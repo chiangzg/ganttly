@@ -17,12 +17,15 @@ import {
   moveTaskWithRollupCommand,
   deleteTaskCommand,
   updateTaskCommand,
+  swapSiblingOrderCommand,
+  pasteTaskCommand,
   type Command,
 } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { buildTree, flattenVisible, type TreeNode } from '@/engine/scene';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 import { cn } from '@/lib/cn';
+import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
 import { nanoid } from 'nanoid';
 import type { Task } from '@ganttly/schema';
 
@@ -94,6 +97,54 @@ export function TaskTable() {
   // ---- Keyboard navigation (PRD §3.10) ----
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, node: TreeNode) => {
     const task = node.task;
+
+    // Clipboard (Ctrl/Cmd+C / X / V).
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        copyToClipboard(task);
+        return;
+      }
+      if (e.key === 'x' || e.key === 'X') {
+        e.preventDefault();
+        cutToClipboard(task);
+        return;
+      }
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        const src = clipboard.task;
+        if (!src) return;
+        // Deep-copy with a fresh id; drop dependencies (they reference old ids).
+        const pasted: Task = {
+          ...src,
+          id: nanoid(10),
+          name: `${src.name} ${t('table.copySuffix')}`.trim(),
+          dependencies: [],
+        };
+        if (clipboard.cutMode) {
+          // Cut = move: delete source then insert at anchor.
+          dispatch(deleteTaskCommand(src.id));
+          clearClipboard();
+        }
+        dispatch(pasteTaskCommand(pasted, task.id));
+        return;
+      }
+      // Fall through: don't hijack Ctrl+S, Ctrl+Z, etc.
+    }
+
+    // Alt+Up/Down: reorder within siblings (PRD §3.10).
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      moveSibling(task.id, e.key === 'ArrowUp' ? -1 : 1);
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dispatch(setViewStateCommand({ selectedTaskId: null }));
+      return;
+    }
+
     if (e.key === 'Tab') {
       e.preventDefault();
       indentOrOutdent(task.id, e.shiftKey);
@@ -111,6 +162,19 @@ export function TaskTable() {
       // Force re-render so the row shows an input.
       forceRerender();
     }
+  };
+
+  /** Swap a task with its previous (-1) or next (+1) sibling by order. */
+  const moveSibling = (taskId: string, dir: -1 | 1) => {
+    const me = file.tasks.find((t) => t.id === taskId);
+    if (!me) return;
+    const siblings = file.tasks
+      .filter((t) => t.parentId === me.parentId)
+      .sort((a, b) => a.order - b.order);
+    const idx = siblings.findIndex((t) => t.id === taskId);
+    const swapWith = siblings[idx + dir];
+    if (!swapWith) return; // already at the edge
+    dispatch(swapSiblingOrderCommand(taskId, swapWith.id));
   };
 
   // We need a tiny rerender trigger for inline rename.

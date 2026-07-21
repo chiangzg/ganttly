@@ -39,6 +39,7 @@ export const zhCN = {
     placeholderName: '任务名称',
     addTask: '新建任务',
     confirmDelete: '删除此任务及其所有子任务?',
+    copySuffix: '副本',
   },
   drawer: {
     title: '编辑任务',

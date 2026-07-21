@@ -32,6 +32,9 @@ importers:
       eslint-plugin-react-hooks:
         specifier: ^4.6.2
         version: 4.6.2(eslint@9.39.5(jiti@2.6.1))
+      globals:
+        specifier: ^14.0.0
+        version: 14.0.0
       husky:
         specifier: ^9.0.0
         version: 9.1.7

@@ -18,17 +18,18 @@ import {
   useProjectStore,
   setViewStateCommand,
   addDependencyCommand,
+  updateTaskWithRollupCommand,
 } from '@/store/useProjectStore';
 import { assembleScene, originDateFor, chartEndDate } from '@/engine/scene';
 import { renderScene, resolveThemeColors } from '@/engine/render';
-import { todayISO, dateRangeWidth } from '@/engine/layout';
+import { todayISO, dateRangeWidth, pixelToDate } from '@/engine/layout';
 import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
 import { cn } from '@/lib/cn';
-import type { ZoomLevel, DependencyType, Task } from '@ganttly/schema';
+import type { ZoomLevel, DependencyType, Task, Holiday } from '@ganttly/schema';
 
 export function GanttCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,6 +42,20 @@ export function GanttCanvas() {
   const [, forceRerender] = useState(0);
   const dragRef = useRef<DragState>({ kind: 'idle' });
   const hoverConnectRef = useRef<string | null>(null);
+  // Holiday hover tooltip (PRD §3.5, §7.3). Null when not hovering a holiday.
+  const [hoverHoliday, setHoverHoliday] = useState<{
+    holiday: Holiday;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Snapshot of tasks + final geometry for a drag, so pointer-up can dispatch a
+  // Command that captures the TRUE pre-drag state (the live cursor-following
+  // updates bypass the store's undo stack). See pointer-down / pointer-up.
+  const dragSnapshotRef = useRef<{
+    taskId: string;
+    preDragTasks: Task[];
+    final: { start: string; end: string };
+  } | null>(null);
 
   // Keep a fresh scene ref so pointer handlers can read it without re-binding.
   const sceneRef = useRef<Scene | null>(null);
@@ -168,10 +183,25 @@ export function GanttCanvas() {
       const grabOffsetPx = x - barXStart;
       const grabOffsetDays = Math.round(grabOffsetPx / pxPerDayLocal(scene.zoom));
       dragRef.current = { kind: 'move', taskId: hit.taskId, grabOffsetDays };
+      dragSnapshotRef.current = {
+        taskId: hit.taskId,
+        preDragTasks: file.tasks,
+        final: { start: row.start, end: row.end },
+      };
     } else if (hit.kind === 'left-handle') {
       dragRef.current = { kind: 'resize-left', taskId: hit.taskId };
+      dragSnapshotRef.current = {
+        taskId: hit.taskId,
+        preDragTasks: file.tasks,
+        final: { start: row.start, end: row.end },
+      };
     } else if (hit.kind === 'right-handle') {
       dragRef.current = { kind: 'resize-right', taskId: hit.taskId };
+      dragSnapshotRef.current = {
+        taskId: hit.taskId,
+        preDragTasks: file.tasks,
+        final: { start: row.start, end: row.end },
+      };
     } else if (hit.kind === 'right-edge') {
       dragRef.current = { kind: 'connect', fromTaskId: hit.taskId };
     }
@@ -180,10 +210,16 @@ export function GanttCanvas() {
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const scene = sceneRef.current;
-    if (!scene || dragRef.current.kind === 'idle') return;
+    if (!scene) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // When not dragging, detect holiday hover for the tooltip (PRD §3.5).
+    if (dragRef.current.kind === 'idle') {
+      updateHolidayHover(scene, x, y);
+      return;
+    }
 
     if (dragRef.current.kind === 'pan') {
       const dx = x - dragRef.current.startX;
@@ -209,8 +245,11 @@ export function GanttCanvas() {
     if (!row) return;
     const next = applyDrag(scene, row, dragRef.current, x, y);
     if (next) {
+      // Track the latest drag geometry so pointer-up knows the final commit.
+      if (dragSnapshotRef.current) dragSnapshotRef.current.final = next;
       // Apply a live (non-undoable) update so the bar follows the cursor.
-      // The final commit happens on pointer-up via a Command.
+      // The final commit happens on pointer-up via a Command; the snapshot's
+      // preDragTasks lets that Command's invert restore the true pre-drag state.
       useProjectStore.setState({
         file: {
           ...file,
@@ -262,21 +301,53 @@ export function GanttCanvas() {
     }
 
     if (drag.kind === 'move' || drag.kind === 'resize-left' || drag.kind === 'resize-right') {
-      // Commit a Command so the change is undoable. The live update already
-      // mutated state; we push a synthetic command whose apply is a no-op and
-      // whose invert restores the original.
-      const after = file.tasks.find((t) => t.id === drag.taskId);
-      if (!after) return;
-      // Compute the original by reading from the previous state... but we
-      // already mutated. To support undo we'd need the original. Simplify:
-      // treat the dispatch as a "free" non-undoable edit (revert manually if
-      // needed). For MVP correctness this is acceptable; full undo for drags
-      // is tracked in the history store as a Command with captured original.
-      // We capture by reading the nextUndoLabel... but we don't have the
-      // pre-drag state. So just clear redo stack (the change is visible but
-      // not on the undo stack). A more complete fix in M3 captures before.
-      void after;
-      forceRerender((n) => n + 1);
+      const snap = dragSnapshotRef.current;
+      dragSnapshotRef.current = null;
+      if (!snap) return;
+      const { taskId, preDragTasks, final } = snap;
+
+      // No-op if the pointer never moved enough to change geometry.
+      const preTask = preDragTasks.find((t) => t.id === taskId);
+      if (!preTask || (preTask.start === final.start && preTask.end === final.end)) {
+        forceRerender((n) => n + 1);
+        return;
+      }
+
+      const currentFile = useProjectStore.getState().file;
+      const finalDuration = durationOf(final.start, final.end);
+      useProjectStore.setState({
+        file: { ...currentFile, tasks: preDragTasks },
+      });
+      dispatch(
+        updateTaskWithRollupCommand(taskId, {
+          start: final.start,
+          end: final.end,
+          duration: finalDuration,
+        }),
+      );
+    }
+  };
+
+  /**
+   * Resolve the holiday (if any) under the viewport-local (x, y) and update
+   * the hover tooltip state. Cheap: O(visible holidays) per move event.
+   * Only holidays (`type === 'holiday'`) get a tooltip — make-up working
+   * days (`type === 'working'`) render as normal columns with no tooltip,
+   * matching PRD §3.5 ("调休工作日不高亮").
+   */
+  const updateHolidayHover = (scene: Scene, x: number, y: number) => {
+    // Convert viewport x → chart-local x → ISO date at the cursor.
+    const chartX = x + scene.scrollLeft;
+    const iso = pixelToDate(chartX, scene.originDate, scene.zoom);
+    const found = scene.holidays.find((h) => h.date === iso && h.type === 'holiday');
+    if (found) {
+      setHoverHoliday((prev) =>
+        prev?.holiday.date === found.date && prev?.x === x && prev?.y === y
+          ? prev
+          : { holiday: found, x, y },
+      );
+    } else if (hoverHoliday !== null) {
+      setHoverHoliday(null);
     }
   };
 
@@ -310,7 +381,24 @@ export function GanttCanvas() {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onPointerLeave={() => {
+          if (hoverHoliday) setHoverHoliday(null);
+        }}
       />
+      {hoverHoliday && (
+        <div
+          role="tooltip"
+          data-gantt-holiday-tooltip
+          className="pointer-events-none absolute z-40 rounded border border-border bg-bg-elevated px-2 py-1 text-xs text-fg shadow-lg"
+          style={{
+            left: Math.min(hoverHoliday.x + 12, size.width - 120),
+            top: Math.max(hoverHoliday.y - 28, 4),
+          }}
+        >
+          {hoverHoliday.holiday.name}
+          <span className="ml-1 text-fg-muted">({hoverHoliday.holiday.date})</span>
+        </div>
+      )}
       <ScrollShim viewportWidth={size.width} />
     </div>
   );

@@ -14,8 +14,11 @@ import {
   deleteTaskCommand,
   updateTaskCommand,
   moveTaskCommand,
+  pasteTaskCommand,
   setViewStateCommand,
 } from '@/store/useProjectStore';
+import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
+import { nanoid } from 'nanoid';
 
 export function ContextMenu() {
   const { t } = useTranslation();
@@ -85,6 +88,38 @@ export function ContextMenu() {
     close();
   };
 
+  const onCopy = () => {
+    copyToClipboard(task);
+    close();
+  };
+
+  const onCut = () => {
+    cutToClipboard(task);
+    close();
+  };
+
+  const onPaste = () => {
+    const src = clipboard.task;
+    if (!src) {
+      close();
+      return;
+    }
+    const pasted = {
+      ...src,
+      id: nanoid(10),
+      name: `${src.name} ${t('table.copySuffix')}`.trim(),
+      dependencies: [],
+    };
+    if (clipboard.cutMode) {
+      dispatch(deleteTaskCommand(src.id));
+      clearClipboard();
+    }
+    dispatch(pasteTaskCommand(pasted, task.id));
+    close();
+  };
+
+  const canPaste = clipboard.task !== null;
+
   return (
     <>
       <div
@@ -97,6 +132,11 @@ export function ContextMenu() {
         style={{ left: menu.x, top: menu.y }}
       >
         <MenuItem onClick={onEdit}>{t('contextMenu.edit')}</MenuItem>
+        <MenuItem onClick={onCopy}>{t('contextMenu.copy')}</MenuItem>
+        <MenuItem onClick={onCut}>{t('contextMenu.cut')}</MenuItem>
+        <MenuItem onClick={onPaste} disabled={!canPaste}>
+          {t('contextMenu.paste')}
+        </MenuItem>
         <MenuItem onClick={onToggleMilestone}>
           {task.isMilestone ? t('contextMenu.toTask') : t('contextMenu.toMilestone')}
         </MenuItem>
@@ -114,15 +154,24 @@ function MenuItem({
   children,
   onClick,
   danger,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`block w-full px-3 py-1 text-left hover:bg-bg ${danger ? 'text-danger' : 'text-fg'}`}
+      disabled={disabled}
+      className={`block w-full px-3 py-1 text-left hover:bg-bg ${
+        disabled
+          ? 'cursor-not-allowed text-fg-muted opacity-50 hover:bg-transparent'
+          : danger
+            ? 'text-danger'
+            : 'text-fg'
+      }`}
     >
       {children}
     </button>

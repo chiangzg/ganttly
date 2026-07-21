@@ -37,3 +37,6 @@ yarn-error.log*
 # misc
 .cache/
 .eslintcache
+
+# agent plan cache (ZCode)
+.zcode/

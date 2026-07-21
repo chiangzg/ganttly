@@ -342,9 +342,74 @@ export function setViewStateCommand(patch: Partial<ViewState>): Command {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Rollup-aware commands
-// ---------------------------------------------------------------------------
+/**
+ * Swap the `order` of two sibling tasks (PRD §3.10 Alt+Up/Down). Both ids must
+ * share the same parentId. Captures each task's prior order so undo restores.
+ */
+export function swapSiblingOrderCommand(aId: string, bId: string): Command {
+  let oldAOrder = 0;
+  let oldBOrder = 0;
+  return {
+    label: `调整顺序`,
+    apply: (file) => {
+      const a = file.tasks.find((t) => t.id === aId);
+      const b = file.tasks.find((t) => t.id === bId);
+      if (!a || !b) return file;
+      oldAOrder = a.order;
+      oldBOrder = b.order;
+      return {
+        ...file,
+        tasks: file.tasks.map((t) => {
+          if (t.id === aId) return { ...t, order: oldBOrder };
+          if (t.id === bId) return { ...t, order: oldAOrder };
+          return t;
+        }),
+      };
+    },
+    invert: (file) => ({
+      ...file,
+      tasks: file.tasks.map((t) => {
+        if (t.id === aId) return { ...t, order: oldAOrder };
+        if (t.id === bId) return { ...t, order: oldBOrder };
+        return t;
+      }),
+    }),
+  };
+}
+
+/**
+ * Insert a copy of `template` as the next sibling of `anchorId`, bumping the
+ * order of all later siblings. Used by paste (PRD §3.10 Ctrl+V). The template
+ * already has a fresh id assigned by the caller.
+ */
+export function pasteTaskCommand(template: Task, anchorId: string): Command {
+  let pastedParentId: string | null = null;
+  let pastedOrder = 0;
+  return {
+    label: `粘贴任务`,
+    apply: (file) => {
+      const anchor = file.tasks.find((t) => t.id === anchorId);
+      if (!anchor) return file;
+      pastedParentId = anchor.parentId;
+      pastedOrder = anchor.order + 1;
+      const pasted: Task = { ...template, parentId: pastedParentId, order: pastedOrder };
+      // Bump later siblings.
+      const tasks = file.tasks.map((t) =>
+        t.parentId === pastedParentId && t.order >= pastedOrder ? { ...t, order: t.order + 1 } : t,
+      );
+      return { ...file, tasks: [...tasks, pasted] };
+    },
+    invert: (file) => {
+      // Remove the pasted task and shift back the siblings we bumped.
+      const tasks = file.tasks
+        .filter((t) => t.id !== template.id)
+        .map((t) =>
+          t.parentId === pastedParentId && t.order > pastedOrder ? { ...t, order: t.order - 1 } : t,
+        );
+      return { ...file, tasks };
+    },
+  };
+}
 
 /**
  * Apply a patch to a single task in `tasks`, capturing its pre-change values

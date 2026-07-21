@@ -17,6 +17,15 @@ export default defineConfig({
   forbidOnly: CI,
   retries: CI ? 2 : 0,
   workers: CI ? 1 : undefined,
+  // Snapshot baselines are platform/browser-agnostic by design (PRD §7.1
+  // requires pixel-consistency across macOS/Win/Linux × Chrome/Firefox/Safari).
+  // CI generates and enforces a single shared baseline; local runs on other
+  // platforms may diff slightly and should be accepted via --update-snapshots
+  // only when the change is intentional.
+  //
+  // Template strips the default `-chromium-darwin` suffix so a single PNG is
+  // shared across all platforms/browsers (matches the per-test `arg` name).
+  snapshotPathTemplate: '{testDir}/{testFileName}-snapshots/{arg}{ext}',
   reporter: CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   expect: {
     // Screenshot diff tolerance — kept tight. Cross-platform font anti-alias

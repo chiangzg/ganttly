@@ -2,7 +2,7 @@
 
 > 开源、本地优先、中文优先的 Web 甘特图软件 —— GanttProject 的现代平替。
 
-[![CI](https://github.com/your-org/ganttly/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
+[![CI](https://github.com/chiangzg/ganttly/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## 为什么做这个
@@ -32,28 +32,29 @@ pnpm dev          # 启动 http://localhost:5173
 pnpm build
 
 # 跑测试
-pnpm test         # 单元测试 (140+)
-pnpm test:e2e     # Playwright + 截图回归
+pnpm test         # 单元测试 (135+)
+pnpm test:e2e     # Playwright + 截图回归 (37+ 用例)
 ```
 
 环境要求:Node ≥ 18, pnpm ≥ 9。
 
 ## 主要功能
 
-| 功能         | MVP   | 说明                                       |
-| ------------ | ----- | ------------------------------------------ |
-| WBS 任务树   | ✅    | 任意嵌套,Tab 升降级,鼠标拖拽排序           |
-| 任务字段     | ✅    | 名称、日期、工期、进度、里程碑、颜色、备注 |
-| 4 种依赖     | ✅    | FS / SS / FF / SF,带 lag,自动排期          |
-| 关键路径     | ✅    | CPM 算法,一键高亮,多等长路径支持           |
-| 中国节假日   | ✅    | 2026 全年法定节假日 + 调休补班             |
-| 4 个时间视图 | ✅    | 日 / 周 / 月 / 年,Ctrl+滚轮缩放            |
-| 撤销/重做    | ✅    | 命令模式,深度无限                          |
-| 本地持久化   | ✅    | IndexedDB 自动保存                         |
-| 导入导出     | ✅    | JSON / CSV 导出,JSON / `.gan` 导入         |
-| 资源分配     | 🚧 P1 | 团队管理与负载图                           |
-| 基线对比     | 🚧 P1 | 计划 vs 实际                               |
-| 多人协作     | 📋 P2 | CRDT 实时同步                              |
+| 功能         | MVP   | 说明                                          |
+| ------------ | ----- | --------------------------------------------- |
+| WBS 任务树   | ✅    | 任意嵌套,Tab 升降级,鼠标拖拽排序              |
+| 任务字段     | ✅    | 名称、日期、工期、进度、里程碑、颜色、备注    |
+| 4 种依赖     | ✅    | FS / SS / FF / SF,带 lag,自动排期             |
+| 关键路径     | ✅    | CPM 算法,一键高亮,多等长路径支持              |
+| 中国节假日   | ✅    | 2026 全年法定节假日 + 调休补班,hover 显示名称 |
+| 4 个时间视图 | ✅    | 日 / 周 / 月 / 年,Ctrl+滚轮缩放               |
+| 撤销/重做    | ✅    | 命令模式,深度无限(含拖拽改期)                 |
+| 完整交互     | ✅    | 复制/剪切/粘贴、Alt+Up/Down 排序、右键菜单    |
+| 本地持久化   | ✅    | IndexedDB 自动保存                            |
+| 导入导出     | ✅    | JSON / CSV 导出,JSON / `.gan` 导入            |
+| 资源分配     | 🚧 P1 | 团队管理与负载图                              |
+| 基线对比     | 🚧 P1 | 计划 vs 实际                                  |
+| 多人协作     | 📋 P2 | CRDT 实时同步                                 |
 
 完整路线图见 [`docs/PRD.md`](docs/PRD.md) 第 8 章。
 
@@ -81,7 +82,8 @@ ganttly/
 │   ├── gan-parser/           # GanttProject .gan 导入器
 │   └── tsconfig/             # 共享 tsconfig
 └── docs/
-    ├── PRD.md                # 产品需求文档
+    ├── PRD.md                # 产品需求文档(含 ADR-lite 决策记录)
+    ├── architecture.md       # 架构详解(Canvas 引擎分层、状态管理、数据流)
     └── roadmap.json          # dogfooding:用 ganttly 管理 ganttly 自己
 ```
 
