@@ -9,6 +9,7 @@
  * `computeArrows` in scene/assembly, so the renderer stays pure and fast.
  */
 import type { Scene, ThemeColors } from './types';
+import { HEADER_HEIGHT } from '../layout';
 
 const ARROW_HEAD_SIZE = 6;
 const CURVE_RADIUS = 8;
@@ -18,6 +19,13 @@ export function renderArrows(
   scene: Scene,
   theme: ThemeColors,
 ): void {
+  // Clip arrows to the content area below the header so bezier curves
+  // and arrowheads never overlap the month/day header row.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, HEADER_HEIGHT, scene.viewportWidth, scene.viewportHeight - HEADER_HEIGHT);
+  ctx.clip();
+
   for (const arrow of scene.arrows) {
     const isCritical = scene.showCriticalPath && arrow.isCritical;
     const color = isCritical ? theme.critical : theme.fgMuted;
@@ -26,6 +34,8 @@ export function renderArrows(
     ctx.lineWidth = isCritical ? 2 : 1;
     drawArrowPath(ctx, arrow.fromX, arrow.fromY, arrow.toX, arrow.toY);
   }
+
+  ctx.restore();
 }
 
 function drawArrowPath(
