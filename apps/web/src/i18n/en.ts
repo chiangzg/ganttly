@@ -59,6 +59,10 @@ export const en = {
     save: 'Save',
     cancel: 'Cancel',
     delete: 'Delete',
+    depTypeFS: 'Finish\u2192Start',
+    depTypeSS: 'Start\u2192Start',
+    depTypeFF: 'Finish\u2192Finish',
+    depTypeSF: 'Start\u2192Finish',
   },
   contextMenu: {
     edit: 'Edit',

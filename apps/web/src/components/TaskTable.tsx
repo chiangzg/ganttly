@@ -31,7 +31,7 @@ const TABLE_WIDTH = 420;
  * 共享列模板：表头与每行数据必须用同一个，否则列宽按行内容自适应，
  * 会导致 WBS/工期/进度列与表头错位、长任务名挤压（bug: 左侧明细挤在一起）。
  */
-const GRID_TEMPLATE = '44px 1fr 72px 64px';
+const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 64px';
 
 export function TaskTable() {
   const { t } = useTranslation();

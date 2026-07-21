@@ -24,6 +24,7 @@ import { renderScene, resolveThemeColors } from '@/engine/render';
 import { todayISO, dateRangeWidth } from '@/engine/layout';
 import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
+import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { cn } from '@/lib/cn';
 import type { ZoomLevel, DependencyType } from '@ganttly/schema';
@@ -35,6 +36,7 @@ export function GanttCanvas() {
 
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
+  const openDrawer = useViewStore((s) => s.openDrawer);
   const [, forceRerender] = useState(0);
   const dragRef = useRef<DragState>({ kind: 'idle' });
   const hoverConnectRef = useRef<string | null>(null);
@@ -286,6 +288,20 @@ export function GanttCanvas() {
     }
   };
 
+  // ----- Double-click to open task drawer -----
+  const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = hitTest(scene, x, y);
+    if (hit.kind !== 'empty') {
+      dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
+      openDrawer();
+    }
+  };
+
   // ----- Wheel: Ctrl/Cmd+wheel = zoom, otherwise pan -----
   return (
     <div ref={containerRef} data-gantt-chart className="relative flex-1 overflow-hidden bg-bg">
@@ -301,6 +317,7 @@ export function GanttCanvas() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onDoubleClick={onDoubleClick}
       />
       <ScrollShim viewportWidth={size.width} />
     </div>
