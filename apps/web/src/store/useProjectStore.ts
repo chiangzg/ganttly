@@ -12,6 +12,7 @@ import type { GanttlyFile, Task, Dependency, ViewState } from '@ganttly/schema';
 import { createEmptyFile } from '@ganttly/schema';
 import { getCalendar } from '@ganttly/calendar-data';
 import { DEFAULT_PROJECT_ID, type ProjectRepository } from '@/data/repository';
+import { computeCascadeRollup } from '@/lib/summary';
 
 // ---------------------------------------------------------------------------
 // Command pattern (PRD §3.7)
@@ -338,5 +339,143 @@ export function setViewStateCommand(patch: Partial<ViewState>): Command {
       return { ...file, viewState: { ...file.viewState, ...patch } };
     },
     invert: (file) => ({ ...file, viewState: oldViewState ?? file.viewState }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rollup-aware commands
+// ---------------------------------------------------------------------------
+
+/**
+ * Update a task and cascade rollup to all ancestors.
+ * The apply captures old values for all modified tasks (target + ancestors).
+ */
+export function updateTaskWithRollupCommand(taskId: string, patch: Partial<Task>): Command {
+  let capturedOldValues: Map<string, Partial<Task>> | null = null;
+  return {
+    label: `更新任务(含汇总)`,
+    apply: (file) => {
+      capturedOldValues = new Map();
+
+      // 1. Apply patch to target task
+      let tasks = file.tasks.map((t) => {
+        if (t.id !== taskId) return t;
+        // Capture old values for target
+        const old: Partial<Task> = {};
+        for (const key of Object.keys(patch) as Array<keyof Task>) {
+          (old as Record<string, unknown>)[key] = t[key];
+        }
+        capturedOldValues!.set(t.id, old);
+        return { ...t, ...patch };
+      });
+
+      // 2. Compute cascade rollup
+      const rollupPatches = computeCascadeRollup(tasks, taskId);
+
+      // 3. Apply rollup patches to ancestors
+      for (const { id, patch: rp } of rollupPatches) {
+        tasks = tasks.map((t) => {
+          if (t.id !== id) return t;
+          // Capture old values for ancestor
+          const old: Partial<Task> = {};
+          for (const key of Object.keys(rp) as Array<keyof Task>) {
+            (old as Record<string, unknown>)[key] = t[key];
+          }
+          capturedOldValues!.set(id, old);
+          return { ...t, ...rp };
+        });
+      }
+
+      return { ...file, tasks };
+    },
+    invert: (file) => {
+      if (!capturedOldValues) return file;
+      const oldVals = capturedOldValues;
+      return {
+        ...file,
+        tasks: file.tasks.map((t) => {
+          const old = oldVals.get(t.id);
+          return old ? { ...t, ...old } : t;
+        }),
+      };
+    },
+  };
+}
+
+/**
+ * Move a task and rollup both old and new parent chains.
+ */
+export function moveTaskWithRollupCommand(
+  taskId: string,
+  newParentId: string | null,
+  newOrder: number,
+): Command {
+  let capturedOldValues: Map<string, Partial<Task>> | null = null;
+  let oldParentId: string | null = null;
+  let oldOrder = 0;
+
+  return {
+    label: `移动任务(含汇总)`,
+    apply: (file) => {
+      capturedOldValues = new Map();
+      const target = file.tasks.find((t) => t.id === taskId);
+      if (!target) return file;
+
+      oldParentId = target.parentId;
+      oldOrder = target.order;
+
+      // Capture old values
+      capturedOldValues.set(taskId, { parentId: oldParentId, order: oldOrder });
+
+      // Apply move
+      let tasks = file.tasks.map((t) =>
+        t.id === taskId ? { ...t, parentId: newParentId, order: newOrder } : t,
+      );
+
+      // Rollup old parent chain (if old parent still has children)
+      if (oldParentId) {
+        const oldPatches = computeCascadeRollup(tasks, oldParentId);
+        for (const { id, patch } of oldPatches) {
+          tasks = tasks.map((t) => {
+            if (t.id !== id) return t;
+            const old: Partial<Task> = {};
+            for (const key of Object.keys(patch) as Array<keyof Task>) {
+              (old as Record<string, unknown>)[key] = t[key];
+            }
+            if (!capturedOldValues!.has(id)) capturedOldValues!.set(id, old);
+            return { ...t, ...patch };
+          });
+        }
+      }
+
+      // Rollup new parent chain
+      if (newParentId) {
+        const newPatches = computeCascadeRollup(tasks, newParentId);
+        for (const { id, patch } of newPatches) {
+          tasks = tasks.map((t) => {
+            if (t.id !== id) return t;
+            const old: Partial<Task> = {};
+            for (const key of Object.keys(patch) as Array<keyof Task>) {
+              (old as Record<string, unknown>)[key] = t[key];
+            }
+            if (!capturedOldValues!.has(id)) capturedOldValues!.set(id, old);
+            return { ...t, ...patch };
+          });
+        }
+      }
+
+      return { ...file, tasks };
+    },
+    invert: (file) => {
+      if (!capturedOldValues) return file;
+      const oldVals = capturedOldValues;
+      return {
+        ...file,
+        tasks: file.tasks.map((t) => {
+          const old = oldVals.get(t.id);
+          return old ? { ...t, ...old } : t;
+        }),
+      };
+    },
   };
 }

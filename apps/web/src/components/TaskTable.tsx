@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import {
   useProjectStore,
   setViewStateCommand,
-  moveTaskCommand,
+  moveTaskWithRollupCommand,
   deleteTaskCommand,
   updateTaskCommand,
   type Command,
@@ -85,6 +85,12 @@ export function TaskTable() {
     dispatch(setViewStateCommand({ selectedTaskId: taskId }));
   };
 
+  const toggleCollapse = (taskId: string) => {
+    const ids = file.viewState.collapsedTaskIds;
+    const next = ids.includes(taskId) ? ids.filter((id) => id !== taskId) : [...ids, taskId];
+    dispatch(setViewStateCommand({ collapsedTaskIds: next }));
+  };
+
   // ---- Keyboard navigation (PRD §3.10) ----
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, node: TreeNode) => {
     const task = node.task;
@@ -126,12 +132,12 @@ export function TaskTable() {
       if (!parent) return;
       const newParentId = parent.parentId;
       const newOrder = parent.order + 1;
-      dispatch(moveTaskCommand(taskId, newParentId, newOrder));
+      dispatch(moveTaskWithRollupCommand(taskId, newParentId, newOrder));
     } else {
       // Indent: become child of previous sibling.
       if (myIdx === null || myIdx <= 0) return;
       const prev = siblings[myIdx - 1]!;
-      dispatch(moveTaskCommand(taskId, prev.id, countChildren(prev.id, tasks)));
+      dispatch(moveTaskWithRollupCommand(taskId, prev.id, countChildren(prev.id, tasks)));
     }
   };
 
@@ -186,7 +192,13 @@ export function TaskTable() {
     // Can't drop onto own descendant.
     if (target.ancestorIds.includes(draggedId)) return;
     // Place as last child of target (drop "into" target).
-    dispatch(moveTaskCommand(draggedId, target.task.id, countChildren(target.task.id, file.tasks)));
+    dispatch(
+      moveTaskWithRollupCommand(
+        draggedId,
+        target.task.id,
+        countChildren(target.task.id, file.tasks),
+      ),
+    );
   };
 
   return (
@@ -244,15 +256,37 @@ export function TaskTable() {
                   'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
                   'hover:bg-bg',
                   selected && 'bg-bg ring-1 ring-inset ring-primary',
+                  node.children.length > 0 && 'bg-bg-elevated',
                 )}
               >
                 <div
-                  className="overflow-hidden border-r border-border px-2 text-fg-muted"
+                  className={cn(
+                    'flex items-center overflow-hidden border-r border-border px-2 text-fg-muted',
+                    node.children.length > 0 && 'font-semibold',
+                  )}
                   style={{ paddingLeft: 8 + node.depth * 16 }}
                 >
+                  {node.children.length > 0 && (
+                    <button
+                      type="button"
+                      className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
+                      style={{ width: 14, height: 14 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCollapse(node.task.id);
+                      }}
+                    >
+                      {file.viewState.collapsedTaskIds.includes(node.task.id) ? '▶' : '▼'}
+                    </button>
+                  )}
                   {node.wbsNumber}
                 </div>
-                <div className="min-w-0 truncate border-r border-border px-2 font-medium">
+                <div
+                  className={cn(
+                    'min-w-0 truncate border-r border-border px-2 font-medium',
+                    node.children.length > 0 && 'font-semibold',
+                  )}
+                >
                   {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
                   {isRenaming ? (
                     <input

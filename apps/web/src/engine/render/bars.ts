@@ -54,6 +54,11 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
     COLUMN_WIDTH[env.zoom] / 2, // min visible width
   );
 
+  if (row.isSummary) {
+    drawSummaryBar(ctx, xStart, yTop, width, row, env);
+    return;
+  }
+
   const barColor =
     env.showCriticalPath && row.isCritical ? env.theme.critical : (row.color ?? env.theme.taskBar);
   const progressColor =
@@ -107,6 +112,75 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
       ctx.fillText(truncated, labelX, yTop + ROW_HEIGHT / 2);
     }
   }
+}
+
+function drawSummaryBar(
+  ctx: CanvasRenderingContext2D,
+  xStart: number,
+  yTop: number,
+  width: number,
+  row: TaskRow,
+  env: DrawCtx,
+): void {
+  const barColor =
+    env.showCriticalPath && row.isCritical ? env.theme.critical : (row.color ?? env.theme.taskBar);
+  const progressColor =
+    env.showCriticalPath && row.isCritical ? darken(env.theme.critical) : env.theme.taskProgress;
+
+  const summaryBarH = Math.round((ROW_HEIGHT - 2 * BAR_INSET_Y) * 0.45);
+  const summaryBarY = yTop + ROW_HEIGHT / 2;
+  const darkColor = darken(barColor);
+
+  // Main bar (dark fill)
+  drawRoundedRect(ctx, xStart, summaryBarY, width, summaryBarH, 1);
+  ctx.fillStyle = darkColor;
+  ctx.fill();
+
+  // Progress fill
+  if (row.progress > 0) {
+    const progressWidth = (width * Math.min(100, Math.max(0, row.progress))) / 100;
+    if (progressWidth > 0.5) {
+      drawRoundedRect(ctx, xStart, summaryBarY, progressWidth, summaryBarH, 1);
+      ctx.fillStyle = progressColor;
+      ctx.fill();
+    }
+  }
+
+  // Down triangles at both ends
+  const triSize = 4;
+  drawDownTriangle(ctx, xStart, summaryBarY + summaryBarH, triSize, darkColor);
+  drawDownTriangle(ctx, xStart + width, summaryBarY + summaryBarH, triSize, darkColor);
+
+  // Label (bold)
+  const label = row.name;
+  if (label) {
+    ctx.fillStyle = env.theme.fg;
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const labelX = xStart + width + 6;
+    const maxLabelWidth = env.viewportWidth - labelX;
+    if (maxLabelWidth > 20) {
+      const truncated = ellipsis(ctx, label, Math.max(20, maxLabelWidth));
+      ctx.fillText(truncated, labelX, yTop + ROW_HEIGHT / 2);
+    }
+  }
+}
+
+function drawDownTriangle(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  topY: number,
+  size: number,
+  color: string,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(cx - size, topY);
+  ctx.lineTo(cx + size, topY);
+  ctx.lineTo(cx, topY + size);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
 }
 
 function drawMilestone(

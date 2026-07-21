@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import {
   useProjectStore,
   updateTaskCommand,
+  updateTaskWithRollupCommand,
   deleteTaskCommand,
   addDependencyCommand,
   deleteDependencyCommand,
@@ -40,9 +41,14 @@ export function TaskDrawer() {
 
   if (drawer === 'closed' || !draft || !task) return null;
 
+  const ROLLUP_FIELDS = new Set(['progress', 'start', 'end', 'duration']);
+
   const commit = (patch: Partial<Task>) => {
     if (!task) return;
-    dispatch(updateTaskCommand(task.id, patch));
+    const needsRollup = Object.keys(patch).some((k) => ROLLUP_FIELDS.has(k));
+    dispatch(
+      needsRollup ? updateTaskWithRollupCommand(task.id, patch) : updateTaskCommand(task.id, patch),
+    );
   };
 
   const deleteTask = () => {
@@ -176,7 +182,7 @@ export function TaskDrawer() {
                 <div key={dep.targetId} className="flex items-center gap-2">
                   <span className="flex-1 truncate text-xs">{pred?.name ?? dep.targetId}</span>
                   <span className="text-xs text-fg-muted">
-                    {t(`drawer.depType${dep.type}` as any)}
+                    {t(`drawer.depType${dep.type}` as `drawer.depType${string}`)}
                   </span>
                   <span className="text-xs text-fg-muted">lag={dep.lag}</span>
                   <button
