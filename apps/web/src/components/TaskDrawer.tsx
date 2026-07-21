@@ -175,7 +175,9 @@ export function TaskDrawer() {
               return (
                 <div key={dep.targetId} className="flex items-center gap-2">
                   <span className="flex-1 truncate text-xs">{pred?.name ?? dep.targetId}</span>
-                  <span className="text-xs text-fg-muted">{dep.type}</span>
+                  <span className="text-xs text-fg-muted">
+                    {t(`drawer.depType${dep.type}` as any)}
+                  </span>
                   <span className="text-xs text-fg-muted">lag={dep.lag}</span>
                   <button
                     onClick={() => dispatch(deleteDependencyCommand(task.id, dep.targetId))}
@@ -297,10 +299,10 @@ function DependencyAdder({
         value={type}
         onChange={(e) => setType(e.target.value as DependencyType)}
       >
-        <option value="FS">FS</option>
-        <option value="SS">SS</option>
-        <option value="FF">FF</option>
-        <option value="SF">SF</option>
+        <option value="FS">{t('drawer.depTypeFS')}</option>
+        <option value="SS">{t('drawer.depTypeSS')}</option>
+        <option value="FF">{t('drawer.depTypeFF')}</option>
+        <option value="SF">{t('drawer.depTypeSF')}</option>
       </select>
       <input
         type="number"
