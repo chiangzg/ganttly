@@ -55,6 +55,11 @@ export const zhCN = {
     dependencyType: '类型',
     dependencyLag: '滞后(工作日)',
     deleteDependency: '删除依赖',
+    // 依赖类型（项目管理标准：前置→后继）。保持"X→Y"格式便于扫读。
+    depTypeFS: '完成→开始',
+    depTypeSS: '开始→开始',
+    depTypeFF: '完成→完成',
+    depTypeSF: '开始→完成',
     save: '保存',
     cancel: '取消',
     delete: '删除',

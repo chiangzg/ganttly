@@ -19,12 +19,13 @@ import {
   setViewStateCommand,
   addDependencyCommand,
 } from '@/store/useProjectStore';
-import { assembleScene } from '@/engine/scene';
+import { assembleScene, originDateFor, chartEndDate } from '@/engine/scene';
 import { renderScene, resolveThemeColors } from '@/engine/render';
-import { todayISO } from '@/engine/layout';
-import { hitTest, applyDrag, type DragState } from '@/engine/interaction';
+import { todayISO, dateRangeWidth } from '@/engine/layout';
+import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
 import { wouldCreateCycle } from '@/lib/schedule';
+import { cn } from '@/lib/cn';
 import type { ZoomLevel, DependencyType } from '@ganttly/schema';
 
 export function GanttCanvas() {
@@ -40,6 +41,61 @@ export function GanttCanvas() {
 
   // Keep a fresh scene ref so pointer handlers can read it without re-binding.
   const sceneRef = useRef<Scene | null>(null);
+
+  // Latest file kept in a ref so the non-passive wheel listener (added once)
+  // can read the current view state without going stale or being re-bound.
+  const fileRef = useRef(file);
+  fileRef.current = file;
+
+  // Update scroll (horizontal/vertical) directly on the store — bypasses the
+  // Command/undo stack because scrolling is ephemeral and should not pollute
+  // undo (consistent with the ScrollShim behaviour).
+  const setScroll = ({ scrollLeft, scrollTop }: { scrollLeft?: number; scrollTop?: number }) => {
+    const f = fileRef.current;
+    const next = {
+      scrollLeft: scrollLeft ?? f.viewState.scrollLeft,
+      scrollTop: scrollTop ?? f.viewState.scrollTop,
+    };
+    if (next.scrollLeft === f.viewState.scrollLeft && next.scrollTop === f.viewState.scrollTop) {
+      return;
+    }
+    useProjectStore.setState({
+      file: { ...f, viewState: { ...f.viewState, ...next } },
+    });
+  };
+
+  // Native non-passive wheel listener: React's onWheel is passive on some
+  // browsers, so we attach our own to support trackpad/mouse panning with
+  // preventDefault. Ctrl/Cmd+wheel still zooms.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handler = (e: WheelEvent) => {
+      const f = fileRef.current;
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch-zoom on trackpad fires ctrlKey+wheel; let the React onWheel
+        // path handle discrete zoom steps.
+        e.preventDefault();
+        const order: ZoomLevel[] = ['day', 'week', 'month', 'year'];
+        const idx = order.indexOf(f.viewState.zoom);
+        const next = order[Math.max(0, Math.min(order.length - 1, idx + (e.deltaY > 0 ? 1 : -1)))];
+        if (next) dispatch(setViewStateCommand({ zoom: next }));
+        return;
+      }
+      e.preventDefault();
+      // Trackpads emit deltaX for horizontal gestures; mouse wheels emit only
+      // deltaY (Shift+wheel = horizontal). Combine both signals.
+      const dx = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+      const dy = e.shiftKey ? 0 : e.deltaY;
+      if (dx === 0 && dy === 0) return;
+      setScroll({
+        scrollLeft: Math.max(0, f.viewState.scrollLeft + dx),
+        scrollTop: Math.max(0, f.viewState.scrollTop + dy),
+      });
+    };
+    canvas.addEventListener('wheel', handler, { passive: false });
+    return () => canvas.removeEventListener('wheel', handler);
+  }, [dispatch]);
 
   // Observe container size — drives canvas CSS size.
   useEffect(() => {
@@ -86,7 +142,18 @@ export function GanttCanvas() {
     const y = e.clientY - rect.top;
     const hit = hitTest(scene, x, y);
     if (hit.kind === 'empty') {
-      dispatch(setViewStateCommand({ selectedTaskId: null }));
+      // Press on empty space: tentatively start a pan. We only "engage" the pan
+      // once the pointer moves past PAN_THRESHOLD; if it never does (a click),
+      // we clear the selection on pointer-up instead.
+      dragRef.current = {
+        kind: 'pan',
+        startX: x,
+        startY: y,
+        startScrollLeft: file.viewState.scrollLeft,
+        startScrollTop: file.viewState.scrollTop,
+        engaged: false,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
     dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
@@ -114,6 +181,19 @@ export function GanttCanvas() {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    if (dragRef.current.kind === 'pan') {
+      const dx = x - dragRef.current.startX;
+      const dy = y - dragRef.current.startY;
+      if (!dragRef.current.engaged) {
+        if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+        dragRef.current.engaged = true;
+      }
+      const scrollLeft = Math.max(0, dragRef.current.startScrollLeft + dx);
+      const scrollTop = Math.max(0, dragRef.current.startScrollTop + dy);
+      setScroll({ scrollLeft, scrollTop });
+      return;
+    }
 
     if (dragRef.current.kind === 'connect') {
       // Track which task is under the cursor for the drop preview.
@@ -178,6 +258,15 @@ export function GanttCanvas() {
       return;
     }
 
+    if (drag.kind === 'pan') {
+      // If we never crossed the threshold, treat it as a click on empty space:
+      // clear the selection. Otherwise the pan already updated scroll.
+      if (!drag.engaged) {
+        dispatch(setViewStateCommand({ selectedTaskId: null }));
+      }
+      return;
+    }
+
     if (drag.kind === 'move' || drag.kind === 'resize-left' || drag.kind === 'resize-right') {
       // Commit a Command so the change is undoable. The live update already
       // mutated state; we push a synthetic command whose apply is a no-op and
@@ -197,47 +286,65 @@ export function GanttCanvas() {
     }
   };
 
-  // ----- Wheel zoom (Ctrl+wheel) -----
-  const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    const order: ZoomLevel[] = ['day', 'week', 'month', 'year'];
-    const idx = order.indexOf(file.viewState.zoom);
-    const next = order[Math.max(0, Math.min(order.length - 1, idx + (e.deltaY > 0 ? 1 : -1)))];
-    if (next) dispatch(setViewStateCommand({ zoom: next }));
-  };
-
+  // ----- Wheel: Ctrl/Cmd+wheel = zoom, otherwise pan -----
   return (
-    <div ref={containerRef} className="relative flex-1 overflow-hidden bg-bg">
+    <div ref={containerRef} data-gantt-chart className="relative flex-1 overflow-hidden bg-bg">
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 touch-none"
+        className={cn(
+          'absolute inset-0',
+          dragRef.current.kind === 'pan' && dragRef.current.engaged
+            ? 'cursor-grabbing'
+            : 'cursor-default',
+        )}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onWheel={onWheel}
       />
-      <ScrollShim />
+      <ScrollShim viewportWidth={size.width} />
     </div>
   );
 }
 
-function ScrollShim() {
+function ScrollShim({ viewportWidth }: { viewportWidth: number }) {
   const file = useProjectStore((s) => s.file);
   const scrollLeft = file.viewState.scrollLeft;
-  const contentWidth = 4000;
+  const shimRef = useRef<HTMLDivElement>(null);
+  const userScrolling = useRef(false);
+
+  // Total scrollable width = chart extent + current viewport (so there's room
+  // to scroll the last column into view). Replaces the old hardcoded 4000.
+  const originDate = originDateFor(file);
+  const endIso = chartEndDate(file, todayISO());
+  const chartWidth = dateRangeWidth(originDate, endIso, file.viewState.zoom);
+  const contentWidth = Math.max(chartWidth + viewportWidth, viewportWidth + 100);
+
+  // Reflect store-driven scroll changes (wheel pan, Today button) onto the bar.
+  useEffect(() => {
+    const el = shimRef.current;
+    if (!el || userScrolling.current) return;
+    if (Math.abs(el.scrollLeft - scrollLeft) > 1) el.scrollLeft = scrollLeft;
+  }, [scrollLeft]);
+
   return (
     <div
+      ref={shimRef}
       className="absolute inset-x-0 bottom-0 overflow-x-auto overflow-y-hidden"
       style={{ height: 12 }}
       onScroll={(e) => {
         const left = e.currentTarget.scrollLeft;
+        userScrolling.current = true;
         if (left !== scrollLeft) {
           useProjectStore.setState({
             file: { ...file, viewState: { ...file.viewState, scrollLeft: left } },
           });
         }
+        // Release the "user scrolling" flag next tick so the store→DOM sync
+        // effect can take over again after the user stops dragging the bar.
+        requestAnimationFrame(() => {
+          userScrolling.current = false;
+        });
       }}
     >
       <div style={{ width: contentWidth, height: 1 }} />
