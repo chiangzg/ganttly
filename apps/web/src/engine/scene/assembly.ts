@@ -183,7 +183,7 @@ function pxPerDay(zoom: GanttlyFile['viewState']['zoom']): number {
   return COLUMN_WIDTH[zoom] / DAYS_PER_COLUMN[zoom];
 }
 
-function originDateFor(file: GanttlyFile, _opts: AssembleOptions): string {
+export function originDateFor(file: GanttlyFile, _opts?: AssembleOptions): string {
   // Anchor at the project start date if present, otherwise the earliest task.
   const fallback = file.project.startDate ?? '2026-01-05';
   if (file.tasks.length === 0) return fallback;
@@ -192,6 +192,17 @@ function originDateFor(file: GanttlyFile, _opts: AssembleOptions): string {
     file.tasks[0]!.start,
   );
   return minStart < fallback ? minStart : fallback;
+}
+
+/**
+ * The latest task end (or today, whichever is later) — used to size the
+ * horizontal scroll extent so the ScrollShim reflects the real date range.
+ * Exposed for the chart host (GanttCanvas) and the Today button.
+ */
+export function chartEndDate(file: GanttlyFile, today: string): string {
+  if (file.tasks.length === 0) return today;
+  const maxEnd = file.tasks.reduce((max, t) => (t.end > max ? t.end : max), file.tasks[0]!.end);
+  return maxEnd > today ? maxEnd : today;
 }
 
 /** Filter holidays to those within `[today-365, today+365]`. */

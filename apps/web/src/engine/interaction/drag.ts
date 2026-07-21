@@ -51,7 +51,21 @@ export type DragState =
   | { kind: 'move'; taskId: string; grabOffsetDays: number }
   | { kind: 'resize-left'; taskId: string }
   | { kind: 'resize-right'; taskId: string }
-  | { kind: 'connect'; fromTaskId: string };
+  | { kind: 'connect'; fromTaskId: string }
+  | {
+      kind: 'pan';
+      /** Pointer position (viewport-local) at pan start. */
+      startX: number;
+      startY: number;
+      /** Scroll values at pan start. */
+      startScrollLeft: number;
+      startScrollTop: number;
+      /** Set true once the pointer moved past PAN_THRESHOLD (commit the pan). */
+      engaged: boolean;
+    };
+
+/** Pointer must move at least this many CSS px before a press becomes a pan. */
+export const PAN_THRESHOLD = 3;
 
 /** Compute the new start/end ISO dates for a task given a drag delta. */
 export function applyDrag(

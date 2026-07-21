@@ -15,6 +15,7 @@ import { useProjectStore, setViewStateCommand } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { todayISO } from '@/engine/layout';
 import { dateToPixel, pixelsPerDay } from '@/engine/layout';
+import { originDateFor } from '@/engine/scene';
 import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
@@ -40,9 +41,26 @@ export function Toolbar() {
   const openDrawer = useViewStore((s) => s.openDrawer);
 
   const jumpToToday = () => {
+    // Use the SAME origin the renderer uses (assembleScene → originDateFor).
+    // The previous code used file.tasks[0]?.start, which diverged from the
+    // renderer's min(earliest task, project.startDate ?? '2026-01-05') and so
+    // the "today" button landed on the wrong column (e.g. February).
+    const origin = originDateFor(file);
     const today = todayISO();
-    const px = dateToPixel(today, file.tasks[0]?.start ?? today, file.viewState.zoom);
-    dispatch(setViewStateCommand({ scrollLeft: Math.max(0, px - 200) }));
+    const px = dateToPixel(today, origin, file.viewState.zoom);
+    // Center today in the chart viewport instead of a fixed -200px offset.
+    // The chart container is the element right of the task table.
+    const chartEl = document.querySelector('[data-gantt-chart]') as HTMLElement | null;
+    const viewportWidth = chartEl ? chartEl.clientWidth : 800;
+    const scrollLeft = Math.max(0, px - viewportWidth / 2);
+    // Direct setState, not dispatch — a "go to today" jump is navigation, not
+    // an undoable edit.
+    useProjectStore.setState({
+      file: {
+        ...file,
+        viewState: { ...file.viewState, scrollLeft },
+      },
+    });
   };
 
   const zoomIn = () => {

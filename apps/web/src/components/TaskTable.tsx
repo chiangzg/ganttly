@@ -10,7 +10,7 @@
  * - Vertical scroll shared with GanttCanvas via projectStore.scrollTop
  */
 import { useTranslation } from 'react-i18next';
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   useProjectStore,
   setViewStateCommand,
@@ -26,7 +26,12 @@ import { cn } from '@/lib/cn';
 import { nanoid } from 'nanoid';
 import type { Task } from '@ganttly/schema';
 
-const TABLE_WIDTH = 360;
+const TABLE_WIDTH = 420;
+/**
+ * 共享列模板：表头与每行数据必须用同一个，否则列宽按行内容自适应，
+ * 会导致 WBS/工期/进度列与表头错位、长任务名挤压（bug: 左侧明细挤在一起）。
+ */
+const GRID_TEMPLATE = '44px 1fr 72px 64px';
 
 export function TaskTable() {
   const { t } = useTranslation();
@@ -42,11 +47,38 @@ export function TaskTable() {
     return flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
   }, [file.tasks, file.viewState.collapsedTaskIds]);
 
+  // Latest scrollTop kept in a ref so the store→DOM sync effect can decide
+  // whether the change originated here (user scrolling) or elsewhere (canvas
+  // wheel-pan / Today button) without re-binding.
+  const localScrolling = useRef(false);
+
+  // Reflect store-driven scrollTop changes (from canvas wheel-pan) onto this
+  // panel. When the user scrolls here directly, onScroll updates the store and
+  // sets localScrolling so this effect becomes a no-op for that frame.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || localScrolling.current) return;
+    if (Math.abs(el.scrollTop - file.viewState.scrollTop) > 1) {
+      el.scrollTop = file.viewState.scrollTop;
+    }
+  }, [file.viewState.scrollTop]);
+
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const top = e.currentTarget.scrollTop;
+    localScrolling.current = true;
     if (top !== file.viewState.scrollTop) {
-      dispatch(setViewStateCommand({ scrollTop: top }));
+      // Direct setState, not dispatch — scrolling is ephemeral and must not
+      // pollute the undo stack with one "视图变更" per scroll tick.
+      useProjectStore.setState({
+        file: {
+          ...file,
+          viewState: { ...file.viewState, scrollTop: top },
+        },
+      });
     }
+    requestAnimationFrame(() => {
+      localScrolling.current = false;
+    });
   };
 
   const select = (taskId: string) => {
@@ -164,7 +196,7 @@ export function TaskTable() {
     >
       <div
         className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
-        style={{ height: HEADER_HEIGHT, gridTemplateColumns: '40px 1fr 80px 80px' }}
+        style={{ height: HEADER_HEIGHT, gridTemplateColumns: GRID_TEMPLATE }}
       >
         <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
         <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
@@ -203,7 +235,11 @@ export function TaskTable() {
                     forceRerender();
                   }
                 }}
-                style={{ height: ROW_HEIGHT, transform: `translateY(${y}px)` }}
+                style={{
+                  height: ROW_HEIGHT,
+                  transform: `translateY(${y}px)`,
+                  gridTemplateColumns: GRID_TEMPLATE,
+                }}
                 className={cn(
                   'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
                   'hover:bg-bg',
@@ -211,12 +247,12 @@ export function TaskTable() {
                 )}
               >
                 <div
-                  className="border-r border-border px-2 text-fg-muted"
+                  className="overflow-hidden border-r border-border px-2 text-fg-muted"
                   style={{ paddingLeft: 8 + node.depth * 16 }}
                 >
                   {node.wbsNumber}
                 </div>
-                <div className="truncate border-r border-border px-2 font-medium">
+                <div className="min-w-0 truncate border-r border-border px-2 font-medium">
                   {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
                   {isRenaming ? (
                     <input
@@ -245,10 +281,12 @@ export function TaskTable() {
                     node.task.name || t('table.placeholderName')
                   )}
                 </div>
-                <div className="border-r border-border px-2 text-fg-muted">
+                <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
                   {node.task.isMilestone ? '—' : `${node.task.duration}d`}
                 </div>
-                <div className="px-2 text-fg-muted">{node.task.progress}%</div>
+                <div className="px-2 text-right tabular-nums text-fg-muted">
+                  {node.task.progress}%
+                </div>
               </div>
             );
           })}
