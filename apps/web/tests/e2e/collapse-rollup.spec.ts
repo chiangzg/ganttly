@@ -68,21 +68,6 @@ async function readTask(page: Page, id: string): Promise<Record<string, unknown>
   }, id);
 }
 
-/**
- * Poll a task field until it matches. Survives transient store states where
- * autosave/init may briefly overwrite the injected fixture — using expect.poll
- * instead of a one-shot readTask avoids flaky "task not found" failures on
- * slow CI runners.
- */
-async function pollTaskField(page: Page, id: string, field: string): Promise<void> {
-  await expect
-    .poll(async () => {
-      const t = await readTask(page, id).catch(() => null);
-      return t ? (t as Record<string, unknown>)[field] : undefined;
-    })
-    .toBeDefined();
-}
-
 async function waitForStoreReady(page: Page): Promise<void> {
   // Wait for the initial load/save cycle so it won't overwrite our injection.
   await expect(page.getByText('已保存').or(page.getByText('保存中'))).toBeVisible({
@@ -122,19 +107,10 @@ test('summary task row renders with font-semibold styling', async ({ page }) => 
     { id: 'child1', name: 'Child 1', parentId: 'parent', order: 0 },
   ]);
 
-  // Wait for both rows to actually render before asserting styling. Poll:
-  // on slow CI the injected state can be briefly overwritten by an in-flight
-  // init/autosave cycle before our inject sticks.
-  await expect.poll(async () => await page.locator('[role="row"]').count()).toBe(2);
-
   // First row is the parent (summary) — its name cell carries font-semibold.
-  // Poll for the class: on slow CI the Tailwind class application can lag
-  // behind the row's DOM insertion by a frame, causing one-shot toBeVisible
-  // to time out (flaky). expect.poll retries until it sticks.
   const firstRow = page.locator('[role="row"]').first();
-  await expect
-    .poll(async () => await firstRow.locator('.font-semibold').first().count())
-    .toBeGreaterThanOrEqual(1);
+  await expect(firstRow).toBeVisible();
+  await expect(firstRow.locator('.font-semibold').first()).toBeVisible();
 
   // The child (second row) is a leaf — it should NOT have font-semibold on
   // its name cell, distinguishing it from the summary row.
@@ -162,12 +138,6 @@ test('editing child progress rolls up to the parent summary', async ({ page }) =
   ]);
 
   // Sanity: parent rollup is 0 before edit (assembly + command both converge).
-  // Poll for the row count: on slow CI the injected state can be briefly
-  // overwritten by an in-flight init/autosave cycle before our inject sticks.
-  await expect.poll(async () => await page.locator('[role="row"]').count()).toBe(2);
-  // Poll until the parent task is readable (autosave/init can briefly blank
-  // the store on slow CI runners — see flaky history of this test).
-  await pollTaskField(page, 'parent', 'progress');
   const parentBefore = await readTask(page, 'parent');
   expect(parentBefore.progress).toBe(0);
 
