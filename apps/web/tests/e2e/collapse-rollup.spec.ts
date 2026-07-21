@@ -107,9 +107,12 @@ test('summary task row renders with font-semibold styling', async ({ page }) => 
     { id: 'child1', name: 'Child 1', parentId: 'parent', order: 0 },
   ]);
 
+  // Wait for both rows to actually render before asserting styling — inject
+  // is non-undoable store setState, and React's re-render isn't synchronous.
+  await expect(page.locator('[role="row"]')).toHaveCount(2);
+
   // First row is the parent (summary) — its name cell carries font-semibold.
   const firstRow = page.locator('[role="row"]').first();
-  await expect(firstRow).toBeVisible();
   await expect(firstRow.locator('.font-semibold').first()).toBeVisible();
 
   // The child (second row) is a leaf — it should NOT have font-semibold on
@@ -138,6 +141,8 @@ test('editing child progress rolls up to the parent summary', async ({ page }) =
   ]);
 
   // Sanity: parent rollup is 0 before edit (assembly + command both converge).
+  // Wait for both rows to render first — inject is async-with-render-delay.
+  await expect(page.locator('[role="row"]')).toHaveCount(2);
   const parentBefore = await readTask(page, 'parent');
   expect(parentBefore.progress).toBe(0);
 
