@@ -12,7 +12,7 @@ import type { GanttlyFile, Task, Dependency, ViewState } from '@ganttly/schema';
 import { createEmptyFile } from '@ganttly/schema';
 import { getCalendar } from '@ganttly/calendar-data';
 import { DEFAULT_PROJECT_ID, type ProjectRepository } from '@/data/repository';
-import { computeCascadeRollup } from '@/lib/summary';
+import { computeCascadeRollup, recomputeSelfAndAncestors } from '@/lib/summary';
 
 // ---------------------------------------------------------------------------
 // Command pattern (PRD §3.7)
@@ -347,6 +347,40 @@ export function setViewStateCommand(patch: Partial<ViewState>): Command {
 // ---------------------------------------------------------------------------
 
 /**
+ * Apply a patch to a single task in `tasks`, capturing its pre-change values
+ * into `captured` (only the keys present in `patch`) so the command's `invert`
+ * can restore them later. Used by the rollup commands below.
+ */
+function applyPatchAndCapture(
+  tasks: Task[],
+  id: string,
+  patch: Partial<Task>,
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  return tasks.map((t) => {
+    if (t.id !== id) return t;
+    const old: Partial<Task> = {};
+    for (const key of Object.keys(patch) as Array<keyof Task>) {
+      (old as Record<string, unknown>)[key] = t[key];
+    }
+    // Don't overwrite an earlier capture (a task may be patched more than once
+    // — e.g. moveTask captures the target's parentId/order, then rollup also
+    // wants to capture its start/end). Keep the union of old values.
+    const existing = captured.get(id);
+    captured.set(id, existing ? { ...old, ...existing } : old);
+    return { ...t, ...patch };
+  });
+}
+
+/** Restore captured old values onto a tasks array (shared `invert` body). */
+function restoreCaptured(tasks: Task[], captured: Map<string, Partial<Task>>): Task[] {
+  return tasks.map((t) => {
+    const old = captured.get(t.id);
+    return old ? { ...t, ...old } : t;
+  });
+}
+
+/**
  * Update a task and cascade rollup to all ancestors.
  * The apply captures old values for all modified tasks (target + ancestors).
  */
@@ -357,53 +391,31 @@ export function updateTaskWithRollupCommand(taskId: string, patch: Partial<Task>
     apply: (file) => {
       capturedOldValues = new Map();
 
-      // 1. Apply patch to target task
-      let tasks = file.tasks.map((t) => {
-        if (t.id !== taskId) return t;
-        // Capture old values for target
-        const old: Partial<Task> = {};
-        for (const key of Object.keys(patch) as Array<keyof Task>) {
-          (old as Record<string, unknown>)[key] = t[key];
-        }
-        capturedOldValues!.set(t.id, old);
-        return { ...t, ...patch };
-      });
+      // 1. Apply patch to target task (captures old values for the patch keys)
+      let tasks = applyPatchAndCapture(file.tasks, taskId, patch, capturedOldValues);
 
-      // 2. Compute cascade rollup
+      // 2-3. Compute cascade rollup and apply each ancestor patch.
+      // `taskId` itself is not recomputed here (it's the edit target).
       const rollupPatches = computeCascadeRollup(tasks, taskId);
-
-      // 3. Apply rollup patches to ancestors
       for (const { id, patch: rp } of rollupPatches) {
-        tasks = tasks.map((t) => {
-          if (t.id !== id) return t;
-          // Capture old values for ancestor
-          const old: Partial<Task> = {};
-          for (const key of Object.keys(rp) as Array<keyof Task>) {
-            (old as Record<string, unknown>)[key] = t[key];
-          }
-          capturedOldValues!.set(id, old);
-          return { ...t, ...rp };
-        });
+        tasks = applyPatchAndCapture(tasks, id, rp, capturedOldValues);
       }
 
       return { ...file, tasks };
     },
     invert: (file) => {
       if (!capturedOldValues) return file;
-      const oldVals = capturedOldValues;
-      return {
-        ...file,
-        tasks: file.tasks.map((t) => {
-          const old = oldVals.get(t.id);
-          return old ? { ...t, ...old } : t;
-        }),
-      };
+      return { ...file, tasks: restoreCaptured(file.tasks, capturedOldValues) };
     },
   };
 }
 
 /**
  * Move a task and rollup both old and new parent chains.
+ *
+ * Uses {@link recomputeSelfAndAncestors} so that the old parent (which may have
+ * lost a child) and the new parent (which gained one) are themselves
+ * recomputed — not just their ancestors.
  */
 export function moveTaskWithRollupCommand(
   taskId: string,
@@ -424,43 +436,27 @@ export function moveTaskWithRollupCommand(
       oldParentId = target.parentId;
       oldOrder = target.order;
 
-      // Capture old values
+      // Capture the move itself (parentId/order) for the target
       capturedOldValues.set(taskId, { parentId: oldParentId, order: oldOrder });
 
-      // Apply move
+      // 1. Apply move
       let tasks = file.tasks.map((t) =>
         t.id === taskId ? { ...t, parentId: newParentId, order: newOrder } : t,
       );
 
-      // Rollup old parent chain (if old parent still has children)
-      if (oldParentId) {
-        const oldPatches = computeCascadeRollup(tasks, oldParentId);
+      // 2. Recompute old parent (it lost a child) and its ancestors.
+      if (oldParentId && oldParentId !== newParentId) {
+        const oldPatches = recomputeSelfAndAncestors(tasks, oldParentId);
         for (const { id, patch } of oldPatches) {
-          tasks = tasks.map((t) => {
-            if (t.id !== id) return t;
-            const old: Partial<Task> = {};
-            for (const key of Object.keys(patch) as Array<keyof Task>) {
-              (old as Record<string, unknown>)[key] = t[key];
-            }
-            if (!capturedOldValues!.has(id)) capturedOldValues!.set(id, old);
-            return { ...t, ...patch };
-          });
+          tasks = applyPatchAndCapture(tasks, id, patch, capturedOldValues);
         }
       }
 
-      // Rollup new parent chain
-      if (newParentId) {
-        const newPatches = computeCascadeRollup(tasks, newParentId);
+      // 3. Recompute new parent (it gained a child) and its ancestors.
+      if (newParentId && newParentId !== oldParentId) {
+        const newPatches = recomputeSelfAndAncestors(tasks, newParentId);
         for (const { id, patch } of newPatches) {
-          tasks = tasks.map((t) => {
-            if (t.id !== id) return t;
-            const old: Partial<Task> = {};
-            for (const key of Object.keys(patch) as Array<keyof Task>) {
-              (old as Record<string, unknown>)[key] = t[key];
-            }
-            if (!capturedOldValues!.has(id)) capturedOldValues!.set(id, old);
-            return { ...t, ...patch };
-          });
+          tasks = applyPatchAndCapture(tasks, id, patch, capturedOldValues);
         }
       }
 
@@ -468,14 +464,7 @@ export function moveTaskWithRollupCommand(
     },
     invert: (file) => {
       if (!capturedOldValues) return file;
-      const oldVals = capturedOldValues;
-      return {
-        ...file,
-        tasks: file.tasks.map((t) => {
-          const old = oldVals.get(t.id);
-          return old ? { ...t, ...old } : t;
-        }),
-      };
+      return { ...file, tasks: restoreCaptured(file.tasks, capturedOldValues) };
     },
   };
 }

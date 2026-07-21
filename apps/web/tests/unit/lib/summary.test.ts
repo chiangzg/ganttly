@@ -81,7 +81,7 @@ describe('computeRollup', () => {
 });
 
 describe('computeCascadeRollup', () => {
-  it('multi-level nesting — cascades to parent and root', () => {
+  it('multi-level nesting — cascades progress correctly to parent and root', () => {
     const root = makeTask({ id: 'root' });
     const parent = makeTask({ id: 'parent', parentId: 'root' });
     const child = makeTask({ id: 'child', parentId: 'parent', progress: 80, duration: 5 });
@@ -93,13 +93,43 @@ describe('computeCascadeRollup', () => {
     expect(patches).toHaveLength(2);
     expect(patches[0]!.id).toBe('parent');
     expect(patches[1]!.id).toBe('root');
-    // Direct parent gets child's rolled-up progress
+    // Direct parent: single child with progress 80 → 80
     expect(patches[0]!.patch.progress).toBe(80);
-    // Root uses parent's own task.progress (0) as weight,
-    // since rollupMap only overrides duration for summary children
-    expect(patches[1]!.patch.progress).toBe(0);
-    // But root still gets the time range and duration from its children
+    // Root: single summary child `parent`, whose rolled-up progress is 80.
+    // Using rolled-up progress (not stale task progress 0), root should be 80.
+    expect(patches[1]!.patch.progress).toBe(80);
+    // Root still gets the time range and duration from its children
     expect(patches[1]!.patch.duration).toBe(5);
+  });
+
+  it('asymmetric multi-level — root progress bubbles up via rolled-up children', () => {
+    // root
+    //   ├─ mid (summary)
+    //   │    └─ leaf1 (duration=4, progress=50)
+    //   └─ leaf2 (duration=6, progress=100)
+    const root = makeTask({ id: 'root' });
+    const mid = makeTask({ id: 'mid', parentId: 'root' });
+    const leaf1 = makeTask({ id: 'leaf1', parentId: 'mid', duration: 4, progress: 50 });
+    const leaf2 = makeTask({ id: 'leaf2', parentId: 'root', duration: 6, progress: 100 });
+
+    const tasks = [root, mid, leaf1, leaf2];
+    const patches = computeCascadeRollup(tasks, 'leaf1');
+
+    const midPatch = patches.find((p) => p.id === 'mid')!;
+    const rootPatch = patches.find((p) => p.id === 'root')!;
+
+    // mid: single child leaf1 → progress=50, duration=4
+    expect(midPatch.patch.progress).toBe(50);
+    expect(midPatch.patch.duration).toBe(4);
+
+    // root: weight(mid)=4 with rolled-up progress 50, weight(leaf2)=6 with progress 100
+    //   (50*4 + 100*6) / (4+6) = 800/10 = 80
+    expect(rootPatch.patch.progress).toBe(80);
+    // Duration sums each child's `duration` field. `mid` has not been re-persisted
+    // yet in this pure-function test (its own `duration` is still the default 5),
+    // so root.duration = mid.duration(5) + leaf2.duration(6) = 11. In real flows
+    // the rollup commands write mid.duration back first, then root sees 4 + 6 = 10.
+    expect(rootPatch.patch.duration).toBe(11);
   });
 
   it('returns empty array when no ancestors', () => {

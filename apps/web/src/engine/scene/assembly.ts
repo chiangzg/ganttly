@@ -30,24 +30,31 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const collapsed = new Set(file.viewState.collapsedTaskIds);
   const visible = flattenVisible(tree, collapsed);
 
+  // Pre-compute rollup values for all summary tasks. Used for both CPM input
+  // (so critical-path sees a summary's true aggregated start/duration) and for
+  // canvas row rendering (especially important during drag mid-states where
+  // the underlying Task data may be momentarily stale).
+  const allRollups = computeAllRollups(file.tasks);
+
+  // Set of summary task ids, derived from the FULL task list (not just
+  // visible rows) so that a summary whose children are all collapsed still
+  // renders as a summary bar rather than degrading to a leaf.
+  const summaryIds = buildSummaryIds(file.tasks);
+
   // Compute the critical path once per assembly. Cheap (<1ms for hundreds of
   // tasks) and gives every row the `isCritical` flag for highlighting.
+  // Summary tasks are fed their rolled-up start/duration so CPM uses the
+  // aggregated span (computeCriticalPath only reads start + duration, not end).
   const cpm = opts.criticalTaskIds
     ? null
     : computeCriticalPath(
-        file.tasks.map((t) => ({
-          ...t,
-          // For summary tasks (those with children), use the rolled-up dates.
-          // computeCriticalPath treats each task independently; we replace
-          // summary duration/end with min(child.start)/max(child.end) below.
-        })),
+        file.tasks.map((t) => {
+          const r = allRollups.get(t.id);
+          return r ? { ...t, start: r.start, duration: r.duration } : t;
+        }),
         file.calendar,
       );
   const criticalIds = opts.criticalTaskIds ?? cpm?.criticalTaskIds ?? new Set<string>();
-
-  // Pre-compute rollup values for all summary tasks so canvas rows show
-  // aggregated dates/progress (especially important during drag mid-states).
-  const allRollups = computeAllRollups(file.tasks);
 
   // Virtualise rows: drop rows above/below the visible scroll area.
   const firstVisibleRow = Math.max(0, Math.floor(file.viewState.scrollTop / ROW_HEIGHT) - 5);
@@ -58,7 +65,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const visibleSlice = visible.slice(firstVisibleRow, lastVisibleRow);
 
   const rows: TaskRow[] = visibleSlice.map((node) =>
-    toTaskRow(node.task, node.depth, node.wbsNumber, criticalIds, visible, allRollups),
+    toTaskRow(node.task, node.depth, node.wbsNumber, criticalIds, summaryIds, allRollups),
   );
 
   const arrows = computeArrows(file, opts, visible, firstVisibleRow, criticalIds);
@@ -84,10 +91,10 @@ function toTaskRow(
   depth: number,
   wbs: string,
   criticalIds: ReadonlySet<string>,
-  visible: ReturnType<typeof flattenVisible>,
+  summaryIds: ReadonlySet<string>,
   allRollups: Map<string, { start: string; end: string; progress: number }>,
 ): TaskRow {
-  const isSummary = hasChildren(task.id, visible);
+  const isSummary = summaryIds.has(task.id);
   const rollup = allRollups.get(task.id);
   return {
     id: task.id,
@@ -104,8 +111,17 @@ function toTaskRow(
   };
 }
 
-function hasChildren(id: string, visible: ReturnType<typeof flattenVisible>): boolean {
-  return visible.some((n) => n.task.parentId === id);
+/**
+ * Build the set of task ids that have at least one child. Derived from the
+ * full task list so collapse state (which removes children from `visible`)
+ * does not demote a summary task to a leaf for rendering purposes.
+ */
+function buildSummaryIds(tasks: ReadonlyArray<Task>): Set<string> {
+  const ids = new Set<string>();
+  for (const t of tasks) {
+    if (t.parentId) ids.add(t.parentId);
+  }
+  return ids;
 }
 
 /**

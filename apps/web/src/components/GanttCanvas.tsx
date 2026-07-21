@@ -28,7 +28,7 @@ import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
 import { cn } from '@/lib/cn';
-import type { ZoomLevel, DependencyType } from '@ganttly/schema';
+import type { ZoomLevel, DependencyType, Task } from '@ganttly/schema';
 
 export function GanttCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -214,25 +214,7 @@ export function GanttCanvas() {
       useProjectStore.setState({
         file: {
           ...file,
-          tasks: (() => {
-            // 1. Apply drag update
-            let tasks = file.tasks.map((t) =>
-              t.id === row.id
-                ? {
-                    ...t,
-                    start: next.start,
-                    end: next.end,
-                    duration: durationOf(next.start, next.end),
-                  }
-                : t,
-            );
-            // 2. Apply rollup to ancestor summary tasks
-            const patches = computeCascadeRollup(tasks, row.id);
-            for (const { id, patch } of patches) {
-              tasks = tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
-            }
-            return tasks;
-          })(),
+          tasks: applyDragWithRollup(file.tasks, row.id, next),
         },
       });
     }
@@ -398,4 +380,39 @@ function durationOf(start: string, end: string): number {
   const [d, e, f] = end.split('-').map(Number);
   const ms = Date.UTC(d!, e! - 1, f!) - Date.UTC(a!, b! - 1, c!);
   return Math.max(0, Math.round(ms / 86_400_000) + 1);
+}
+
+/**
+ * Apply a drag move to `draggedId` and cascade rollup to its ancestor summary
+ * tasks. Returns a new tasks array; does not mutate the input. Used for the
+ * live (non-undoable) cursor-following update during pointer-move; the final
+ * commit happens on pointer-up via a Command.
+ */
+function applyDragWithRollup(
+  tasks: Task[],
+  draggedId: string,
+  next: { start: string; end: string },
+): Task[] {
+  // 1. Apply the drag to the target task.
+  let result = tasks.map((t) =>
+    t.id === draggedId
+      ? {
+          ...t,
+          start: next.start,
+          end: next.end,
+          duration: durationOf(next.start, next.end),
+        }
+      : t,
+  );
+  // 2. Cascade rollup to all ancestor summaries. Merge all patches in a single
+  //    pass (O(n)) rather than one map per patch.
+  const patches = computeCascadeRollup(result, draggedId);
+  if (patches.length > 0) {
+    const patchMap = new Map(patches.map((p) => [p.id, p.patch]));
+    result = result.map((t) => {
+      const p = patchMap.get(t.id);
+      return p ? { ...t, ...p } : t;
+    });
+  }
+  return result;
 }
