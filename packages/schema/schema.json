@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ganttly.dev/schema.json",
+  "title": "ganttly project file",
+  "description": "Data model for a ganttly project. See PRD §4 for design notes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "project",
+    "calendar",
+    "tasks",
+    "resources",
+    "baselines",
+    "viewState",
+    "meta"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Current schema version."
+    },
+    "project": { "$ref": "#/$defs/project" },
+    "calendar": { "$ref": "#/$defs/calendar" },
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/task" }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "baselines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/baseline" }
+    },
+    "viewState": { "$ref": "#/$defs/viewState" },
+    "meta": { "$ref": "#/$defs/meta" }
+  },
+  "$defs": {
+    "isoDate": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "isoDateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cssColor": {
+      "type": "string",
+      "description": "Any valid CSS color value, e.g. #ff0000 or rgb(255,0,0)."
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "locale"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "company": { "type": "string" },
+        "manager": { "type": "string" },
+        "startDate": { "$ref": "#/$defs/isoDate" },
+        "locale": { "enum": ["zh-CN", "en"] },
+        "timezone": { "type": "string" }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "weekStart", "weekends", "holidays", "workingHours"],
+      "properties": {
+        "id": { "type": "string" },
+        "weekStart": { "enum": [0, 1] },
+        "weekends": {
+          "type": "array",
+          "items": { "enum": [0, 1, 2, 3, 4, 5, 6] },
+          "uniqueItems": true
+        },
+        "holidays": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/holiday" }
+        },
+        "workingHours": { "$ref": "#/$defs/workingHours" }
+      }
+    },
+    "holiday": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "name", "type"],
+      "properties": {
+        "date": { "$ref": "#/$defs/isoDate" },
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["holiday", "working"] }
+      }
+    },
+    "workingHours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "end": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "parentId",
+        "order",
+        "start",
+        "end",
+        "duration",
+        "progress",
+        "isMilestone",
+        "dependencies",
+        "constraints",
+        "assignments",
+        "customFields"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "parentId": {
+          "oneOf": [{ "type": "string" }, { "type": "null" }]
+        },
+        "order": { "type": "integer", "minimum": 0 },
+        "start": { "$ref": "#/$defs/isoDate" },
+        "end": { "$ref": "#/$defs/isoDate" },
+        "duration": { "type": "integer", "minimum": 0 },
+        "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+        "isMilestone": { "type": "boolean" },
+        "color": { "$ref": "#/$defs/cssColor" },
+        "note": { "type": "string" },
+        "dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dependency" }
+        },
+        "constraints": { "type": "object" },
+        "assignments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/assignment" }
+        },
+        "customFields": { "type": "object" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetId", "type", "lag"],
+      "properties": {
+        "targetId": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["FS", "SS", "FF", "SF"] },
+        "lag": { "type": "integer" }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "load"],
+      "properties": {
+        "resourceId": { "type": "string" },
+        "load": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "rate": { "type": "number", "minimum": 0 }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "capturedAt", "tasks"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "capturedAt": { "$ref": "#/$defs/isoDateTime" },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "start", "end", "duration", "progress"],
+            "properties": {
+              "id": { "type": "string" },
+              "start": { "$ref": "#/$defs/isoDate" },
+              "end": { "$ref": "#/$defs/isoDate" },
+              "duration": { "type": "integer", "minimum": 0 },
+              "progress": { "type": "number", "minimum": 0, "maximum": 100 }
+            }
+          }
+        }
+      }
+    },
+    "viewState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zoom",
+        "scrollLeft",
+        "scrollTop",
+        "selectedTaskId",
+        "showCriticalPath",
+        "collapsedTaskIds"
+      ],
+      "properties": {
+        "zoom": { "enum": ["day", "week", "month", "year"] },
+        "scrollLeft": { "type": "number", "minimum": 0 },
+        "scrollTop": { "type": "number", "minimum": 0 },
+        "selectedTaskId": {
+          "oneOf": [{ "type": "string" }, { "type": "null" }]
+        },
+        "showCriticalPath": { "type": "boolean" },
+        "collapsedTaskIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdAt", "updatedAt", "appVersion"],
+      "properties": {
+        "createdAt": { "$ref": "#/$defs/isoDateTime" },
+        "updatedAt": { "$ref": "#/$defs/isoDateTime" },
+        "appVersion": { "type": "string" }
+      }
+    }
+  }
+}

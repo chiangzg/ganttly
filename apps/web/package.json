@@ -1,0 +1,48 @@
+{
+  "name": "@ganttly/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "pretest:e2e": "vite build",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@ganttly/calendar-data": "workspace:*",
+    "@ganttly/gan-parser": "workspace:*",
+    "@ganttly/schema": "workspace:*",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0",
+    "i18next": "^23.12.0",
+    "nanoid": "^5.0.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^15.0.0",
+    "tailwind-merge": "^2.4.0",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@ganttly/tsconfig": "workspace:*",
+    "@playwright/test": "^1.46.0",
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^24.1.0",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.7",
+    "vite": "^5.3.5",
+    "vitest": "^2.0.0"
+  }
+}

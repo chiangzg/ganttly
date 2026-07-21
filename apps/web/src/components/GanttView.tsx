@@ -1,0 +1,50 @@
+/**
+ * Top-level Gantt editor view (PRD §5.1).
+ *
+ * Layout:
+ *   ┌─────────────────────────────────────────────────┐
+ *   │ Toolbar                                         │
+ *   ├──────────────┬──────────────────────────────────┤
+ *   │ TaskTable    │ GanttCanvas                      │
+ *   │ (WBS list)   │ (date grid + bars + arrows)      │
+ *   │              │                                  │
+ *   ├──────────────┴──────────────────────────────────┤
+ *   │ StatusBar                                       │
+ *   └─────────────────────────────────────────────────┘
+ *
+ * The TaskTable and GanttCanvas share scroll-Y (a row at index N must align
+ * on both sides). The Toolbar drives high-level actions; the StatusBar shows
+ * save state and undo/redo availability.
+ */
+import { useEffect } from 'react';
+import { Toolbar } from './Toolbar';
+import { TaskTable } from './TaskTable';
+import { GanttCanvas } from './GanttCanvas';
+import { StatusBar } from './StatusBar';
+import { TaskDrawer } from './TaskDrawer';
+import { ContextMenu } from './ContextMenu';
+import { getRepository } from '@/data/createRepository';
+import { useProjectStore } from '@/store/useProjectStore';
+
+export function GanttView() {
+  const init = useProjectStore((s) => s.init);
+
+  // Boot: open the default project (creating one if needed).
+  useEffect(() => {
+    const repo = getRepository();
+    void init(repo);
+  }, [init]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <Toolbar />
+      <div className="flex flex-1 overflow-hidden">
+        <TaskTable />
+        <GanttCanvas />
+      </div>
+      <StatusBar />
+      <TaskDrawer />
+      <ContextMenu />
+    </div>
+  );
+}
