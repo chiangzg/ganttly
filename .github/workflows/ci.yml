@@ -45,6 +45,9 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      - name: Validate roadmap.json against schema
+        run: pnpm validate:roadmap
+
       - name: Build
         run: pnpm build
 

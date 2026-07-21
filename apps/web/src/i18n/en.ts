@@ -40,6 +40,7 @@ export const en = {
     placeholderName: 'Task name',
     addTask: 'New task',
     confirmDelete: 'Delete this task and all its subtasks?',
+    copySuffix: 'copy',
   },
   drawer: {
     title: 'Edit task',
