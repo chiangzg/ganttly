@@ -32,7 +32,13 @@ export function hitTest(scene: Scene, x: number, y: number): HitZone {
   const row = scene.rows[rowIndex];
   if (!row) return { kind: 'empty' };
 
-  // Summary rows are not directly draggable (their dates come from children).
+  // Summary rows are not directly draggable — their dates are derived from
+  // children, so dragging the bar directly would be immediately overwritten by
+  // the next rollup. Returning 'empty' suppresses the drag interaction for the
+  // whole row.
+  // NOTE: this also blocks selection hit-testing on the bar. If a future change
+  // adds right-click menus or click-to-select on summary bars, this branch
+  // should return a non-draggable hit kind (e.g. 'select-only') instead.
   if (row.isSummary) return { kind: 'empty' };
 
   const xStart = dateToPixel(row.start, scene.originDate, scene.zoom) - scene.scrollLeft;

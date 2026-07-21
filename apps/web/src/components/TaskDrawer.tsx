@@ -24,6 +24,9 @@ import { wouldCreateCycle } from '@/lib/schedule';
 
 const cal = resolveCalendar(getCalendar('zh-CN'));
 
+/** Fields whose edit must cascade rollup to ancestor summary tasks. */
+const ROLLUP_FIELDS = new Set(['progress', 'start', 'end', 'duration']);
+
 export function TaskDrawer() {
   const { t } = useTranslation();
   const drawer = useViewStore((s) => s.drawer);
@@ -40,8 +43,6 @@ export function TaskDrawer() {
   }, [task?.id, task]);
 
   if (drawer === 'closed' || !draft || !task) return null;
-
-  const ROLLUP_FIELDS = new Set(['progress', 'start', 'end', 'duration']);
 
   const commit = (patch: Partial<Task>) => {
     if (!task) return;
