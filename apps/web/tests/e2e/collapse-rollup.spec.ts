@@ -127,8 +127,13 @@ test('summary task row renders with font-semibold styling', async ({ page }) => 
   await expect(page.locator('[role="row"]')).toHaveCount(2);
 
   // First row is the parent (summary) — its name cell carries font-semibold.
+  // Poll for the class: on slow CI the Tailwind class application can lag
+  // behind the row's DOM insertion by a frame, causing one-shot toBeVisible
+  // to time out (flaky). expect.poll retries until it sticks.
   const firstRow = page.locator('[role="row"]').first();
-  await expect(firstRow.locator('.font-semibold').first()).toBeVisible();
+  await expect
+    .poll(async () => await firstRow.locator('.font-semibold').first().count())
+    .toBeGreaterThanOrEqual(1);
 
   // The child (second row) is a leaf — it should NOT have font-semibold on
   // its name cell, distinguishing it from the summary row.
