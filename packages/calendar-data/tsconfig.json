@@ -1,0 +1,7 @@
+{
+  "extends": "@ganttly/tsconfig/base.json",
+  "compilerOptions": {
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*", "vitest.config.ts"]
+}

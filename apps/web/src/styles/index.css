@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+ * Color tokens — RGB channel triples so Tailwind's `<alpha-value>` works.
+ *
+ * PRD §2.9: themes follow `prefers-color-scheme`. We use @media rather than a
+ * `.dark` class toggle so users get zero-config dark mode. (A future P1 task
+ * can add an explicit three-way toggle that overrides this.)
+ * --------------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    --color-bg: 250 250 250;
+    --color-bg-elevated: 255 255 255;
+    --color-border: 226 232 240;
+    --color-fg: 15 23 42;
+    --color-fg-muted: 100 116 139;
+    --color-primary: 37 99 235;
+    --color-accent: 14 165 233;
+    --color-danger: 220 38 38;
+    --color-success: 22 163 74;
+    --color-warning: 217 119 6;
+    --color-non-working: 254 226 226;
+    --color-task-bar: 96 165 250;
+    --color-task-progress: 37 99 235;
+    --color-critical: 220 38 38;
+
+    --font-size-base: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-bg: 15 23 42;
+      --color-bg-elevated: 30 41 59;
+      --color-border: 51 65 85;
+      --color-fg: 241 245 249;
+      --color-fg-muted: 148 163 184;
+      --color-primary: 96 165 250;
+      --color-accent: 56 189 248;
+      --color-danger: 248 113 113;
+      --color-success: 74 222 128;
+      --color-warning: 251 191 36;
+      --color-non-working: 60 28 28;
+      --color-task-bar: 51 110 200;
+      --color-task-progress: 96 165 250;
+      --color-critical: 248 113 113;
+    }
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: rgb(var(--color-bg));
+    color: rgb(var(--color-fg));
+    font-family: theme('fontFamily.sans');
+    font-size: var(--font-size-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* PRD pain point A: crisp text on Retina. Set text-rendering explicitly. */
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Canvas pixels line up with device pixels for crisp rendering on Retina. */
+  canvas {
+    display: block;
+    image-rendering: -webkit-optimize-contrast;
+  }
+
+  /* Tight, unstyled scrollbar to match data-density of pro gantt apps. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--color-border));
+    border-radius: 4px;
+  }
+}
