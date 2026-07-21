@@ -122,9 +122,10 @@ test('summary task row renders with font-semibold styling', async ({ page }) => 
     { id: 'child1', name: 'Child 1', parentId: 'parent', order: 0 },
   ]);
 
-  // Wait for both rows to actually render before asserting styling — inject
-  // is non-undoable store setState, and React's re-render isn't synchronous.
-  await expect(page.locator('[role="row"]')).toHaveCount(2);
+  // Wait for both rows to actually render before asserting styling. Poll:
+  // on slow CI the injected state can be briefly overwritten by an in-flight
+  // init/autosave cycle before our inject sticks.
+  await expect.poll(async () => await page.locator('[role="row"]').count()).toBe(2);
 
   // First row is the parent (summary) — its name cell carries font-semibold.
   // Poll for the class: on slow CI the Tailwind class application can lag
@@ -161,8 +162,9 @@ test('editing child progress rolls up to the parent summary', async ({ page }) =
   ]);
 
   // Sanity: parent rollup is 0 before edit (assembly + command both converge).
-  // Wait for both rows to render first — inject is async-with-render-delay.
-  await expect(page.locator('[role="row"]')).toHaveCount(2);
+  // Poll for the row count: on slow CI the injected state can be briefly
+  // overwritten by an in-flight init/autosave cycle before our inject sticks.
+  await expect.poll(async () => await page.locator('[role="row"]').count()).toBe(2);
   // Poll until the parent task is readable (autosave/init can briefly blank
   // the store on slow CI runners — see flaky history of this test).
   await pollTaskField(page, 'parent', 'progress');
