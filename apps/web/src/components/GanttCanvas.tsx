@@ -26,6 +26,7 @@ import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/inte
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
+import { computeCascadeRollup } from '@/lib/summary';
 import { cn } from '@/lib/cn';
 import type { ZoomLevel, DependencyType } from '@ganttly/schema';
 
@@ -213,16 +214,25 @@ export function GanttCanvas() {
       useProjectStore.setState({
         file: {
           ...file,
-          tasks: file.tasks.map((t) =>
-            t.id === row.id
-              ? {
-                  ...t,
-                  start: next.start,
-                  end: next.end,
-                  duration: durationOf(next.start, next.end),
-                }
-              : t,
-          ),
+          tasks: (() => {
+            // 1. Apply drag update
+            let tasks = file.tasks.map((t) =>
+              t.id === row.id
+                ? {
+                    ...t,
+                    start: next.start,
+                    end: next.end,
+                    duration: durationOf(next.start, next.end),
+                  }
+                : t,
+            );
+            // 2. Apply rollup to ancestor summary tasks
+            const patches = computeCascadeRollup(tasks, row.id);
+            for (const { id, patch } of patches) {
+              tasks = tasks.map((t) => (t.id === id ? { ...t, ...patch } : t));
+            }
+            return tasks;
+          })(),
         },
       });
     }

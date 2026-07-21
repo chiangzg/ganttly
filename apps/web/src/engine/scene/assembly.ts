@@ -15,6 +15,7 @@ import type { Scene, TaskRow, ArrowSpec } from '../render/types';
 import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff } from '../layout';
 import { buildTree, flattenVisible } from './tree';
 import { computeCriticalPath } from '@/lib/cpm';
+import { computeAllRollups } from '@/lib/summary';
 
 export interface AssembleOptions {
   viewportWidth: number;
@@ -44,6 +45,10 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
       );
   const criticalIds = opts.criticalTaskIds ?? cpm?.criticalTaskIds ?? new Set<string>();
 
+  // Pre-compute rollup values for all summary tasks so canvas rows show
+  // aggregated dates/progress (especially important during drag mid-states).
+  const allRollups = computeAllRollups(file.tasks);
+
   // Virtualise rows: drop rows above/below the visible scroll area.
   const firstVisibleRow = Math.max(0, Math.floor(file.viewState.scrollTop / ROW_HEIGHT) - 5);
   const lastVisibleRow = Math.min(
@@ -53,7 +58,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const visibleSlice = visible.slice(firstVisibleRow, lastVisibleRow);
 
   const rows: TaskRow[] = visibleSlice.map((node) =>
-    toTaskRow(node.task, node.depth, node.wbsNumber, criticalIds, visible),
+    toTaskRow(node.task, node.depth, node.wbsNumber, criticalIds, visible, allRollups),
   );
 
   const arrows = computeArrows(file, opts, visible, firstVisibleRow, criticalIds);
@@ -80,19 +85,22 @@ function toTaskRow(
   wbs: string,
   criticalIds: ReadonlySet<string>,
   visible: ReturnType<typeof flattenVisible>,
+  allRollups: Map<string, { start: string; end: string; progress: number }>,
 ): TaskRow {
+  const isSummary = hasChildren(task.id, visible);
+  const rollup = allRollups.get(task.id);
   return {
     id: task.id,
     name: task.name,
-    start: task.start,
-    end: task.end,
-    progress: task.progress,
+    start: isSummary && rollup ? rollup.start : task.start,
+    end: isSummary && rollup ? rollup.end : task.end,
+    progress: isSummary && rollup ? rollup.progress : task.progress,
     isMilestone: task.isMilestone,
     color: task.color,
     depth,
     wbsNumber: wbs,
     isCritical: criticalIds.has(task.id),
-    isSummary: hasChildren(task.id, visible),
+    isSummary,
   };
 }
 

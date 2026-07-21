@@ -5,6 +5,7 @@ import {
   addTaskCommand,
   deleteTaskCommand,
   updateTaskCommand,
+  updateTaskWithRollupCommand,
   setViewStateCommand,
   moveTaskCommand,
   addDependencyCommand,
@@ -137,3 +138,51 @@ describe('history — undo/redo basics', () => {
 
 // Silence unused-import warnings from the delete-command helper (re-tested above).
 void deleteTaskCommand;
+
+describe('updateTaskWithRollupCommand', () => {
+  beforeEach(async () => {
+    await reset();
+  });
+
+  it('should cascade progress changes to parent', async () => {
+    const store = useProjectStore.getState;
+    // Create parent and child
+    store().dispatch(addTaskCommand(makeTask('parent'), null, 0));
+    store().dispatch(
+      addTaskCommand(
+        makeTask('child', { parentId: 'parent', duration: 5, progress: 0 }),
+        'parent',
+        0,
+      ),
+    );
+
+    // Update child progress to 80
+    store().dispatch(updateTaskWithRollupCommand('child', { progress: 80 }));
+
+    const parent = store().file.tasks.find((t) => t.id === 'parent');
+    expect(parent!.progress).toBe(80);
+  });
+
+  it('should undo both child and parent changes', async () => {
+    const store = useProjectStore.getState;
+    // Create parent and child
+    store().dispatch(addTaskCommand(makeTask('parent'), null, 0));
+    store().dispatch(
+      addTaskCommand(
+        makeTask('child', { parentId: 'parent', duration: 5, progress: 0 }),
+        'parent',
+        0,
+      ),
+    );
+
+    // Update child progress
+    store().dispatch(updateTaskWithRollupCommand('child', { progress: 80 }));
+    expect(store().file.tasks.find((t) => t.id === 'child')!.progress).toBe(80);
+    expect(store().file.tasks.find((t) => t.id === 'parent')!.progress).toBe(80);
+
+    // Undo should restore both
+    store().undo();
+    expect(store().file.tasks.find((t) => t.id === 'child')!.progress).toBe(0);
+    expect(store().file.tasks.find((t) => t.id === 'parent')!.progress).toBe(0);
+  });
+});

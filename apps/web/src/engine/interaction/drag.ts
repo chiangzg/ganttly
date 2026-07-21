@@ -32,6 +32,9 @@ export function hitTest(scene: Scene, x: number, y: number): HitZone {
   const row = scene.rows[rowIndex];
   if (!row) return { kind: 'empty' };
 
+  // Summary rows are not directly draggable (their dates come from children).
+  if (row.isSummary) return { kind: 'empty' };
+
   const xStart = dateToPixel(row.start, scene.originDate, scene.zoom) - scene.scrollLeft;
   const width = Math.max(dateRangeWidth(row.start, row.end, scene.zoom), 16);
   if (x < xStart - 2 || x > xStart + width + 2) return { kind: 'empty' };
