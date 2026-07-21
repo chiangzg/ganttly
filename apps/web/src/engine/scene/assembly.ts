@@ -136,10 +136,8 @@ function computeArrows(
         file.viewState.scrollLeft,
       );
       const toX = endpointX(successor, dep.type, 'to', originDate, zoom, file.viewState.scrollLeft);
-      const fromY =
-        HEADER_HEIGHT + (fromIdx - firstVisibleRow + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
-      const toY =
-        HEADER_HEIGHT + (toIdx - firstVisibleRow + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
+      const fromY = HEADER_HEIGHT + (fromIdx - firstVisibleRow + 0.5) * ROW_HEIGHT;
+      const toY = HEADER_HEIGHT + (toIdx - firstVisibleRow + 0.5) * ROW_HEIGHT;
 
       out.push({
         fromId: predecessor.id,
