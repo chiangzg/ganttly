@@ -68,6 +68,21 @@ async function readTask(page: Page, id: string): Promise<Record<string, unknown>
   }, id);
 }
 
+/**
+ * Poll a task field until it matches. Survives transient store states where
+ * autosave/init may briefly overwrite the injected fixture — using expect.poll
+ * instead of a one-shot readTask avoids flaky "task not found" failures on
+ * slow CI runners.
+ */
+async function pollTaskField(page: Page, id: string, field: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const t = await readTask(page, id).catch(() => null);
+      return t ? (t as Record<string, unknown>)[field] : undefined;
+    })
+    .toBeDefined();
+}
+
 async function waitForStoreReady(page: Page): Promise<void> {
   // Wait for the initial load/save cycle so it won't overwrite our injection.
   await expect(page.getByText('已保存').or(page.getByText('保存中'))).toBeVisible({
@@ -143,6 +158,9 @@ test('editing child progress rolls up to the parent summary', async ({ page }) =
   // Sanity: parent rollup is 0 before edit (assembly + command both converge).
   // Wait for both rows to render first — inject is async-with-render-delay.
   await expect(page.locator('[role="row"]')).toHaveCount(2);
+  // Poll until the parent task is readable (autosave/init can briefly blank
+  // the store on slow CI runners — see flaky history of this test).
+  await pollTaskField(page, 'parent', 'progress');
   const parentBefore = await readTask(page, 'parent');
   expect(parentBefore.progress).toBe(0);
 
