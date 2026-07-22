@@ -28,10 +28,12 @@ export function renderArrows(
 
   for (const arrow of scene.arrows) {
     const isCritical = scene.showCriticalPath && arrow.isCritical;
-    const color = isCritical ? theme.critical : theme.fgMuted;
+    // G4: conflict arrows are orange, taking priority over critical-path red.
+    const isConflict = arrow.isConflict;
+    const color = isConflict ? '#f97316' : isCritical ? theme.critical : theme.fgMuted;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = isCritical ? 2 : 1;
+    ctx.lineWidth = isConflict || isCritical ? 2 : 1;
     drawArrowPath(ctx, arrow.fromX, arrow.fromY, arrow.toX, arrow.toY);
   }
 

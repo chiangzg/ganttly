@@ -15,12 +15,18 @@ import {
   deleteTaskCommand,
   addDependencyCommand,
   deleteDependencyCommand,
+  assignResourceCommand,
+  unassignResourceCommand,
+  updateConstraintCommand,
 } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
-import type { Task, DependencyType } from '@ganttly/schema';
+import type { Task, DependencyType, Resource, ConstraintType } from '@ganttly/schema';
 import { resolveCalendar, endDateFromDuration, durationBetween } from '@/lib/calendar';
 import { getCalendar } from '@ganttly/calendar-data';
 import { wouldCreateCycle } from '@/lib/schedule';
+import { computeTaskPersonDays } from '@/lib/cost';
+import { computeAllRollups } from '@/lib/summary';
+import { snapConstraintDate } from '@/lib/schedule';
 
 const cal = resolveCalendar(getCalendar('zh-CN'));
 
@@ -58,6 +64,16 @@ export function TaskDrawer() {
     dispatch(deleteTaskCommand(task.id));
     closeDrawer();
   };
+
+  // G13/Q13: summary tasks roll up their children; assigning resources to a
+  // summary would double-count person-days. Block it at the UI layer (the cost
+  // lib also short-circuits, so this is defense-in-depth).
+  const hasChildren = file.tasks.some((x) => x.parentId === task.id);
+
+  // Person-days for this task: summary → rolled-up children sum; leaf → own.
+  const personDays = hasChildren
+    ? (computeAllRollups(file.tasks, file.resources).get(task.id)?.personDays ?? 0)
+    : computeTaskPersonDays(task, file.resources);
 
   return (
     <aside className="absolute right-0 top-0 z-10 flex h-full w-80 flex-col border-l border-border bg-bg-elevated shadow-lg">
@@ -214,6 +230,112 @@ export function TaskDrawer() {
             />
           </div>
         </Field>
+        <Field label={t('drawer.assignments')}>
+          <div className="mb-1 text-xs text-fg-muted">
+            {t('drawer.totalPersonDays')}: <span className="font-medium text-fg">{personDays}</span>
+          </div>
+          {hasChildren ? (
+            <p className="text-xs text-fg-muted">{t('drawer.summaryNoAssignment')}</p>
+          ) : (
+            <div className="space-y-2">
+              {task.assignments.map((a) => {
+                const resource = file.resources.find((r) => r.id === a.resourceId);
+                return (
+                  <div key={a.resourceId} className="flex items-center gap-2">
+                    <span className="flex-1 truncate text-xs">
+                      {resource?.name ?? a.resourceId}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={a.load}
+                      className="flex-1"
+                      onChange={(e) =>
+                        dispatch(
+                          assignResourceCommand(task.id, {
+                            resourceId: a.resourceId,
+                            load: Number(e.target.value),
+                          }),
+                        )
+                      }
+                    />
+                    <span className="w-8 text-right text-xs text-fg-muted">{a.load}%</span>
+                    <button
+                      onClick={() => dispatch(unassignResourceCommand(task.id, a.resourceId))}
+                      className="text-danger hover:underline"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+              {file.resources.length > 0 && (
+                <AssignmentAdder
+                  existingResourceIds={task.assignments.map((a) => a.resourceId)}
+                  resources={file.resources}
+                  onAssign={(resourceId, load) =>
+                    dispatch(assignResourceCommand(task.id, { resourceId, load }))
+                  }
+                />
+              )}
+            </div>
+          )}
+        </Field>
+        <Field label={t('drawer.constraint')}>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs">
+              <select
+                className="input flex-1"
+                value={task.constraints.type}
+                onChange={(e) => {
+                  const type = e.target.value as ConstraintType;
+                  // Keep existing date when switching to another dated type;
+                  // clear it for 'none'.
+                  dispatch(
+                    updateConstraintCommand(task.id, {
+                      type,
+                      date: type === 'none' ? undefined : (task.constraints.date ?? task.start),
+                    }),
+                  );
+                }}
+              >
+                <option value="none">{t('drawer.constraintNone')}</option>
+                <option value="startNoEarlierThan">{t('drawer.constraintSNET')}</option>
+                <option value="mustStartOn">{t('drawer.constraintMSO')}</option>
+                <option value="mustFinishOn">{t('drawer.constraintMFO')}</option>
+                <option value="finishNoLaterThan">{t('drawer.constraintFNLT')}</option>
+              </select>
+              {task.constraints.type !== 'none' && (
+                <input
+                  type="date"
+                  className="input w-36"
+                  value={task.constraints.date ?? task.start}
+                  onChange={(e) =>
+                    dispatch(
+                      updateConstraintCommand(task.id, {
+                        type: task.constraints.type,
+                        date: e.target.value,
+                      }),
+                    )
+                  }
+                />
+              )}
+            </div>
+            {/* G12/Q11 snap feedback: show if the constraint date landed on a non-working day. */}
+            {task.constraints.type !== 'none' &&
+              task.constraints.date &&
+              (() => {
+                const snap = snapConstraintDate(task.constraints.date, cal);
+                return snap.snapped ? (
+                  <p className="text-xs text-fg-muted">
+                    {t('drawer.constraintSnapped', { from: snap.original, to: snap.date })}
+                  </p>
+                ) : null;
+              })()}
+          </div>
+        </Field>
       </div>
       <div className="flex gap-2 border-t border-border p-3">
         <button onClick={deleteTask} className="btn-danger flex-1">
@@ -324,6 +446,59 @@ function DependencyAdder({
           if (!targetId) return;
           onAdd(targetId, type, lag);
           setTargetId('');
+        }}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function AssignmentAdder({
+  existingResourceIds,
+  resources,
+  onAssign,
+}: {
+  existingResourceIds: string[];
+  resources: Resource[];
+  onAssign: (resourceId: string, load: number) => void;
+}) {
+  const { t } = useTranslation();
+  const [resourceId, setResourceId] = useState('');
+  const [load, setLoad] = useState(50);
+
+  const available = resources.filter((r) => !existingResourceIds.includes(r.id));
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <select
+        className="input flex-1"
+        value={resourceId}
+        onChange={(e) => setResourceId(e.target.value)}
+      >
+        <option value="">{t('drawer.addAssignment')}</option>
+        {available.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name || r.id}
+          </option>
+        ))}
+      </select>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={load}
+        onChange={(e) => setLoad(Number(e.target.value))}
+      />
+      <span className="w-8 text-right text-fg-muted">{load}%</span>
+      <button
+        className="btn px-2"
+        disabled={!resourceId}
+        onClick={() => {
+          if (!resourceId) return;
+          onAssign(resourceId, load);
+          setResourceId('');
         }}
       >
         +

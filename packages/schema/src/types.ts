@@ -148,10 +148,27 @@ export interface Dependency {
 export type DependencyType = 'FS' | 'SS' | 'FF' | 'SF';
 
 /**
- * P1 reserved — empty in MVP. Will hold `earliest-start`, `must-finish-on`,
- * etc. Object shape used so future additions are non-breaking.
+ * Task scheduling constraints (P1 feature three — G3).
+ *
+ * Five practical subset covering ~95% of needs (none of them require deep CPM
+ * backward-pass coupling like ALAP):
+ *  - `none`: no constraint (default)
+ *  - `startNoEarlierThan` (SNET): start ≥ date
+ *  - `mustStartOn` (MSO): start == date (hard anchor)
+ *  - `mustFinishOn` (MFO): end == date (hard anchor)
+ *  - `finishNoLaterThan` (FNLT): end ≤ date
+ *
+ * `date` is required when `type !== 'none'`. Old files (MVP) wrote `{}`; the
+ * loader normalizes that to `{ type: 'none' }`.
  */
-export type TaskConstraints = Record<string, never>;
+export type ConstraintType =
+  'none' | 'startNoEarlierThan' | 'mustStartOn' | 'mustFinishOn' | 'finishNoLaterThan';
+
+export interface TaskConstraints {
+  type: ConstraintType;
+  /** ISO date `YYYY-MM-DD`. Required when `type !== 'none'`. */
+  date?: string;
+}
 
 /** P1 reserved — empty in MVP. */
 export interface TaskAssignment {
@@ -166,8 +183,19 @@ export interface TaskAssignment {
 export interface Resource {
   id: string;
   name: string;
-  /** Hourly cost rate. P1 feature. */
+  /**
+   * Hourly cost rate. Deprecated in P1: the cost feature was scoped down to
+   * person-days only (grilling Q7), so `rate` is retained for schema
+   * compatibility but is not read by any P1 computation or UI. It remains so
+   * older v0.1.0 files with `rate` still load (additive-only policy).
+   */
   rate?: number;
+  /** Capacity 0-1, default 1.0 (full-time). Drives load-chart overload detection. P1. */
+  capacity?: number;
+  /** Role label for filtering, e.g. "前端", "设计". P1. */
+  role?: string;
+  /** CSS color for distinguishing resources on the load chart. P1. */
+  color?: string;
 }
 
 // ---------------------------------------------------------------------------

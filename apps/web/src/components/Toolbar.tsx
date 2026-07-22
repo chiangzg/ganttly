@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { useProjectStore, setViewStateCommand } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { todayISO } from '@/engine/layout';
-import { dateToPixel, pixelsPerDay } from '@/engine/layout';
+import { dateToPixel } from '@/engine/layout';
 import { originDateFor } from '@/engine/scene';
 import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
@@ -93,7 +93,7 @@ export function Toolbar() {
       progress: 0,
       isMilestone: false,
       dependencies: [],
-      constraints: {},
+      constraints: { type: 'none' },
       assignments: [],
       customFields: {},
     };
@@ -103,8 +103,10 @@ export function Toolbar() {
     openDrawer();
   };
 
-  // pixelsPerDay unused in this component — silence import.
-  void pixelsPerDay;
+  const viewMode = useViewStore((s) => s.viewMode);
+  const setViewMode = useViewStore((s) => s.setViewMode);
+  const showCostColumns = useViewStore((s) => s.showCostColumns);
+  const setShowCostColumns = useViewStore((s) => s.setShowCostColumns);
 
   return (
     <div className="flex items-center gap-1 border-b border-border bg-bg-elevated px-3 py-2">
@@ -130,6 +132,28 @@ export function Toolbar() {
         {file.viewState.showCriticalPath
           ? t('toolbar.hideCriticalPath')
           : t('toolbar.showCriticalPath')}
+      </ToolbarButton>
+      <ToolbarDivider />
+      <ToolbarButton
+        onClick={() => setViewMode('task')}
+        title={t('toolbar.taskView')}
+        pressed={viewMode === 'task'}
+      >
+        {t('toolbar.taskView')}
+      </ToolbarButton>
+      <ToolbarButton
+        onClick={() => setViewMode('resource')}
+        title={t('toolbar.resourceView')}
+        pressed={viewMode === 'resource'}
+      >
+        {t('toolbar.resourceView')}
+      </ToolbarButton>
+      <ToolbarButton
+        onClick={() => setShowCostColumns(!showCostColumns)}
+        title={t('toolbar.effortColumn')}
+        pressed={showCostColumns}
+      >
+        {t('toolbar.effortColumn')}
       </ToolbarButton>
       <ToolbarDivider />
       <ToolbarButton onClick={addRootTask} title={t('toolbar.newTask')}>

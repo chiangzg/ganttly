@@ -27,7 +27,7 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
     progress: 0,
     isMilestone: false,
     dependencies: [],
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
     ...overrides,
@@ -124,6 +124,54 @@ describe('history — undo/redo basics', () => {
     store().dispatch(deleteTaskCommand('t1'));
     // t1 + its child 'child' deleted; t2 (not a child) remains.
     expect(store().file.tasks.map((t) => t.id)).toEqual(['t2']);
+  });
+
+  it('addDependencyCommand cascades: successor reschedules to satisfy the new FS dep', () => {
+    const store = useProjectStore.getState;
+    // t1 ends 1/9; t2 starts 1/5. FS dep t2→t1 means t2 must start 1/12 (next
+    // working day after t1.end). The cascade should move t2 forward.
+    store().dispatch(addTaskCommand(makeTask('t1'), null, 0));
+    store().dispatch(addTaskCommand(makeTask('t2'), null, 1));
+    store().dispatch(addDependencyCommand('t2', { targetId: 't1', type: 'FS', lag: 0 }));
+    const t2 = store().file.tasks.find((t) => t.id === 't2')!;
+    expect(t2.dependencies).toHaveLength(1);
+    expect(t2.start).toBe('2026-01-12'); // rescheduled
+    // Undo restores both the dependency AND the original start (atomic).
+    store().undo();
+    const t2Undo = store().file.tasks.find((t) => t.id === 't2')!;
+    expect(t2Undo.dependencies).toHaveLength(0);
+    expect(t2Undo.start).toBe('2026-01-05'); // original restored
+  });
+
+  it('updateTaskWithRollupCommand cascades: moving a predecessor reschedules successors', () => {
+    const store = useProjectStore.getState;
+    // Set up t1 (1/5-1/9) → t2 (FS, 1/12-1/16) so the dep is already satisfied.
+    store().dispatch(
+      addTaskCommand(
+        makeTask('t1', { start: '2026-01-05', end: '2026-01-09', duration: 5 }),
+        null,
+        0,
+      ),
+    );
+    store().dispatch(
+      addTaskCommand(
+        makeTask('t2', { start: '2026-01-12', end: '2026-01-16', duration: 5 }),
+        null,
+        1,
+      ),
+    );
+    store().dispatch(addDependencyCommand('t2', { targetId: 't1', type: 'FS', lag: 0 }));
+    // t2 should still be at 1/12 (dep already satisfied, no move).
+    expect(store().file.tasks.find((t) => t.id === 't2')!.start).toBe('2026-01-12');
+    // Now move t1 later by a week: 1/12 → 1/16. t2 must follow to 1/19.
+    store().dispatch(
+      updateTaskWithRollupCommand('t1', { start: '2026-01-12', end: '2026-01-16', duration: 5 }),
+    );
+    expect(store().file.tasks.find((t) => t.id === 't2')!.start).toBe('2026-01-19');
+    // Undo moves t2 back atomically with t1.
+    store().undo();
+    expect(store().file.tasks.find((t) => t.id === 't1')!.start).toBe('2026-01-05');
+    expect(store().file.tasks.find((t) => t.id === 't2')!.start).toBe('2026-01-12');
   });
 
   it('nextUndoLabel / nextRedoLabel return latest command labels', () => {
