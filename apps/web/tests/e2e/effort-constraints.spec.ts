@@ -65,7 +65,9 @@ test.describe('person-days column', () => {
     await page.waitForTimeout(300);
   });
 
-  test('resource-view drill-down shows per-resource person-days in task lanes', async ({ page }) => {
+  test('resource-view drill-down shows per-resource person-days in task lanes', async ({
+    page,
+  }) => {
     // Switch to resource view, where Alice (r1) carries task "开发" at 50% load.
     await page.getByRole('button', { name: '资源视图' }).click();
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
