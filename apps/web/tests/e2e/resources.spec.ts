@@ -102,4 +102,45 @@ test.describe('resource view', () => {
     // The injected task "设计" should be visible again.
     await expect(page.getByText('设计')).toBeVisible();
   });
+
+  test('wheel-pan over the right pane scrolls vertically and horizontally', async ({ page }) => {
+    // Switch to resource view and wait for the load canvas to mount.
+    await page.getByRole('button', { name: '资源视图' }).click();
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible();
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+
+    const readScroll = () =>
+      page.evaluate(() => {
+        // resourceScrollTop lives in the view store (G19: independent of the
+        // file's viewState.scrollTop); scrollLeft lives in the file store.
+        const fileStore = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as {
+          getState: () => { file: { viewState: { scrollLeft: number } } };
+        };
+        const viewStore = (window as unknown as { __ganttlyViewStore?: unknown })
+          .__ganttlyViewStore as {
+          getState: () => { resourceScrollTop: number };
+        };
+        return {
+          scrollTop: viewStore.getState().resourceScrollTop,
+          scrollLeft: fileStore.getState().file.viewState.scrollLeft,
+        };
+      });
+
+    const before = await readScroll();
+
+    // Center over the canvas and emit a wheel with both deltaY (vertical) and
+    // deltaX (horizontal trackpad gesture) — this is what GanttCanvas handles
+    // for the task view and ResourceLoadCanvas must now mirror.
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(40, 60);
+    await page.waitForTimeout(150);
+
+    const after = await readScroll();
+    // Vertical pan wrote to resourceScrollTop (G19: resource-view scroll store).
+    expect(after.scrollTop).toBeGreaterThan(before.scrollTop);
+    // Horizontal pan wrote to file.viewState.scrollLeft (shared time axis).
+    expect(after.scrollLeft).toBeGreaterThan(before.scrollLeft);
+  });
 });
