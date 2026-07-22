@@ -143,4 +143,41 @@ test.describe('resource view', () => {
     // Horizontal pan wrote to file.viewState.scrollLeft (shared time axis).
     expect(after.scrollLeft).toBeGreaterThan(before.scrollLeft);
   });
+
+  test('drilling down a resource reveals its task lanes and selects on click', async ({ page }) => {
+    // The fixture injects one task "设计" assigned to Alice (r1) at 50% load,
+    // so Alice's row should have an expand arrow (▶) once in resource view.
+    await page.getByRole('button', { name: '资源视图' }).click();
+    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+
+    // Initially: only the resource row exists (1 row), and the task "设计" is
+    // NOT visible in the resource list yet.
+    await expect(page.getByText('设计')).toHaveCount(0);
+
+    // Click the expand arrow (▶) inside Alice's row.
+    const aliceRow = page
+      .locator('[role="row"]')
+      .filter({ has: page.locator('input[value="Alice"]') });
+    await aliceRow.locator('button', { hasText: '▶' }).click();
+
+    // The task lane "设计" now appears beneath Alice's row.
+    await expect(page.getByText('设计')).toBeVisible();
+    // The arrow flipped to the expanded glyph (▼).
+    await expect(aliceRow.locator('button', { hasText: '▼' })).toBeVisible();
+
+    // Clicking the task lane selects it (G19: writes selectedTaskIdInResource).
+    await page.getByText('设计').click();
+    const selectedLane = await page.evaluate(() => {
+      const viewStore = (window as unknown as { __ganttlyViewStore?: unknown })
+        .__ganttlyViewStore as {
+        getState: () => { selectedTaskIdInResource: string | null };
+      };
+      return viewStore.getState().selectedTaskIdInResource;
+    });
+    expect(selectedLane).toBe('t1');
+
+    // Collapsing hides the task lane again.
+    await aliceRow.locator('button', { hasText: '▼' }).click();
+    await expect(page.getByText('设计')).toHaveCount(0);
+  });
 });

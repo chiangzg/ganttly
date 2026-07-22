@@ -23,6 +23,7 @@ export interface ThemeColors {
   accent: string;
   danger: string;
   nonWorking: string;
+  warning: string;
   taskBar: string;
   taskProgress: string;
   critical: string;
@@ -73,8 +74,27 @@ export interface ResourceLoadBar {
   load: number;
 }
 
-/** A resource row in the resource-view scene (P1 feature one, G7). */
-export interface ResourceRow {
+/**
+ * Rows in the resource-view scene (P1 feature one, G7).
+ *
+ * The flattened row list mixes two kinds of rows so the left list and the
+ * right canvas can align pixel-for-pixel when a resource is drilled down:
+ * - A `resource` row: the resource itself, with its per-day load bars.
+ * - A `task` row (only present when the resource is expanded): one lane per
+ *   leaf task mounted on the resource, used to draw the task's load bar.
+ *
+ * Each row carries a global `yIndex` (its 0-based position in the flattened
+ * list) so the renderer positions it with `HEADER_HEIGHT + yIndex * ROW_HEIGHT`
+ * exactly like the left list, and both panes share the same total height.
+ */
+export interface ResourceRowBase {
+  /** Global 0-based index of this row in the flattened scene rows. */
+  yIndex: number;
+}
+
+/** A resource summary row (the resource itself). */
+export interface ResourceSummaryRow extends ResourceRowBase {
+  kind: 'resource';
   id: string;
   name: string;
   role?: string;
@@ -82,7 +102,33 @@ export interface ResourceRow {
   capacity: number;
   /** Load bars for this resource (one per working day with any load). */
   bars: ResourceLoadBar[];
+  /** Whether this resource is currently expanded (drilled down). */
+  expanded: boolean;
+  /** Leaf tasks mounted on this resource (for the expand-arrow visibility). */
+  taskCount: number;
 }
+
+/** A task lane row, shown beneath its resource when expanded. */
+export interface ResourceTaskRow extends ResourceRowBase {
+  kind: 'task';
+  taskId: string;
+  /** The resource this lane belongs to (for selection highlight scoping). */
+  resourceId: string;
+  name: string;
+  /** WBS number (e.g. `1.2.3`) for display. */
+  wbsNumber: string;
+  start: string; // ISO date
+  end: string; // ISO date (inclusive)
+  duration: number; // working days
+  progress: number; // 0-100
+  isMilestone: boolean;
+  /** This resource's load on this task, from the assignment (0-100). */
+  load: number;
+  /** Inherited from the owning resource; drives the overload color threshold. */
+  capacity: number;
+}
+
+export type ResourceRow = ResourceSummaryRow | ResourceTaskRow;
 
 /** The complete immutable scene for the resource (load) view. */
 export interface ResourceScene {
@@ -94,9 +140,11 @@ export interface ResourceScene {
   viewportHeight: number;
   today: string;
   holidays: Holiday[];
-  /** Resource rows in display order. */
+  /** Flattened rows in display order (resources + expanded task lanes). */
   rows: ResourceRow[];
   selectedResourceId: string | null;
+  /** Selected drilled-down task lane (G19: independent of selectedTaskId). */
+  selectedTaskIdInResource: string | null;
 }
 
 /** The complete immutable scene passed to render functions. */

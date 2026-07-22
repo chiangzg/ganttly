@@ -260,6 +260,7 @@ export const _dayDiff = dayDiff;
 
 import type { ResourceScene, ResourceRow, ResourceLoadBar } from '../render/types';
 import { computeResourceLoad } from '@/lib/resourceLoad';
+import { tasksByResource } from '@/lib/resourceTasks';
 
 export interface AssembleResourceOptions {
   viewportWidth: number;
@@ -267,14 +268,21 @@ export interface AssembleResourceOptions {
   today: string;
   scrollTop: number;
   selectedResourceId: string | null;
+  /** Expanded (drilled-down) resource ids — drives task-lane rows. */
+  expandedResourceIds?: ReadonlySet<string>;
+  /** Highlighted task lane (G19: independent of selectedTaskId). */
+  selectedTaskIdInResource?: string | null;
 }
 
 /**
  * Build the renderable `ResourceScene` for the resource (load) view.
  *
  * Mirrors `assembleScene`'s contract (origin/scroll/holidays reuse the same
- * time axis) but rows are resources, each carrying load bars from
- * `computeResourceLoad`. Rows are virtualised against `scrollTop`.
+ * time axis). The flattened `rows` list interleaves resource rows with their
+ * expanded task lanes so the left list and right canvas stay pixel-aligned:
+ * each entry carries a global `yIndex` used for `yIndex * ROW_HEIGHT` layout.
+ * Resource rows keep their per-day load bars; task lanes carry the task's
+ * date span + the resource's load on it for the lane rectangle.
  */
 export function assembleResourceScene(
   file: GanttlyFile,
@@ -283,20 +291,69 @@ export function assembleResourceScene(
   const cal = resolveCalendar(getCalendar(file.calendar.id) ?? getCalendar('zh-CN'));
   const loadMap = computeResourceLoad(file.tasks, file.resources, cal);
 
-  const rows: ResourceRow[] = file.resources.map((r) => {
+  // Pre-compute which task ids have children once (used both for the
+  // leaf-only filter in `tasksByResource` and WBS numbering via buildTree).
+  const tree = buildTree(file.tasks);
+  const nodeByTaskId = new Map<string, (typeof tree)[number]>();
+  const indexTree = (nodes: ReadonlyArray<(typeof tree)[number]>): void => {
+    for (const n of nodes) {
+      nodeByTaskId.set(n.task.id, n);
+      indexTree(n.children);
+    }
+  };
+  indexTree(tree);
+  const hasChildren = (id: string) => {
+    const node = nodeByTaskId.get(id);
+    return !!node && node.children.length > 0;
+  };
+  const tasksByRes = tasksByResource(file.tasks, hasChildren);
+
+  const expanded = opts.expandedResourceIds ?? new Set<string>();
+  const rows: ResourceRow[] = [];
+  let yIndex = 0;
+
+  for (const r of file.resources) {
     const perDay = loadMap.get(r.id) ?? new Map<string, number>();
     const bars: ResourceLoadBar[] = [];
     for (const [date, load] of perDay) {
       if (load > 0) bars.push({ resourceId: r.id, date, load });
     }
-    return {
+    const resourceTasks = tasksByRes.get(r.id) ?? [];
+    rows.push({
+      kind: 'resource',
+      yIndex: yIndex++,
       id: r.id,
       name: r.name,
       role: r.role,
       capacity: r.capacity ?? 1,
       bars,
-    };
-  });
+      expanded: expanded.has(r.id),
+      taskCount: resourceTasks.length,
+    });
+
+    // Drill-down task lanes (only when expanded).
+    if (expanded.has(r.id)) {
+      for (const t of resourceTasks) {
+        const assignment = t.assignments.find((a) => a.resourceId === r.id);
+        const node = nodeByTaskId.get(t.id);
+        rows.push({
+          kind: 'task',
+          yIndex: yIndex++,
+          taskId: t.id,
+          resourceId: r.id,
+          name: t.name,
+          wbsNumber: node?.wbsNumber ?? '',
+          start: t.start,
+          end: t.end,
+          duration: t.duration,
+          progress: t.progress,
+          isMilestone: t.isMilestone,
+          load: assignment?.load ?? 0,
+          capacity: r.capacity ?? 1,
+        });
+      }
+    }
+  }
 
   // Note: rows are passed in full (not pre-sliced) so the renderer's row
   // virtualization uses the correct global index for pixel positioning.
@@ -314,5 +371,6 @@ export function assembleResourceScene(
     holidays: file.calendar.holidays,
     rows,
     selectedResourceId: opts.selectedResourceId,
+    selectedTaskIdInResource: opts.selectedTaskIdInResource ?? null,
   };
 }

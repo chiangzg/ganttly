@@ -52,6 +52,8 @@ export const zhCN = {
     placeholderName: '资源名称',
     add: '新增资源',
     delete: '删除资源',
+    expand: '展开任务',
+    collapse: '收起任务',
   },
   drawer: {
     title: '编辑任务',

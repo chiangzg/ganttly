@@ -9,12 +9,19 @@
  * (load ≤ 100×capacity) and red when overloaded. The 100% capacity line is drawn
  * per row as a reference.
  *
+ * Drill-down: when a resource is expanded, task-lane rows (`kind: 'task'`) are
+ * interleaved with resource rows. Each lane draws one horizontal rectangle
+ * spanning `[task.start, task.end]`, filled with the SAME green/red load-band
+ * rule as the daily bars (load ≤ 100×capacity = green, else red), with the
+ * resource's `load%` on this task labelled inside. Rows are positioned by their
+ * global `yIndex` so lanes line up with the left list.
+ *
  * The grid background + header is reused from `renderGrid` by constructing a
  * minimal Scene view (grid only reads zoom/origin/scroll/holidays), keeping
  * the time axis visually identical to the task view.
  */
 import type { ResourceScene, Scene, ThemeColors } from './types';
-import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, pixelsPerDay } from '../layout';
+import { HEADER_HEIGHT, ROW_HEIGHT, dateRangeWidth, dateToPixel, pixelsPerDay } from '../layout';
 import { renderGrid } from './grid';
 
 /** Bar fill colors by load band. */
@@ -28,7 +35,7 @@ export function renderResourceLoad(
 ): void {
   const { zoom, originDate, scrollLeft, viewportWidth, viewportHeight } = scene;
   const pxPerDay = pixelsPerDay(zoom);
-  const barWidth = Math.max(2, pxPerDay - 1);
+  const dayBarWidth = Math.max(2, pxPerDay - 1);
 
   // Reuse the task-view grid (time axis, holidays, header labels) by handing
   // it a minimal Scene projection. renderGrid reads only the fields below.
@@ -48,7 +55,9 @@ export function renderResourceLoad(
   };
   renderGrid(ctx, gridScene, theme);
 
-  // Row virtualization: only draw rows intersecting the viewport.
+  // Row virtualization: only draw rows intersecting the viewport. Rows carry
+  // their own global yIndex; since the array is dense and 0-indexed, the loop
+  // index == yIndex, but we read row.yIndex for positioning to stay robust.
   const firstRow = Math.max(0, Math.floor(scene.scrollTop / ROW_HEIGHT));
   const lastRow = Math.min(
     scene.rows.length - 1,
@@ -58,8 +67,23 @@ export function renderResourceLoad(
   for (let r = firstRow; r <= lastRow; r++) {
     const row = scene.rows[r];
     if (!row) continue;
-    const rowTop = HEADER_HEIGHT + r * ROW_HEIGHT - scene.scrollTop;
+    const rowTop = HEADER_HEIGHT + row.yIndex * ROW_HEIGHT - scene.scrollTop;
     const rowBottom = rowTop + ROW_HEIGHT;
+
+    if (row.kind === 'task') {
+      renderTaskLane(ctx, row, {
+        zoom,
+        originDate,
+        scrollLeft,
+        viewportWidth,
+        rowTop,
+        selected: scene.selectedTaskIdInResource === row.taskId,
+        theme,
+      });
+      continue;
+    }
+
+    // --- Resource row (kind: 'resource') ---
     const capacity = row.capacity;
     const selected = scene.selectedResourceId === row.id;
 
@@ -87,7 +111,7 @@ export function renderResourceLoad(
     // Load bars.
     for (const bar of row.bars) {
       const x = dateToPixel(bar.date, originDate, zoom) - scrollLeft;
-      if (x + barWidth < 0 || x > viewportWidth) continue;
+      if (x + dayBarWidth < 0 || x > viewportWidth) continue;
       // Absolute scale: the cell height represents 100% load regardless of the
       // resource's capacity, so the bar can NEVER exceed the row vertically.
       // (Previously height was scaled by capacity + a stacked red spike, which
@@ -98,7 +122,7 @@ export function renderResourceLoad(
       const overload = bar.load > 100 * capacity; // capacity only affects the color threshold
       ctx.fillStyle = overload ? RED : GREEN;
       ctx.globalAlpha = 0.85;
-      ctx.fillRect(x + 0.5, rowBottom - 3 - barH, barWidth, barH);
+      ctx.fillRect(x + 0.5, rowBottom - 3 - barH, dayBarWidth, barH);
       ctx.globalAlpha = 1;
 
       // R4.1: load percentage label — anchored at the TOP INSIDE of the bar:
@@ -106,14 +130,81 @@ export function renderResourceLoad(
       // bar's top edge, not the row baseline), so low-capacity resources don't
       // drop the label to the bottom. White reads on both green and red fills
       // (only drawn when the bar is wide enough).
-      if (barWidth >= 20) {
+      if (dayBarWidth >= 20) {
         ctx.fillStyle = '#fff';
         ctx.font = '9px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         const barTop = rowBottom - 3 - barH;
-        ctx.fillText(`${Math.round(bar.load)}%`, x + barWidth / 2, barTop + 2);
+        ctx.fillText(`${Math.round(bar.load)}%`, x + dayBarWidth / 2, barTop + 2);
       }
     }
+  }
+}
+
+/** Draw a single task-lane row: a load-colored rectangle over [start, end]. */
+function renderTaskLane(
+  ctx: CanvasRenderingContext2D,
+  row: Extract<ResourceScene['rows'][number], { kind: 'task' }>,
+  opts: {
+    zoom: ResourceScene['zoom'];
+    originDate: string;
+    scrollLeft: number;
+    viewportWidth: number;
+    rowTop: number;
+    selected: boolean;
+    theme: ThemeColors;
+  },
+): void {
+  const { zoom, originDate, scrollLeft, viewportWidth, rowTop, selected, theme } = opts;
+
+  // Selection highlight band (mirrors resource-row selection).
+  if (selected) {
+    ctx.fillStyle = theme.primary;
+    ctx.globalAlpha = 0.08;
+    ctx.fillRect(0, rowTop, viewportWidth, ROW_HEIGHT);
+    ctx.globalAlpha = 1;
+  }
+
+  if (row.isMilestone) {
+    // Milestone: draw a diamond marker at the start date instead of a span.
+    const cx = dateToPixel(row.start, originDate, zoom) - scrollLeft + pixelsPerDay(zoom) / 2;
+    const cy = rowTop + ROW_HEIGHT / 2;
+    const half = 5;
+    ctx.fillStyle = theme.warning;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - half);
+    ctx.lineTo(cx + half, cy);
+    ctx.lineTo(cx, cy + half);
+    ctx.lineTo(cx - half, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  const x = dateToPixel(row.start, originDate, zoom) - scrollLeft;
+  const w = Math.max(2, dateRangeWidth(row.start, row.end, zoom));
+  if (x + w < 0 || x > viewportWidth) return;
+
+  // Fill the lane rectangle with the load-band color (green ≤ cap, red > cap).
+  const padY = 5;
+  const rectTop = rowTop + padY;
+  const rectH = ROW_HEIGHT - padY * 2;
+  const overload = row.load > 100 * row.capacity;
+  ctx.fillStyle = overload ? RED : GREEN;
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(x + 0.5, rectTop, w, rectH);
+  ctx.globalAlpha = 1;
+
+  // load% label inside the rectangle (white reads on both fills), only when the
+  // rectangle is wide enough — mirrors the daily-bar label policy.
+  if (w >= 24) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '9px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${Math.round(row.load)}%`, x + 6, rowTop + ROW_HEIGHT / 2);
   }
 }

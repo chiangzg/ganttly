@@ -22,12 +22,14 @@
  * the task view. Vertical scroll state still lives in `useViewStore` and both
  * panes render offset by the same value.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore, setViewStateCommand } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { assembleResourceScene, originDateFor, chartEndDate } from '@/engine/scene';
 import { renderResourceLoad, resolveThemeColors } from '@/engine/render';
 import { todayISO, dateRangeWidth, ROW_HEIGHT } from '@/engine/layout';
+import { buildTree } from '@/engine/scene/tree';
+import { tasksByResource } from '@/lib/resourceTasks';
 import { PAN_THRESHOLD } from '@/engine/interaction';
 import { cn } from '@/lib/cn';
 import type { ZoomLevel } from '@ganttly/schema';
@@ -50,6 +52,8 @@ export function ResourceLoadCanvas() {
   const resourceScrollTop = useViewStore((s) => s.resourceScrollTop);
   const setResourceScrollTop = useViewStore((s) => s.setResourceScrollTop);
   const selectedResourceId = useViewStore((s) => s.selectedResourceId);
+  const expandedResourceIds = useViewStore((s) => s.expandedResourceIds);
+  const selectedTaskIdInResource = useViewStore((s) => s.selectedTaskIdInResource);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -97,6 +101,11 @@ export function ResourceLoadCanvas() {
     }
   };
 
+  // Latest scene row count, kept in a ref so the spacer height (rendered
+  // outside this effect) stays in sync with the flattened rows the renderer
+  // actually sees (resources + expanded task lanes).
+  const rowCountRef = useRef(0);
+
   // Render whenever inputs that affect the picture change.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -110,7 +119,10 @@ export function ResourceLoadCanvas() {
       today: todayISO(),
       scrollTop: resourceScrollTop,
       selectedResourceId,
+      expandedResourceIds,
+      selectedTaskIdInResource,
     });
+    rowCountRef.current = scene.rows.length;
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(size.width * dpr);
@@ -122,7 +134,14 @@ export function ResourceLoadCanvas() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size.width, size.height);
     renderResourceLoad(ctx, scene, resolveThemeColors());
-  }, [file, size, resourceScrollTop, selectedResourceId]);
+  }, [
+    file,
+    size,
+    resourceScrollTop,
+    selectedResourceId,
+    expandedResourceIds,
+    selectedTaskIdInResource,
+  ]);
 
   // Native non-passive wheel listener: React's onWheel is passive on some
   // browsers, so we attach our own to support trackpad/mouse panning with
@@ -206,6 +225,27 @@ export function ResourceLoadCanvas() {
   const chartWidth = dateRangeWidth(origin, end, file.viewState.zoom);
   const totalWidth = Math.max(chartWidth + size.width, size.width + 100);
 
+  // Total flattened row count (resources + expanded task lanes). MUST match
+  // ResourceList's computation so both panes share identical total height and
+  // the vertical scrollbar/thumb stays aligned with the content.
+  const rowCount = useMemo(() => {
+    const tree = buildTree(file.tasks);
+    const childSet = new Set<string>();
+    const walk = (nodes: ReadonlyArray<(typeof tree)[number]>): void => {
+      for (const n of nodes) {
+        if (n.children.length > 0) childSet.add(n.task.id);
+        walk(n.children);
+      }
+    };
+    walk(tree);
+    const map = tasksByResource(file.tasks, (id) => childSet.has(id));
+    let count = file.resources.length;
+    for (const r of file.resources) {
+      if (expandedResourceIds.has(r.id)) count += map.get(r.id)?.length ?? 0;
+    }
+    return count;
+  }, [file.tasks, file.resources, expandedResourceIds]);
+
   return (
     <div
       ref={wrapRef}
@@ -225,7 +265,7 @@ export function ResourceLoadCanvas() {
           scrollbar lives in ResourceList on the left, mirroring TaskTable.) */}
       <div
         className="pointer-events-none absolute inset-0"
-        style={{ height: Math.max(file.resources.length * ROW_HEIGHT, 0) }}
+        style={{ height: Math.max(rowCount * ROW_HEIGHT, 0) }}
       />
       <canvas
         ref={canvasRef}

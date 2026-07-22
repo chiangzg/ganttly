@@ -53,6 +53,8 @@ export const en = {
     placeholderName: 'Resource name',
     add: 'Add resource',
     delete: 'Delete resource',
+    expand: 'Expand tasks',
+    collapse: 'Collapse tasks',
   },
   drawer: {
     title: 'Edit task',

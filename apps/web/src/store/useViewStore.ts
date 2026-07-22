@@ -11,6 +11,9 @@
  *   scrollTop would land the wrong row on view switch.
  * - Resource-view selection — G19: independent of `file.viewState.selectedTaskId`;
  *   switching views does not clear the other's selection.
+ * - Resource-view drill-down (which resources are expanded, and which drilled
+ *   task lane is highlighted) — G11/G19: ephemeral, independent of the task
+ *   view's selection.
  *
  * Persisted view state (zoom, scroll, selection) lives in the project file's
  * `viewState` field instead.
@@ -42,6 +45,23 @@ interface ViewStoreState {
   selectedResourceId: string | null;
   setSelectedResourceId(id: string | null): void;
 
+  /**
+   * Resource-view drill-down: expanded resources. Drilling down inserts task
+   * lanes beneath the resource row (left list + right canvas align by row).
+   * Ephemeral (G11): not persisted, not in the undo stack.
+   */
+  expandedResourceIds: Set<string>;
+  toggleResourceExpanded(resourceId: string): void;
+
+  /**
+   * Selected task lane within the resource view (G19: independent of
+   * `file.viewState.selectedTaskId`, so highlighting a lane here does not
+   * affect the task view). Double-clicking a lane opens the drawer, which
+   * reads `selectedTaskId`, so that is set separately at open time.
+   */
+  selectedTaskIdInResource: string | null;
+  setSelectedTaskIdInResource(id: string | null): void;
+
   /** Show the person-days column in TaskTable (G11: ephemeral, not persisted). */
   showCostColumns: boolean;
   setShowCostColumns(v: boolean): void;
@@ -64,6 +84,18 @@ export const useViewStore = create<ViewStoreState>((set) => ({
 
   selectedResourceId: null,
   setSelectedResourceId: (id) => set({ selectedResourceId: id }),
+
+  expandedResourceIds: new Set<string>(),
+  toggleResourceExpanded: (resourceId) =>
+    set((s) => {
+      const next = new Set(s.expandedResourceIds);
+      if (next.has(resourceId)) next.delete(resourceId);
+      else next.add(resourceId);
+      return { expandedResourceIds: next };
+    }),
+
+  selectedTaskIdInResource: null,
+  setSelectedTaskIdInResource: (id) => set({ selectedTaskIdInResource: id }),
 
   showCostColumns: false,
   setShowCostColumns: (v) => set({ showCostColumns: v }),

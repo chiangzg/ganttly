@@ -25,6 +25,7 @@ const THEME: ThemeColors = {
   accent: '#06b6d4',
   danger: '#ef4444',
   nonWorking: '#f5f5f5',
+  warning: '#d97706',
   taskBar: '#3b82f6',
   taskProgress: '#1d4ed8',
   critical: '#dc2626',
@@ -95,13 +96,18 @@ function makeScene(opts: {
     holidays: [],
     rows: [
       {
+        kind: 'resource',
+        yIndex: 0,
         id: 'r1',
         name: 'Alice',
         capacity: opts.capacity,
         bars: [{ resourceId: 'r1', date, load: opts.load }],
+        expanded: false,
+        taskCount: 0,
       },
     ],
     selectedResourceId: null,
+    selectedTaskIdInResource: null,
   };
 }
 
