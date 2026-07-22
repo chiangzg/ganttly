@@ -11,46 +11,201 @@
     "id": "zh-CN",
     "weekStart": 1,
     "weekends": [0, 6],
-    "workingHours": { "start": "09:00", "end": "18:00" },
+    "workingHours": {
+      "start": "09:00",
+      "end": "18:00"
+    },
     "holidays": [
-      { "date": "2026-01-01", "name": "元旦", "type": "holiday" },
-      { "date": "2026-01-02", "name": "元旦", "type": "holiday" },
-      { "date": "2026-01-03", "name": "元旦", "type": "holiday" },
-      { "date": "2026-02-15", "name": "春节", "type": "holiday" },
-      { "date": "2026-02-16", "name": "春节（除夕）", "type": "holiday" },
-      { "date": "2026-02-17", "name": "春节（正月初一）", "type": "holiday" },
-      { "date": "2026-02-18", "name": "春节", "type": "holiday" },
-      { "date": "2026-02-19", "name": "春节", "type": "holiday" },
-      { "date": "2026-02-20", "name": "春节", "type": "holiday" },
-      { "date": "2026-02-21", "name": "春节", "type": "holiday" },
-      { "date": "2026-02-22", "name": "春节", "type": "holiday" },
-      { "date": "2026-02-14", "name": "春节调休上班", "type": "working" },
-      { "date": "2026-02-28", "name": "春节调休上班", "type": "working" },
-      { "date": "2026-04-04", "name": "清明节", "type": "holiday" },
-      { "date": "2026-04-05", "name": "清明节", "type": "holiday" },
-      { "date": "2026-04-06", "name": "清明节", "type": "holiday" },
-      { "date": "2026-05-01", "name": "劳动节", "type": "holiday" },
-      { "date": "2026-05-02", "name": "劳动节", "type": "holiday" },
-      { "date": "2026-05-03", "name": "劳动节", "type": "holiday" },
-      { "date": "2026-05-04", "name": "劳动节", "type": "holiday" },
-      { "date": "2026-05-05", "name": "劳动节", "type": "holiday" },
-      { "date": "2026-04-26", "name": "劳动节调休上班", "type": "working" },
-      { "date": "2026-06-19", "name": "端午节", "type": "holiday" },
-      { "date": "2026-06-20", "name": "端午节", "type": "holiday" },
-      { "date": "2026-06-21", "name": "端午节", "type": "holiday" },
-      { "date": "2026-09-25", "name": "中秋节", "type": "holiday" },
-      { "date": "2026-09-26", "name": "中秋节", "type": "holiday" },
-      { "date": "2026-09-27", "name": "中秋节", "type": "holiday" },
-      { "date": "2026-10-01", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-02", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-03", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-04", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-05", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-06", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-07", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-10-08", "name": "国庆节", "type": "holiday" },
-      { "date": "2026-09-19", "name": "国庆节调休上班", "type": "working" },
-      { "date": "2026-10-10", "name": "国庆节调休上班", "type": "working" }
+      {
+        "date": "2026-01-01",
+        "name": "元旦",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-01-02",
+        "name": "元旦",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-01-03",
+        "name": "元旦",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-15",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-16",
+        "name": "春节（除夕）",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-17",
+        "name": "春节（正月初一）",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-18",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-19",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-20",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-21",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-22",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-14",
+        "name": "春节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-02-28",
+        "name": "春节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-04-04",
+        "name": "清明节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-04-05",
+        "name": "清明节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-04-06",
+        "name": "清明节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-01",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-02",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-03",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-04",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-05",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-04-26",
+        "name": "劳动节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-06-19",
+        "name": "端午节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-06-20",
+        "name": "端午节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-06-21",
+        "name": "端午节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-25",
+        "name": "中秋节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-26",
+        "name": "中秋节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-27",
+        "name": "中秋节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-01",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-02",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-03",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-04",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-05",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-06",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-07",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-08",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-19",
+        "name": "国庆节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-10-10",
+        "name": "国庆节调休上班",
+        "type": "working"
+      }
     ]
   },
   "tasks": [
@@ -65,9 +220,14 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     },
     {
       "id": "m0-mono",
@@ -80,7 +240,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -94,8 +257,17 @@
       "duration": 1,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m0-mono", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m0-mono",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -109,8 +281,17 @@
       "duration": 2,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m0-schema", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m0-schema",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -124,10 +305,21 @@
       "duration": 10,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m0", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m0",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     },
     {
       "id": "m1-data",
@@ -140,7 +332,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -154,8 +349,17 @@
       "duration": 5,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m1-data", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m1-data",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -169,8 +373,17 @@
       "duration": 3,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m1-engine", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m1-engine",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -184,10 +397,21 @@
       "duration": 10,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m1", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m1",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     },
     {
       "id": "m2-wbs",
@@ -200,7 +424,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -214,8 +441,17 @@
       "duration": 4,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m2-wbs", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m2-wbs",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -229,8 +465,17 @@
       "duration": 2,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m2-deps", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m2-deps",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -244,10 +489,21 @@
       "duration": 10,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m2", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m2",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     },
     {
       "id": "m3-cpm",
@@ -260,7 +516,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -274,8 +533,17 @@
       "duration": 5,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m3-cpm", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m3-cpm",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -289,10 +557,21 @@
       "duration": 5,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m3", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m3",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     },
     {
       "id": "m4-io",
@@ -305,7 +584,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -319,8 +601,17 @@
       "duration": 3,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m4-io", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m4-io",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -334,10 +625,21 @@
       "duration": 1,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m4", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m4",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     },
     {
       "id": "m5-undo",
@@ -350,7 +652,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -364,8 +669,17 @@
       "duration": 1,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m5-undo", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m5-undo",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -379,8 +693,17 @@
       "duration": 3,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m5-tooltip", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m5-tooltip",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -394,8 +717,17 @@
       "duration": 2,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m5-screenshots", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m5-screenshots",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -409,8 +741,17 @@
       "duration": 2,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m5-arrows", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m5-arrows",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -425,7 +766,10 @@
       "progress": 100,
       "isMilestone": false,
       "dependencies": [],
-      "constraints": {},
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -439,8 +783,17 @@
       "duration": 2,
       "progress": 100,
       "isMilestone": false,
-      "dependencies": [{ "targetId": "m5-interactions", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m5-interactions",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
       "customFields": {}
     },
@@ -454,10 +807,21 @@
       "duration": 0,
       "progress": 100,
       "isMilestone": true,
-      "dependencies": [{ "targetId": "m5", "type": "FS", "lag": 0 }],
-      "constraints": {},
+      "dependencies": [
+        {
+          "targetId": "m5",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none",
+        "date": null
+      },
       "assignments": [],
-      "customFields": { "status": "done" }
+      "customFields": {
+        "status": "done"
+      }
     }
   ],
   "resources": [],
