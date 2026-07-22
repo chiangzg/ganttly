@@ -32,6 +32,8 @@ import { buildTree } from '@/engine/scene/tree';
 import { tasksByResource } from '@/lib/resourceTasks';
 import { PAN_THRESHOLD } from '@/engine/interaction';
 import { cn } from '@/lib/cn';
+import { useHolidayHover } from '@/components/useHolidayHover';
+import type { ResourceScene } from '@/engine/render/types';
 import type { ZoomLevel } from '@ganttly/schema';
 
 /** Active drag interaction on the canvas. */
@@ -58,6 +60,29 @@ export function ResourceLoadCanvas() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const dragRef = useRef<DragState>({ kind: 'idle' });
+
+  // Keep a fresh scene ref so the holiday hover handler can read the latest
+  // scene (zoom/origin/scroll/holidays) without re-binding the pointer handler.
+  const sceneRef = useRef<ResourceScene | null>(null);
+
+  // Holiday hover tooltip — shared with the task view (PRD §3.5, §7.3).
+  const {
+    onHoverMove,
+    clearHover,
+    tooltip: holidayTooltip,
+  } = useHolidayHover({
+    getSceneFields: () => {
+      const scene = sceneRef.current;
+      if (!scene) return null;
+      return {
+        scrollLeft: scene.scrollLeft,
+        originDate: scene.originDate,
+        zoom: scene.zoom,
+        holidays: scene.holidays,
+      };
+    },
+    viewportWidth: size.width,
+  });
 
   // Latest file/scrollTop kept in refs so the once-bound native wheel listener
   // and pointer handlers can read current state without going stale or being
@@ -123,7 +148,7 @@ export function ResourceLoadCanvas() {
       selectedTaskIdInResource,
     });
     rowCountRef.current = scene.rows.length;
-
+    sceneRef.current = scene;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(size.width * dpr);
     canvas.height = Math.floor(size.height * dpr);
@@ -192,10 +217,16 @@ export function ResourceLoadCanvas() {
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current.kind !== 'pan') return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // When idle, detect holiday hover for the tooltip (PRD §3.5).
+    if (dragRef.current.kind === 'idle') {
+      onHoverMove(x, y);
+      return;
+    }
+
     const dx = x - dragRef.current.startX;
     const dy = y - dragRef.current.startY;
     if (!dragRef.current.engaged) {
@@ -259,6 +290,9 @@ export function ResourceLoadCanvas() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onPointerLeave={() => {
+        clearHover();
+      }}
     >
       {/* Spacer reserves the full vertical scroll height so the store-driven
           scrollTop stays clamped to real content height. (The visible vertical
@@ -272,6 +306,7 @@ export function ResourceLoadCanvas() {
         className="pointer-events-none absolute inset-0"
         style={{ width: size.width, height: size.height }}
       />
+      {holidayTooltip}
       {/* Horizontal scroll shim — mirrors GanttCanvas's ScrollShim; keeps the
           thumb in sync with the store (incl. Today button / wheel pan) via the
           userScrolling guard to avoid feedback loops. */}

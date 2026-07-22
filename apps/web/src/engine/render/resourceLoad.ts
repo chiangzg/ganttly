@@ -23,6 +23,7 @@
 import type { ResourceScene, Scene, ThemeColors } from './types';
 import { HEADER_HEIGHT, ROW_HEIGHT, dateRangeWidth, dateToPixel, pixelsPerDay } from '../layout';
 import { renderGrid } from './grid';
+import { renderTodayLine } from './overlay';
 
 /** Bar fill colors by load band. */
 const GREEN = '#22c55e'; // ≤100% — within capacity
@@ -54,6 +55,9 @@ export function renderResourceLoad(
     selectedTaskId: null,
   };
   renderGrid(ctx, gridScene, theme);
+  // Today line (PRD §3.10) — keep it visible in the resource view too, over the
+  // grid but under the load bars, mirroring renderScene's layer order.
+  renderTodayLine(ctx, gridScene, theme);
 
   // Row virtualization: only draw rows intersecting the viewport. Rows carry
   // their own global yIndex; since the array is dense and 0-indexed, the loop
