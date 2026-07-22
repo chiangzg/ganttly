@@ -4,8 +4,10 @@
  * Draws per-resource load bars across the same time axis as the Gantt view
  * (shared ZoomLevel + layout coordinates — Q4: zero new pxPerDay duplication).
  * For each working day a resource is loaded, a vertical bar fills from the row
- * baseline upward proportional to load%. Bars are green ≤100% (capacity) and
- * red >100% (overload). The 100% capacity line is drawn per row as a reference.
+ * baseline upward proportional to load% (absolute scale: the cell height = 100%
+ * load, so a bar never exceeds its row). Bars are green when within capacity
+ * (load ≤ 100×capacity) and red when overloaded. The 100% capacity line is drawn
+ * per row as a reference.
  *
  * The grid background + header is reused from `renderGrid` by constructing a
  * minimal Scene view (grid only reads zoom/origin/scroll/holidays), keeping
@@ -86,29 +88,31 @@ export function renderResourceLoad(
     for (const bar of row.bars) {
       const x = dateToPixel(bar.date, originDate, zoom) - scrollLeft;
       if (x + barWidth < 0 || x > viewportWidth) continue;
-      const ratio = Math.min(bar.load / 100, 1.5); // cap visual at 150%
-      const barH = fullBarHeight * Math.min(ratio, capacity);
-      const overload = bar.load > 100 * capacity;
+      // Absolute scale: the cell height represents 100% load regardless of the
+      // resource's capacity, so the bar can NEVER exceed the row vertically.
+      // (Previously height was scaled by capacity + a stacked red spike, which
+      // overflowed the cell at capacity≈1.0 and visually shrank bars for
+      // part-time resources — and divided by zero at capacity=0.)
+      const ratio = Math.min(bar.load / 100, 1); // height caps at 100% load = cell top
+      const barH = fullBarHeight * ratio; // ≤ fullBarHeight, always fits the cell
+      const overload = bar.load > 100 * capacity; // capacity only affects the color threshold
       ctx.fillStyle = overload ? RED : GREEN;
       ctx.globalAlpha = 0.85;
       ctx.fillRect(x + 0.5, rowBottom - 3 - barH, barWidth, barH);
-      // Overload spike: the portion above capacity in solid red.
-      if (overload) {
-        const overloadRatio = Math.min((bar.load / 100 - capacity) / capacity, 0.5);
-        const oh = fullBarHeight * capacity * overloadRatio;
-        ctx.globalAlpha = 1;
-        ctx.fillRect(x + 0.5, rowBottom - 3 - barH - oh, barWidth, oh);
-      }
       ctx.globalAlpha = 1;
 
-      // R4.1: load percentage label above the bar (only when wide enough).
+      // R4.1: load percentage label — anchored at the TOP INSIDE of the bar:
+      // it stays inside the bar and rides up as the bar grows (anchored to the
+      // bar's top edge, not the row baseline), so low-capacity resources don't
+      // drop the label to the bottom. White reads on both green and red fills
+      // (only drawn when the bar is wide enough).
       if (barWidth >= 20) {
-        ctx.fillStyle = overload ? RED : theme.fgMuted;
+        ctx.fillStyle = '#fff';
         ctx.font = '9px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        const labelY = rowBottom - 3 - barH - (overload ? 10 : 2);
-        ctx.fillText(`${Math.round(bar.load)}%`, x + barWidth / 2, labelY);
+        ctx.textBaseline = 'top';
+        const barTop = rowBottom - 3 - barH;
+        ctx.fillText(`${Math.round(bar.load)}%`, x + barWidth / 2, barTop + 2);
       }
     }
   }
