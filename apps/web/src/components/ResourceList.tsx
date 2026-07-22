@@ -28,6 +28,7 @@ import { useViewStore } from '@/store/useViewStore';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 import { buildTree } from '@/engine/scene/tree';
 import { tasksByResource } from '@/lib/resourceTasks';
+import { computeAssignmentPersonDays } from '@/lib/cost';
 import { cn } from '@/lib/cn';
 import { nanoid } from 'nanoid';
 import { useTranslation } from 'react-i18next';
@@ -36,6 +37,13 @@ const TABLE_WIDTH = 280;
 const GRID_TEMPLATE = 'minmax(0, 1fr) 80px 56px 28px';
 /** Task-lane grid: expand arrow | WBS | name | duration | progress. */
 const TASK_GRID_TEMPLATE = '20px 44px minmax(0, 1fr) 52px 44px';
+/**
+ * Task-lane grid with the person-days column inserted between duration and
+ * progress (mirrors TaskTable's effort column placement). The resource-row
+ * grid (GRID_TEMPLATE) is unaffected — only drilled-down task lanes get the
+ * column, consistent with how TaskTable shows it per task row.
+ */
+const TASK_GRID_TEMPLATE_WITH_EFFORT = '20px 44px minmax(0, 1fr) 52px 52px 44px';
 
 export function ResourceList() {
   const { t } = useTranslation();
@@ -50,6 +58,8 @@ export function ResourceList() {
   const selectedTaskIdInResource = useViewStore((s) => s.selectedTaskIdInResource);
   const setSelectedTaskIdInResource = useViewStore((s) => s.setSelectedTaskIdInResource);
   const openDrawer = useViewStore((s) => s.openDrawer);
+  const showCostColumns = useViewStore((s) => s.showCostColumns);
+  const taskGridTemplate = showCostColumns ? TASK_GRID_TEMPLATE_WITH_EFFORT : TASK_GRID_TEMPLATE;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Leaf-task reverse lookup (consistent with computeResourceLoad's leaf rule).
@@ -255,7 +265,7 @@ export function ResourceList() {
                 style={{
                   height: ROW_HEIGHT,
                   transform: `translateY(${y}px)`,
-                  gridTemplateColumns: TASK_GRID_TEMPLATE,
+                  gridTemplateColumns: taskGridTemplate,
                 }}
                 className={cn(
                   'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
@@ -276,6 +286,14 @@ export function ResourceList() {
                 <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
                   {task.isMilestone ? '—' : `${task.duration}d`}
                 </div>
+                {showCostColumns && (
+                  <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
+                    {(() => {
+                      const pd = computeAssignmentPersonDays(task, row.resourceId, file.resources);
+                      return pd > 0 ? `${pd}` : '—';
+                    })()}
+                  </div>
+                )}
                 <div className="px-1 text-right tabular-nums text-fg-muted">{task.progress}%</div>
               </div>
             );

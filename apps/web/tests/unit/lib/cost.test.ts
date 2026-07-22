@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTaskPersonDays, totalPersonDays } from '@/lib/cost';
+import { computeTaskPersonDays, computeAssignmentPersonDays, totalPersonDays } from '@/lib/cost';
 import { computeAllRollups, computeRollup } from '@/lib/summary';
 import type { Task, Resource } from '@ganttly/schema';
 
@@ -67,6 +67,54 @@ describe('computeTaskPersonDays', () => {
       assignments: [{ resourceId: 'r3', load: 100 }],
     });
     expect(computeTaskPersonDays(task, [noCap])).toBe(10);
+  });
+});
+
+describe('computeAssignmentPersonDays', () => {
+  it('returns 0 when the resource is not assigned to the task', () => {
+    const task = makeTask('t1', {
+      duration: 10,
+      assignments: [{ resourceId: 'r1', load: 50 }],
+    });
+    expect(computeAssignmentPersonDays(task, 'r2', [fullTime, halfTime])).toBe(0);
+  });
+
+  it('computes the single resource share (load% × capacity × duration)', () => {
+    // 50% × 1.0 × 10 days = 5 person-days
+    const task = makeTask('t1', {
+      duration: 10,
+      assignments: [{ resourceId: 'r1', load: 50 }],
+    });
+    expect(computeAssignmentPersonDays(task, 'r1', [fullTime])).toBe(5);
+  });
+
+  it('isolates one resource from a multi-assignment task', () => {
+    // A: 50% × 1.0 × 10 = 5; B: 100% × 0.5 × 10 = 5 (task total 10)
+    const task = makeTask('t1', {
+      duration: 10,
+      assignments: [
+        { resourceId: 'r1', load: 50 },
+        { resourceId: 'r2', load: 100 },
+      ],
+    });
+    expect(computeAssignmentPersonDays(task, 'r1', [fullTime, halfTime])).toBe(5);
+    expect(computeAssignmentPersonDays(task, 'r2', [fullTime, halfTime])).toBe(5);
+  });
+
+  it('respects resource capacity and defaults missing capacity to 1.0', () => {
+    const task = makeTask('t1', {
+      duration: 10,
+      assignments: [{ resourceId: 'r2', load: 100 }],
+    });
+    // halfTime (capacity 0.5): 1.0 × 0.5 × 10 = 5
+    expect(computeAssignmentPersonDays(task, 'r2', [halfTime])).toBe(5);
+    const noCap: Resource = { id: 'r3', name: 'C' };
+    const task2 = makeTask('t2', {
+      duration: 10,
+      assignments: [{ resourceId: 'r3', load: 100 }],
+    });
+    // missing capacity → 1.0: 1.0 × 1.0 × 10 = 10
+    expect(computeAssignmentPersonDays(task2, 'r3', [noCap])).toBe(10);
   });
 });
 

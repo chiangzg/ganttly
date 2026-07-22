@@ -64,6 +64,37 @@ test.describe('person-days column', () => {
     await page.getByRole('button', { name: '人天列' }).click();
     await page.waitForTimeout(300);
   });
+
+  test('resource-view drill-down shows per-resource person-days in task lanes', async ({
+    page,
+  }) => {
+    // Switch to resource view, where Alice (r1) carries task "开发" at 50% load.
+    await page.getByRole('button', { name: '资源视图' }).click();
+    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+
+    // Enable the person-days column — it must take effect in the resource view.
+    await page.getByRole('button', { name: '人天列' }).click();
+    await page.waitForTimeout(200);
+
+    // Drill down Alice to reveal her task lane.
+    const aliceRow = page
+      .locator('[role="row"]')
+      .filter({ has: page.locator('input[value="Alice"]') });
+    await aliceRow.locator('button', { hasText: '▶' }).click();
+    // The drilled-down task lane "开发" now appears beneath Alice's row.
+    const taskLane = page.locator('[role="row"]').filter({ hasText: '开发' });
+    await expect(taskLane).toBeVisible();
+
+    // r1: load=50%, capacity=1.0, duration=5 → 0.5 × 1.0 × 5 = 2.5 person-days
+    // for THIS resource on this task. Scope the assertion to the task lane so
+    // it isn't confused by the StatusBar's project-total "2.5 人天".
+    await expect(taskLane.getByText('2.5')).toBeVisible({ timeout: 5000 });
+
+    // Toggle off — the column and its value disappear from the task lane.
+    await page.getByRole('button', { name: '人天列' }).click();
+    await page.waitForTimeout(200);
+    await expect(taskLane.getByText('2.5')).toHaveCount(0);
+  });
 });
 
 test.describe('constraint editor', () => {

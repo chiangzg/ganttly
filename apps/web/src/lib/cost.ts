@@ -30,6 +30,26 @@ export function computeTaskPersonDays(task: Task, resources: ReadonlyArray<Resou
 }
 
 /**
+ * Person-days contributed by ONE resource on a task: the matching
+ * assignment's `load/100 × capacity × duration`, or 0 if the resource is not
+ * assigned. Used by the resource view's drill-down, where each task lane is
+ * scoped to a single resource (so the task-wide `computeTaskPersonDays` would
+ * over-count by including other assignees).
+ */
+export function computeAssignmentPersonDays(
+  task: Task,
+  resourceId: string,
+  resources: ReadonlyArray<Resource>,
+): number {
+  const assignment = task.assignments.find((a) => a.resourceId === resourceId);
+  if (!assignment) return 0;
+  const resource = resources.find((r) => r.id === resourceId);
+  const capacity = resource?.capacity ?? 1;
+  const pd = (assignment.load / 100) * capacity * task.duration;
+  return Math.round(pd * 100) / 100;
+}
+
+/**
  * Total person-days across all tasks in a project (sum of leaf-task effort).
  * Summary tasks contribute via their children, so this sums every leaf once.
  */
