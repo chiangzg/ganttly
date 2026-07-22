@@ -22,7 +22,14 @@ import {
 } from '@/store/useProjectStore';
 import { assembleScene, originDateFor, chartEndDate } from '@/engine/scene';
 import { renderScene, resolveThemeColors } from '@/engine/render';
-import { todayISO, dateRangeWidth, pixelToDate } from '@/engine/layout';
+import {
+  todayISO,
+  dateRangeWidth,
+  pixelToDate,
+  dateToPixel,
+  pixelsPerDay,
+  dayDiff,
+} from '@/engine/layout';
 import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
@@ -179,9 +186,9 @@ export function GanttCanvas() {
     if (!row) return;
 
     if (hit.kind === 'body') {
-      const barXStart = dateToPixelLocal(scene, row.start) - scene.scrollLeft;
+      const barXStart = dateToPixel(row.start, scene.originDate, scene.zoom) - scene.scrollLeft;
       const grabOffsetPx = x - barXStart;
-      const grabOffsetDays = Math.round(grabOffsetPx / pxPerDayLocal(scene.zoom));
+      const grabOffsetDays = Math.round(grabOffsetPx / pixelsPerDay(scene.zoom));
       dragRef.current = { kind: 'move', taskId: hit.taskId, grabOffsetDays };
       dragSnapshotRef.current = {
         taskId: hit.taskId,
@@ -314,7 +321,7 @@ export function GanttCanvas() {
       }
 
       const currentFile = useProjectStore.getState().file;
-      const finalDuration = durationOf(final.start, final.end);
+      const finalDuration = dayDiff(final.start, final.end) + 1;
       useProjectStore.setState({
         file: { ...currentFile, tasks: preDragTasks },
       });
@@ -449,27 +456,6 @@ function ScrollShim({ viewportWidth }: { viewportWidth: number }) {
   );
 }
 
-// ---- Local layout helpers (kept here to avoid a circular import) ----
-function dateToPixelLocal(scene: Scene, iso: string): number {
-  const [a, b, c] = scene.originDate.split('-').map(Number);
-  const [d, e, f] = iso.split('-').map(Number);
-  const ms = Date.UTC(d!, e! - 1, f!) - Date.UTC(a!, b! - 1, c!);
-  return Math.round(ms / 86_400_000) * pxPerDayLocal(scene.zoom);
-}
-
-function pxPerDayLocal(zoom: ZoomLevel): number {
-  const COLUMN_WIDTH = { day: 32, week: 140, month: 120, year: 80 } as const;
-  const DAYS_PER_COLUMN = { day: 1, week: 7, month: 30, year: 30 } as const;
-  return COLUMN_WIDTH[zoom] / DAYS_PER_COLUMN[zoom];
-}
-
-function durationOf(start: string, end: string): number {
-  const [a, b, c] = start.split('-').map(Number);
-  const [d, e, f] = end.split('-').map(Number);
-  const ms = Date.UTC(d!, e! - 1, f!) - Date.UTC(a!, b! - 1, c!);
-  return Math.max(0, Math.round(ms / 86_400_000) + 1);
-}
-
 /**
  * Apply a drag move to `draggedId` and cascade rollup to its ancestor summary
  * tasks. Returns a new tasks array; does not mutate the input. Used for the
@@ -488,7 +474,7 @@ function applyDragWithRollup(
           ...t,
           start: next.start,
           end: next.end,
-          duration: durationOf(next.start, next.end),
+          duration: dayDiff(next.start, next.end) + 1,
         }
       : t,
   );

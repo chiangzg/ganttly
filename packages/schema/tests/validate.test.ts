@@ -66,7 +66,7 @@ describe('validateGanttlyFile', () => {
       progress: 150,
       isMilestone: false,
       dependencies: [],
-      constraints: {},
+      constraints: { type: 'none' },
       assignments: [],
       customFields: {},
     };
@@ -88,7 +88,7 @@ describe('validateTask', () => {
     progress: 0,
     isMilestone: false,
     dependencies: [],
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
   };

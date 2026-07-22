@@ -18,7 +18,8 @@
  *   end   = max(children.end)
  *   duration = Σ(children.duration)
  */
-import type { Task } from '@ganttly/schema';
+import type { Task, Resource } from '@ganttly/schema';
+import { computeTaskPersonDays } from './cost';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,8 @@ export interface RollupResult {
   duration: number;
   /** 0-100, weighted average. */
   progress: number;
+  /** Sum of children person-days (P1 feature two — additive, NOT weighted). */
+  personDays: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +52,7 @@ export interface RollupResult {
 export function computeRollup(
   children: ReadonlyArray<Task>,
   rollupMap?: Map<string, RollupResult>,
+  resources: ReadonlyArray<Resource> = [],
 ): RollupResult | null {
   if (children.length === 0) return null;
 
@@ -59,6 +63,7 @@ export function computeRollup(
   let weightSum = 0;
   let allCompleteProgress = true;
   let simpleSum = 0;
+  let totalPersonDays = 0;
 
   for (const child of children) {
     // Time range
@@ -77,6 +82,14 @@ export function computeRollup(
     weightSum += weight;
     simpleSum += childProgress;
 
+    // Person-days: additive rollup. Summary children use their rolled-up value
+    // (already summed from grandchildren); leaf children compute their own.
+    // NOTE: this is pure addition — it must NOT interact with the weighted-
+    // average progress logic above (G9 risk #1).
+    totalPersonDays += childRollup
+      ? childRollup.personDays
+      : computeTaskPersonDays(child, resources);
+
     if (childProgress < 100) allCompleteProgress = false;
   }
 
@@ -91,7 +104,13 @@ export function computeRollup(
     progress = Math.round(weightedProgressSum / weightSum);
   }
 
-  return { start: minStart, end: maxEnd, duration: totalDuration, progress };
+  return {
+    start: minStart,
+    end: maxEnd,
+    duration: totalDuration,
+    progress,
+    personDays: Math.round(totalPersonDays * 100) / 100,
+  };
 }
 
 /**
@@ -224,7 +243,10 @@ export function recomputeSelfAndAncestors(
  * Post-order traversal ensures every summary is resolved after its children.
  * Used by the assembly layer for rendering summary bars.
  */
-export function computeAllRollups(tasks: ReadonlyArray<Task>): Map<string, RollupResult> {
+export function computeAllRollups(
+  tasks: ReadonlyArray<Task>,
+  resources: ReadonlyArray<Resource> = [],
+): Map<string, RollupResult> {
   const childrenOf = buildChildrenIndex(tasks);
   const rollupMap = new Map<string, RollupResult>();
 
@@ -243,7 +265,7 @@ export function computeAllRollups(tasks: ReadonlyArray<Task>): Map<string, Rollu
       visit(child.id);
     }
 
-    const rollup = computeRollup(children, rollupMap);
+    const rollup = computeRollup(children, rollupMap, resources);
     if (rollup) {
       rollupMap.set(taskId, rollup);
     }

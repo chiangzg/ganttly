@@ -42,6 +42,10 @@ export interface TaskRow {
   wbsNumber: string;
   isCritical?: boolean;
   isSummary?: boolean;
+  /** Scheduling constraint (P1 feature three). Present when type !== 'none'. */
+  constraint?: { type: string; date: string };
+  /** True when this task's constraint conflicts with its dependencies (G4). */
+  hasConstraintConflict?: boolean;
 }
 
 /** A dependency arrow in the rendered scene. */
@@ -56,6 +60,43 @@ export interface ArrowSpec {
   toX: number;
   toY: number;
   isCritical?: boolean;
+  /** True when the successor's constraint conflicts with this dependency (G4). */
+  isConflict?: boolean;
+}
+
+/** A single load bar for one resource on one date (P1 feature one). */
+export interface ResourceLoadBar {
+  resourceId: string;
+  /** ISO date this bar covers (one working day). */
+  date: string;
+  /** Total load 0-100+ for this resource on this date (>100 = overload). */
+  load: number;
+}
+
+/** A resource row in the resource-view scene (P1 feature one, G7). */
+export interface ResourceRow {
+  id: string;
+  name: string;
+  role?: string;
+  /** Capacity 0-1, default 1.0. Drives the 100% threshold line. */
+  capacity: number;
+  /** Load bars for this resource (one per working day with any load). */
+  bars: ResourceLoadBar[];
+}
+
+/** The complete immutable scene for the resource (load) view. */
+export interface ResourceScene {
+  zoom: ZoomLevel;
+  originDate: string;
+  scrollLeft: number;
+  scrollTop: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  today: string;
+  holidays: Holiday[];
+  /** Resource rows in display order. */
+  rows: ResourceRow[];
+  selectedResourceId: string | null;
 }
 
 /** The complete immutable scene passed to render functions. */

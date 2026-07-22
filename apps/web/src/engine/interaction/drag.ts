@@ -9,7 +9,15 @@
  * Geometry helpers are pure; the event wiring lives in the React component.
  */
 import type { Scene, TaskRow } from '../render/types';
-import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dateRangeWidth, pixelToDate } from '../layout';
+import {
+  HEADER_HEIGHT,
+  ROW_HEIGHT,
+  dateToPixel,
+  dateRangeWidth,
+  pixelToDate,
+  pixelsPerDay,
+  dayDiff,
+} from '../layout';
 import { addCalendarDays } from '@/lib/calendar';
 
 export type HitZone =
@@ -88,10 +96,10 @@ export function applyDrag(
   if (drag.kind === 'move') {
     // Days moved = round((cursorX - grabOffsetPx - barXStart) / pxPerDay)
     // Simpler: derive the bar's intended start from cursor + original offset.
-    const cursorDays = Math.round((cursorX + scene.scrollLeft) / pxPerDay(scene.zoom));
+    const cursorDays = Math.round((cursorX + scene.scrollLeft) / pixelsPerDay(scene.zoom));
     const newStartOffset = cursorDays - drag.grabOffsetDays;
     const newStartISO = addCalendarDays(scene.originDate, newStartOffset);
-    const duration = dayDelta(row.start, row.end) + 1; // inclusive
+    const duration = dayDiff(row.start, row.end) + 1; // inclusive
     const newEndISO = addCalendarDays(newStartISO, duration - 1);
     return { start: newStartISO, end: newEndISO };
   }
@@ -107,18 +115,3 @@ export function applyDrag(
   }
   return null;
 }
-
-function pxPerDay(zoom: Scene['zoom']): number {
-  const COLUMN_WIDTH = { day: 32, week: 140, month: 120, year: 80 } as const;
-  const DAYS_PER_COLUMN = { day: 1, week: 7, month: 30, year: 30 } as const;
-  return COLUMN_WIDTH[zoom] / DAYS_PER_COLUMN[zoom];
-}
-
-function dayDelta(startISO: string, endISO: string): number {
-  const [a, b, c] = startISO.split('-').map(Number);
-  const [d, e, f] = endISO.split('-').map(Number);
-  const ms = Date.UTC(d!, e! - 1, f!) - Date.UTC(a!, b! - 1, c!);
-  return Math.round(ms / 86_400_000);
-}
-
-void dateToPixel; // referenced via hitTest — keep import
