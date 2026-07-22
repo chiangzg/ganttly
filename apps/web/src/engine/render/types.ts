@@ -77,9 +77,11 @@ export interface ResourceLoadBar {
 /**
  * Rows in the resource-view scene (P1 feature one, G7).
  *
- * The flattened row list mixes two kinds of rows so the left list and the
+ * The flattened row list mixes three kinds of rows so the left list and the
  * right canvas can align pixel-for-pixel when a resource is drilled down:
  * - A `resource` row: the resource itself, with its per-day load bars.
+ * - A `task-header` row: the local header for task lanes beneath an expanded
+ *   resource (drawn by the left pane; the chart side stays empty).
  * - A `task` row (only present when the resource is expanded): one lane per
  *   leaf task mounted on the resource, used to draw the task's load bar.
  *
@@ -108,6 +110,12 @@ export interface ResourceSummaryRow extends ResourceRowBase {
   taskCount: number;
 }
 
+/** A local task-column header row shown inside an expanded resource group. */
+export interface ResourceTaskHeaderRow extends ResourceRowBase {
+  kind: 'task-header';
+  resourceId: string;
+}
+
 /** A task lane row, shown beneath its resource when expanded. */
 export interface ResourceTaskRow extends ResourceRowBase {
   kind: 'task';
@@ -128,7 +136,7 @@ export interface ResourceTaskRow extends ResourceRowBase {
   capacity: number;
 }
 
-export type ResourceRow = ResourceSummaryRow | ResourceTaskRow;
+export type ResourceRow = ResourceSummaryRow | ResourceTaskHeaderRow | ResourceTaskRow;
 
 /** The complete immutable scene for the resource (load) view. */
 export interface ResourceScene {

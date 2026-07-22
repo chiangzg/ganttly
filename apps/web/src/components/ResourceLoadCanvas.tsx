@@ -256,9 +256,9 @@ export function ResourceLoadCanvas() {
   const chartWidth = dateRangeWidth(origin, end, file.viewState.zoom);
   const totalWidth = Math.max(chartWidth + size.width, size.width + 100);
 
-  // Total flattened row count (resources + expanded task lanes). MUST match
-  // ResourceList's computation so both panes share identical total height and
-  // the vertical scrollbar/thumb stays aligned with the content.
+  // Total flattened row count (resources + local task headers + expanded task
+  // lanes). MUST match ResourceList's computation so both panes share
+  // identical total height and the vertical scrollbar/thumb stays aligned.
   const rowCount = useMemo(() => {
     const tree = buildTree(file.tasks);
     const childSet = new Set<string>();
@@ -272,7 +272,10 @@ export function ResourceLoadCanvas() {
     const map = tasksByResource(file.tasks, (id) => childSet.has(id));
     let count = file.resources.length;
     for (const r of file.resources) {
-      if (expandedResourceIds.has(r.id)) count += map.get(r.id)?.length ?? 0;
+      if (expandedResourceIds.has(r.id)) {
+        const taskCount = map.get(r.id)?.length ?? 0;
+        if (taskCount > 0) count += taskCount + 1; // local task header + lanes
+      }
     }
     return count;
   }, [file.tasks, file.resources, expandedResourceIds]);

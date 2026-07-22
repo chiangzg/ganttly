@@ -65,9 +65,7 @@ test.describe('person-days column', () => {
     await page.waitForTimeout(300);
   });
 
-  test('resource-view drill-down shows per-resource person-days in task lanes', async ({
-    page,
-  }) => {
+  test('resource-view drill-down shows per-resource person-days in task lanes', async ({ page }) => {
     // Switch to resource view, where Alice (r1) carries task "开发" at 50% load.
     await page.getByRole('button', { name: '资源视图' }).click();
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
@@ -75,12 +73,19 @@ test.describe('person-days column', () => {
     // Enable the person-days column — it must take effect in the resource view.
     await page.getByRole('button', { name: '人天列' }).click();
     await page.waitForTimeout(200);
+    const resourceList = page.locator('[data-resource-list]');
+    // Task columns belong to the expanded resource group, not the fixed
+    // resource summary header.
+    await expect(resourceList.getByText('工期', { exact: true })).toHaveCount(0);
+    await expect(resourceList.getByText('人天', { exact: true })).toHaveCount(0);
 
     // Drill down Alice to reveal her task lane.
     const aliceRow = page
       .locator('[role="row"]')
       .filter({ has: page.locator('input[value="Alice"]') });
     await aliceRow.locator('button', { hasText: '▶' }).click();
+    await expect(resourceList.getByText('工期', { exact: true })).toBeVisible();
+    await expect(resourceList.getByText('人天', { exact: true })).toBeVisible();
     // The drilled-down task lane "开发" now appears beneath Alice's row.
     const taskLane = page.locator('[role="row"]').filter({ hasText: '开发' });
     await expect(taskLane).toBeVisible();
@@ -94,6 +99,7 @@ test.describe('person-days column', () => {
     await page.getByRole('button', { name: '人天列' }).click();
     await page.waitForTimeout(200);
     await expect(taskLane.getByText('2.5')).toHaveCount(0);
+    await expect(resourceList.getByText('人天', { exact: true })).toHaveCount(0);
   });
 });
 

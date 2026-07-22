@@ -74,6 +74,23 @@ export function renderResourceLoad(
     const rowTop = HEADER_HEIGHT + row.yIndex * ROW_HEIGHT - scene.scrollTop;
     const rowBottom = rowTop + ROW_HEIGHT;
 
+    if (row.kind === 'task-header') {
+      // The column labels live in ResourceList. Keep the corresponding chart
+      // row visually quiet while preserving the shared row pitch/alignment.
+      ctx.fillStyle = theme.bgElevated;
+      ctx.globalAlpha = 0.72;
+      ctx.fillRect(0, rowTop, viewportWidth, ROW_HEIGHT);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = theme.border;
+      ctx.globalAlpha = 0.65;
+      ctx.beginPath();
+      ctx.moveTo(0, rowTop + 0.5);
+      ctx.lineTo(viewportWidth, rowTop + 0.5);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      continue;
+    }
+
     if (row.kind === 'task') {
       renderTaskLane(ctx, row, {
         zoom,

@@ -278,8 +278,9 @@ export interface AssembleResourceOptions {
  * Build the renderable `ResourceScene` for the resource (load) view.
  *
  * Mirrors `assembleScene`'s contract (origin/scroll/holidays reuse the same
- * time axis). The flattened `rows` list interleaves resource rows with their
- * expanded task lanes so the left list and right canvas stay pixel-aligned:
+ * time axis). The flattened `rows` list interleaves resource rows with a
+ * local task header and their expanded task lanes so the left list and right
+ * canvas stay pixel-aligned:
  * each entry carries a global `yIndex` used for `yIndex * ROW_HEIGHT` layout.
  * Resource rows keep their per-day load bars; task lanes carry the task's
  * date span + the resource's load on it for the lane rectangle.
@@ -332,7 +333,12 @@ export function assembleResourceScene(
     });
 
     // Drill-down task lanes (only when expanded).
-    if (expanded.has(r.id)) {
+    if (expanded.has(r.id) && resourceTasks.length > 0) {
+      rows.push({
+        kind: 'task-header',
+        yIndex: yIndex++,
+        resourceId: r.id,
+      });
       for (const t of resourceTasks) {
         const assignment = t.assignments.find((a) => a.resourceId === r.id);
         const node = nodeByTaskId.get(t.id);

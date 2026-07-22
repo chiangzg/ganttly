@@ -10,10 +10,11 @@
  * The right pane (ResourceLoadCanvas) reads `resourceScrollTop` and renders
  * with the same row pitch, exactly as GanttCanvas follows TaskTable.
  *
- * Drill-down: clicking a resource's expand arrow inserts task lanes beneath
- * it (WBS | name | duration | progress, indented). The flattened row list
- * (resources + expanded task lanes) drives BOTH this list and the canvas, so
- * both panes share identical total height and row indices.
+ * Drill-down: clicking a resource's expand arrow inserts a local task header
+ * and task lanes beneath it (WBS | name | duration | progress, indented). The
+ * flattened row list (resources + local task headers + expanded task lanes)
+ * drives BOTH this list and the canvas, so both panes share identical total
+ * height and row indices.
  */
 import { useEffect, useMemo, useRef } from 'react';
 import type { Task } from '@ganttly/schema';
@@ -33,15 +34,19 @@ import { cn } from '@/lib/cn';
 import { nanoid } from 'nanoid';
 import { useTranslation } from 'react-i18next';
 
-const TABLE_WIDTH = 280;
-const GRID_TEMPLATE = 'minmax(0, 1fr) 80px 56px 28px';
+// The fixed pane header describes resource summary rows. Expanded groups add
+// a second, local task header in the scrolling body. Keep the pane wide enough
+// for both sets of labels when the person-days column is enabled.
+const TABLE_WIDTH = 360;
+const TABLE_WIDTH_WITH_EFFORT = 420;
+const GRID_TEMPLATE = 'minmax(0, 1fr) 76px 64px 28px';
 /** Task-lane grid: expand arrow | WBS | name | duration | progress. */
 const TASK_GRID_TEMPLATE = '20px 44px minmax(0, 1fr) 52px 44px';
 /**
  * Task-lane grid with the person-days column inserted between duration and
  * progress (mirrors TaskTable's effort column placement). The resource-row
- * grid (GRID_TEMPLATE) is unaffected — only drilled-down task lanes get the
- * column, consistent with how TaskTable shows it per task row.
+ * grid (GRID_TEMPLATE) is unaffected — only the local task header and
+ * drilled-down task lanes get the column, consistent with TaskTable.
  */
 const TASK_GRID_TEMPLATE_WITH_EFFORT = '20px 44px minmax(0, 1fr) 52px 52px 44px';
 
@@ -59,6 +64,7 @@ export function ResourceList() {
   const setSelectedTaskIdInResource = useViewStore((s) => s.setSelectedTaskIdInResource);
   const openDrawer = useViewStore((s) => s.openDrawer);
   const showCostColumns = useViewStore((s) => s.showCostColumns);
+  const tableWidth = showCostColumns ? TABLE_WIDTH_WITH_EFFORT : TABLE_WIDTH;
   const taskGridTemplate = showCostColumns ? TASK_GRID_TEMPLATE_WITH_EFFORT : TASK_GRID_TEMPLATE;
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -85,10 +91,11 @@ export function ResourceList() {
     return { map, wbsByTaskId };
   }, [file.tasks]);
 
-  // Flattened rows (resources + expanded task lanes), shared with the canvas
-  // so both panes use the same row count and y positions.
+  // Flattened rows (resources + local task headers + expanded task lanes),
+  // shared with the canvas so both panes use the same row count and y positions.
   type FlatRow =
     | { kind: 'resource'; resourceId: string; yIndex: number }
+    | { kind: 'task-header'; resourceId: string; yIndex: number }
     | { kind: 'task'; resourceId: string; task: Task; yIndex: number };
   const flatRows: FlatRow[] = useMemo(() => {
     const out: FlatRow[] = [];
@@ -97,6 +104,9 @@ export function ResourceList() {
       out.push({ kind: 'resource', resourceId: r.id, yIndex: yIndex++ });
       if (expandedResourceIds.has(r.id)) {
         const list = tasksByRes.map.get(r.id) ?? [];
+        if (list.length > 0) {
+          out.push({ kind: 'task-header', resourceId: r.id, yIndex: yIndex++ });
+        }
         for (const task of list) {
           out.push({ kind: 'task', resourceId: r.id, task, yIndex: yIndex++ });
         }
@@ -143,17 +153,23 @@ export function ResourceList() {
 
   return (
     <div
+      data-resource-list
       className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
-      style={{ width: TABLE_WIDTH }}
+      style={{ width: tableWidth }}
     >
       <div
-        className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
-        style={{ height: HEADER_HEIGHT, gridTemplateColumns: GRID_TEMPLATE }}
+        className="shrink-0 border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
+        style={{ height: HEADER_HEIGHT }}
       >
-        <div className="border-r border-border px-2 py-1">{t('resource.columnName')}</div>
-        <div className="border-r border-border px-2 py-1">{t('resource.columnRole')}</div>
-        <div className="border-r border-border px-2 py-1">{t('resource.columnCapacity')}</div>
-        <div className="px-2 py-1" />
+        {/* Resource summary columns stay in the fixed view header. */}
+        <div className="grid h-full items-center" style={{ gridTemplateColumns: GRID_TEMPLATE }}>
+          <div className="border-r border-border px-2">{t('resource.columnName')}</div>
+          <div className="border-r border-border px-2">{t('resource.columnRole')}</div>
+          <div className="border-r border-border px-2">{t('resource.columnCapacity')}</div>
+          <div className="px-1 text-center" aria-label={t('resource.columnActions')}>
+            ⋯
+          </div>
+        </div>
       </div>
       <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
         <div className="relative" style={{ height: Math.max(flatRows.length * ROW_HEIGHT, 0) }}>
@@ -245,6 +261,35 @@ export function ResourceList() {
                 </div>
               );
             }
+            if (row.kind === 'task-header') {
+              return (
+                <div
+                  key={`th-${row.resourceId}`}
+                  role="row"
+                  aria-label={t('table.taskColumnsHeader')}
+                  style={{
+                    height: ROW_HEIGHT,
+                    transform: `translateY(${y}px)`,
+                    gridTemplateColumns: taskGridTemplate,
+                  }}
+                  className="absolute left-0 right-0 grid items-center border-b border-border bg-bg text-[11px] font-semibold text-fg-muted"
+                >
+                  <div className="border-r border-border/70" />
+                  <div className="border-r border-border/70 px-1">{t('table.columnWbs')}</div>
+                  <div className="border-r border-border/70 px-2">{t('table.columnName')}</div>
+                  <div className="border-r border-border/70 px-1 text-right">
+                    {t('table.columnDuration')}
+                  </div>
+                  {showCostColumns && (
+                    <div className="border-r border-border/70 px-1 text-right">
+                      {t('table.columnEffort')}
+                    </div>
+                  )}
+                  <div className="px-1 text-right">{t('table.columnProgress')}</div>
+                </div>
+              );
+            }
+
             // Task lane row — mirrors TaskTable's 4-column row.
             const task = row.task;
             const selected = selectedTaskIdInResource === task.id;
