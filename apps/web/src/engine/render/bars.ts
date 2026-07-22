@@ -97,6 +97,16 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
   ctx.lineWidth = row.id === env.selectedTaskId ? 2 : 1;
   ctx.stroke();
 
+  // Constraint marker (G5): a small icon at the constrained edge.
+  // Start-type constraints (SNET/MSO) → left edge; end-type (MFO/FNLT) → right.
+  if (row.constraint) {
+    const isStartType =
+      row.constraint.type === 'startNoEarlierThan' || row.constraint.type === 'mustStartOn';
+    const markerX = isStartType ? xStart : xStart + width;
+    const markerColor = row.hasConstraintConflict ? '#f97316' : env.theme.fgMuted; // orange if conflict
+    drawConstraintMarker(ctx, markerX, barY, isStartType, markerColor);
+  }
+
   // Label (clipped to viewport; ellipsised if too long)
   const label = row.name;
   if (label) {
@@ -178,6 +188,38 @@ function drawDownTriangle(
   ctx.moveTo(cx - size, topY);
   ctx.lineTo(cx + size, topY);
   ctx.lineTo(cx, topY + size);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+/**
+ * Draw a constraint marker at the bar edge (G5). A small flag/triangle pointing
+ * inward from the constrained side. Start constraints flag the left edge;
+ * finish constraints flag the right edge. Orange when the constraint conflicts
+ * with a dependency (G4).
+ */
+function drawConstraintMarker(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  barY: number,
+  isStartSide: boolean,
+  color: string,
+): void {
+  const size = 5;
+  const y = barY - 1;
+  ctx.beginPath();
+  if (isStartSide) {
+    // Left edge: triangle pointing right into the bar.
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + size, y + size / 2);
+    ctx.lineTo(x, y + size);
+  } else {
+    // Right edge: triangle pointing left into the bar.
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - size, y + size / 2);
+    ctx.lineTo(x, y + size);
+  }
   ctx.closePath();
   ctx.fillStyle = color;
   ctx.fill();

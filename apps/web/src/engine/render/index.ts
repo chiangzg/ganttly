@@ -40,3 +40,4 @@ export function renderScene(input: RenderInput): void {
 
 export * from './types';
 export { resolveThemeColors } from './theme';
+export { renderResourceLoad } from './resourceLoad';

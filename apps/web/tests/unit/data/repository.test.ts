@@ -19,7 +19,7 @@ function makeFile(name: string): GanttlyFile {
     progress: 0,
     isMilestone: false,
     dependencies: [],
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
   };

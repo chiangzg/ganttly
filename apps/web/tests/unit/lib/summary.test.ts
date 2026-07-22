@@ -18,7 +18,7 @@ function makeTask(overrides: Partial<Task> & { id: string }): Task {
     progress: 0,
     isMilestone: false,
     dependencies: [],
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
     ...overrides,

@@ -20,14 +20,18 @@ import { useEffect } from 'react';
 import { Toolbar } from './Toolbar';
 import { TaskTable } from './TaskTable';
 import { GanttCanvas } from './GanttCanvas';
+import { ResourceList } from './ResourceList';
+import { ResourceLoadCanvas } from './ResourceLoadCanvas';
 import { StatusBar } from './StatusBar';
 import { TaskDrawer } from './TaskDrawer';
 import { ContextMenu } from './ContextMenu';
 import { getRepository } from '@/data/createRepository';
 import { useProjectStore } from '@/store/useProjectStore';
+import { useViewStore } from '@/store/useViewStore';
 
 export function GanttView() {
   const init = useProjectStore((s) => s.init);
+  const viewMode = useViewStore((s) => s.viewMode);
 
   // Boot: open the default project (creating one if needed).
   useEffect(() => {
@@ -39,8 +43,17 @@ export function GanttView() {
     <div className="flex h-full flex-col">
       <Toolbar />
       <div className="flex flex-1 overflow-hidden">
-        <TaskTable />
-        <GanttCanvas />
+        {viewMode === 'resource' ? (
+          <>
+            <ResourceList />
+            <ResourceLoadCanvas />
+          </>
+        ) : (
+          <>
+            <TaskTable />
+            <GanttCanvas />
+          </>
+        )}
       </div>
       <StatusBar />
       <TaskDrawer />

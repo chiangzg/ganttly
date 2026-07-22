@@ -22,7 +22,7 @@ function task(id: string, parentId: string | null, order: number): Task {
     progress: 0,
     isMilestone: false,
     dependencies: [],
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
   };

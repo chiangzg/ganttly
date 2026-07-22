@@ -85,8 +85,10 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   for (const id of ids) {
     if ((inDegree.get(id) ?? 0) === 0) {
       const task = byId.get(id)!;
-      earliestStart.set(id, task.start);
-      earliestEnd.set(id, endFromStart(task.start, task.duration, cal));
+      // G18: apply constraint to the root's earliest start.
+      const { start, end } = applyForwardConstraint(task, task.start, cal);
+      earliestStart.set(id, start);
+      earliestEnd.set(id, end);
       queue.push(id);
     }
   }
@@ -103,8 +105,10 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
       const implied = addLag(curEnd, 1 + lag, cal);
       const current = earliestStart.get(successorId);
       if (!current || implied > current) {
-        earliestStart.set(successorId, implied);
-        earliestEnd.set(successorId, endFromStart(implied, successor.duration, cal));
+        // G18: re-apply the successor's constraint against the new implied start.
+        const { start, end } = applyForwardConstraint(successor, implied, cal);
+        earliestStart.set(successorId, start);
+        earliestEnd.set(successorId, end);
       }
       const deg = (inDegreeCopy.get(successorId) ?? 0) - 1;
       inDegreeCopy.set(successorId, deg);
@@ -117,8 +121,9 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   for (const id of ids) {
     if (!earliestStart.has(id)) {
       const task = byId.get(id)!;
-      earliestStart.set(id, task.start);
-      earliestEnd.set(id, endFromStart(task.start, task.duration, cal));
+      const { start, end } = applyForwardConstraint(task, task.start, cal);
+      earliestStart.set(id, start);
+      earliestEnd.set(id, end);
     }
   }
 
@@ -161,9 +166,11 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   if (projectEnd) {
     for (const id of ids) {
       if ((outDegree.get(id) ?? 0) === 0) {
-        latestEnd.set(id, projectEnd);
         const task = byId.get(id)!;
-        latestStart.set(id, startFromEnd(projectEnd, task.duration, cal));
+        // G18: apply backward constraint (FNLT ceiling / MFO anchor).
+        const end = applyBackwardConstraint(task, projectEnd, cal);
+        latestEnd.set(id, end);
+        latestStart.set(id, startFromEnd(end, task.duration, cal));
         backwardQueue.push(id);
       }
     }
@@ -179,9 +186,11 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
       const implied = addLag(curLatestStart, -(1 + dep.lag), cal);
       const current = latestEnd.get(predId);
       if (!current || implied < current) {
-        latestEnd.set(predId, implied);
         const pred = byId.get(predId)!;
-        latestStart.set(predId, startFromEnd(implied, pred.duration, cal));
+        // G18: re-apply the predecessor's backward constraint against the new implied end.
+        const end = applyBackwardConstraint(pred, implied, cal);
+        latestEnd.set(predId, end);
+        latestStart.set(predId, startFromEnd(end, pred.duration, cal));
       }
       const deg = (outDegreeCopy.get(predId) ?? 0) - 1;
       outDegreeCopy.set(predId, deg);
@@ -228,6 +237,69 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
 }
 
 // ---- Calendar helpers ----
+
+/**
+ * Apply a task's constraint to its forward-pass earliest start (G18).
+ *  - SNET (soft floor): earliestStart = max(depImplied, constraintDate)
+ *  - MSO  (hard anchor): earliestStart = constraintDate (override)
+ *  - MFO  (hard anchor): earliestStart = constraintDate - duration (back-calc)
+ *  - FNLT / none: no forward effect (FNLT only affects latestEnd)
+ *
+ * `depImplied` is the dependency-implied earliest start (or the task's own
+ * start for roots). Returns the adjusted {start, end}.
+ */
+function applyForwardConstraint(
+  task: Task,
+  depImplied: string,
+  cal: ResolvedCalendar,
+): { start: string; end: string } {
+  const c = task.constraints;
+  if (!c || c.type === 'none' || !c.date) {
+    return { start: depImplied, end: endFromStart(depImplied, task.duration, cal) };
+  }
+  const anchor = isWorkingDay(c.date, cal) ? c.date : nextWorking(c.date, cal);
+  switch (c.type) {
+    case 'startNoEarlierThan': {
+      const start = depImplied >= anchor ? depImplied : anchor;
+      return { start, end: endFromStart(start, task.duration, cal) };
+    }
+    case 'mustStartOn': {
+      // Hard anchor — override unconditionally.
+      return { start: anchor, end: endFromStart(anchor, task.duration, cal) };
+    }
+    case 'mustFinishOn': {
+      // Hard anchor on end — back-calculate start.
+      return { start: startFromEnd(anchor, task.duration, cal), end: anchor };
+    }
+    case 'finishNoLaterThan':
+    default:
+      return { start: depImplied, end: endFromStart(depImplied, task.duration, cal) };
+  }
+}
+
+/**
+ * Apply a task's constraint to its backward-pass latest end (G18).
+ *  - FNLT (soft ceiling): latestEnd = min(depImplied, constraintDate)
+ *  - MFO  (hard anchor): latestEnd = constraintDate (override)
+ *  - SNET/MSO/none: no backward effect.
+ */
+function applyBackwardConstraint(task: Task, depImplied: string, cal: ResolvedCalendar): string {
+  const c = task.constraints;
+  if (!c || c.type === 'none' || !c.date) return depImplied;
+  const anchor = isWorkingDay(c.date, cal) ? c.date : nextWorking(c.date, cal);
+  switch (c.type) {
+    case 'finishNoLaterThan':
+      // Soft ceiling — take the earlier of dep-implied and constraint.
+      return depImplied <= anchor ? depImplied : anchor;
+    case 'mustFinishOn':
+      // Hard anchor — override unconditionally.
+      return anchor;
+    case 'startNoEarlierThan':
+    case 'mustStartOn':
+    default:
+      return depImplied;
+  }
+}
 
 function endFromStart(startISO: string, duration: number, cal: ResolvedCalendar): string {
   if (duration <= 0) return startISO;

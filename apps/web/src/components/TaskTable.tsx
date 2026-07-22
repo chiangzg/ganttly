@@ -26,15 +26,19 @@ import { buildTree, flattenVisible, type TreeNode } from '@/engine/scene';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 import { cn } from '@/lib/cn';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
+import { computeTaskPersonDays } from '@/lib/cost';
+import { computeAllRollups } from '@/lib/summary';
 import { nanoid } from 'nanoid';
 import type { Task } from '@ganttly/schema';
 
 const TABLE_WIDTH = 420;
+const TABLE_WIDTH_WITH_EFFORT = 480;
 /**
  * 共享列模板：表头与每行数据必须用同一个，否则列宽按行内容自适应，
  * 会导致 WBS/工期/进度列与表头错位、长任务名挤压（bug: 左侧明细挤在一起）。
  */
 const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 64px';
+const GRID_TEMPLATE_WITH_EFFORT = '44px minmax(0, 1fr) 72px 56px 56px';
 
 export function TaskTable() {
   const { t } = useTranslation();
@@ -42,13 +46,23 @@ export function TaskTable() {
   const dispatch = useProjectStore((s) => s.dispatch);
   const openDrawer = useViewStore((s) => s.openDrawer);
   const openContextMenu = useViewStore((s) => s.openContextMenu);
+  const showCostColumns = useViewStore((s) => s.showCostColumns);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renamingId = useRef<string | null>(null);
+
+  const gridTemplate = showCostColumns ? GRID_TEMPLATE_WITH_EFFORT : GRID_TEMPLATE;
+  const tableWidth = showCostColumns ? TABLE_WIDTH_WITH_EFFORT : TABLE_WIDTH;
 
   const rows = useMemo(() => {
     const tree = buildTree(file.tasks);
     return flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
   }, [file.tasks, file.viewState.collapsedTaskIds]);
+
+  // Person-days rollup map (summary tasks use rolled-up children sum, G13).
+  const effortMap = useMemo(
+    () => computeAllRollups(file.tasks, file.resources),
+    [file.tasks, file.resources],
+  );
 
   // Latest scrollTop kept in a ref so the store→DOM sync effect can decide
   // whether the change originated here (user scrolling) or elsewhere (canvas
@@ -222,7 +236,7 @@ export function TaskTable() {
       progress: 0,
       isMilestone: false,
       dependencies: [],
-      constraints: {},
+      constraints: { type: 'none' },
       assignments: [],
       customFields: {},
     };
@@ -268,15 +282,18 @@ export function TaskTable() {
   return (
     <div
       className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
-      style={{ width: TABLE_WIDTH }}
+      style={{ width: tableWidth }}
     >
       <div
         className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
-        style={{ height: HEADER_HEIGHT, gridTemplateColumns: GRID_TEMPLATE }}
+        style={{ height: HEADER_HEIGHT, gridTemplateColumns: gridTemplate }}
       >
         <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
         <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
         <div className="border-r border-border px-2 py-1">{t('table.columnDuration')}</div>
+        {showCostColumns && (
+          <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
+        )}
         <div className="px-2 py-1">{t('table.columnProgress')}</div>
       </div>
       <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
@@ -314,7 +331,7 @@ export function TaskTable() {
                 style={{
                   height: ROW_HEIGHT,
                   transform: `translateY(${y}px)`,
-                  gridTemplateColumns: GRID_TEMPLATE,
+                  gridTemplateColumns: gridTemplate,
                 }}
                 className={cn(
                   'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
@@ -382,6 +399,17 @@ export function TaskTable() {
                 <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
                   {node.task.isMilestone ? '—' : `${node.task.duration}d`}
                 </div>
+                {showCostColumns && (
+                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
+                    {(() => {
+                      const pd =
+                        node.children.length > 0
+                          ? effortMap.get(node.task.id)?.personDays
+                          : computeTaskPersonDays(node.task, file.resources);
+                      return pd && pd > 0 ? `${pd}` : '—';
+                    })()}
+                  </div>
+                )}
                 <div className="px-2 text-right tabular-nums text-fg-muted">
                   {node.task.progress}%
                 </div>

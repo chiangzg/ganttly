@@ -12,10 +12,13 @@
  */
 import type { GanttlyFile, Holiday, Task } from '@ganttly/schema';
 import type { Scene, TaskRow, ArrowSpec } from '../render/types';
-import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff } from '../layout';
+import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff, pixelsPerDay } from '../layout';
 import { buildTree, flattenVisible } from './tree';
 import { computeCriticalPath } from '@/lib/cpm';
 import { computeAllRollups } from '@/lib/summary';
+import { checkConstraintConflicts } from '@/lib/schedule';
+import { resolveCalendar } from '@/lib/calendar';
+import { getCalendar } from '@ganttly/calendar-data';
 
 export interface AssembleOptions {
   viewportWidth: number;
@@ -34,7 +37,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   // (so critical-path sees a summary's true aggregated start/duration) and for
   // canvas row rendering (especially important during drag mid-states where
   // the underlying Task data may be momentarily stale).
-  const allRollups = computeAllRollups(file.tasks);
+  const allRollups = computeAllRollups(file.tasks, file.resources);
 
   // Set of summary task ids, derived from the FULL task list (not just
   // visible rows) so that a summary whose children are all collapsed still
@@ -56,6 +59,12 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
       );
   const criticalIds = opts.criticalTaskIds ?? cpm?.criticalTaskIds ?? new Set<string>();
 
+  // Detect constraint-vs-dependency conflicts (G4 — for arrow/row highlighting).
+  const conflictIds = checkConstraintConflicts(
+    file.tasks,
+    resolveCalendar(getCalendar(file.calendar.id) ?? getCalendar('zh-CN')),
+  );
+
   // Virtualise rows: drop rows above/below the visible scroll area.
   const firstVisibleRow = Math.max(0, Math.floor(file.viewState.scrollTop / ROW_HEIGHT) - 5);
   const lastVisibleRow = Math.min(
@@ -65,10 +74,18 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const visibleSlice = visible.slice(firstVisibleRow, lastVisibleRow);
 
   const rows: TaskRow[] = visibleSlice.map((node) =>
-    toTaskRow(node.task, node.depth, node.wbsNumber, criticalIds, summaryIds, allRollups),
+    toTaskRow(
+      node.task,
+      node.depth,
+      node.wbsNumber,
+      criticalIds,
+      summaryIds,
+      allRollups,
+      conflictIds,
+    ),
   );
 
-  const arrows = computeArrows(file, opts, visible, firstVisibleRow, criticalIds);
+  const arrows = computeArrows(file, opts, visible, firstVisibleRow, criticalIds, conflictIds);
 
   return {
     zoom: file.viewState.zoom,
@@ -93,9 +110,11 @@ function toTaskRow(
   criticalIds: ReadonlySet<string>,
   summaryIds: ReadonlySet<string>,
   allRollups: Map<string, { start: string; end: string; progress: number }>,
+  conflictIds: ReadonlySet<string>,
 ): TaskRow {
   const isSummary = summaryIds.has(task.id);
   const rollup = allRollups.get(task.id);
+  const hasConstraint = task.constraints.type !== 'none' && !!task.constraints.date;
   return {
     id: task.id,
     name: task.name,
@@ -108,6 +127,10 @@ function toTaskRow(
     wbsNumber: wbs,
     isCritical: criticalIds.has(task.id),
     isSummary,
+    constraint: hasConstraint
+      ? { type: task.constraints.type, date: task.constraints.date! }
+      : undefined,
+    hasConstraintConflict: conflictIds.has(task.id),
   };
 }
 
@@ -135,6 +158,7 @@ function computeArrows(
   visible: ReturnType<typeof flattenVisible>,
   firstVisibleRow: number,
   criticalIds: ReadonlySet<string>,
+  conflictIds: ReadonlySet<string>,
 ): ArrowSpec[] {
   const originDate = originDateFor(file, opts);
   const zoom = file.viewState.zoom;
@@ -172,6 +196,8 @@ function computeArrows(
         toX,
         toY,
         isCritical: criticalIds.has(successor.id) && criticalIds.has(predecessor.id),
+        // G4: flag arrows INTO a successor whose constraint conflicts with deps.
+        isConflict: conflictIds.has(successor.id),
       });
     }
   }
@@ -194,15 +220,8 @@ function endpointX(
     (role === 'to' && (depType === 'FF' || depType === 'SF'));
   const iso = useEnd ? task.end : task.start;
   const offsetDays = useEnd ? 1 : 0; // end is inclusive — pixel position of day AFTER end
-  const px = dateToPixel(iso, originDate, zoom) + offsetDays * pxPerDay(zoom);
+  const px = dateToPixel(iso, originDate, zoom) + offsetDays * pixelsPerDay(zoom);
   return px - scrollLeft;
-}
-
-function pxPerDay(zoom: GanttlyFile['viewState']['zoom']): number {
-  // Mirror layout.pixelsPerDay without an import cycle.
-  const COLUMN_WIDTH = { day: 32, week: 140, month: 120, year: 80 } as const;
-  const DAYS_PER_COLUMN = { day: 1, week: 7, month: 30, year: 30 } as const;
-  return COLUMN_WIDTH[zoom] / DAYS_PER_COLUMN[zoom];
 }
 
 export function originDateFor(file: GanttlyFile, _opts?: AssembleOptions): string {
@@ -234,3 +253,130 @@ function holidaysInRange(holidays: Holiday[], _opts: AssembleOptions): Holiday[]
 
 /** Re-exported for tests. */
 export const _dayDiff = dayDiff;
+
+// ---------------------------------------------------------------------------
+// Resource view scene assembly (P1 feature one)
+// ---------------------------------------------------------------------------
+
+import type { ResourceScene, ResourceRow, ResourceLoadBar } from '../render/types';
+import { computeResourceLoad } from '@/lib/resourceLoad';
+import { tasksByResource } from '@/lib/resourceTasks';
+
+export interface AssembleResourceOptions {
+  viewportWidth: number;
+  viewportHeight: number;
+  today: string;
+  scrollTop: number;
+  selectedResourceId: string | null;
+  /** Expanded (drilled-down) resource ids — drives task-lane rows. */
+  expandedResourceIds?: ReadonlySet<string>;
+  /** Highlighted task lane (G19: independent of selectedTaskId). */
+  selectedTaskIdInResource?: string | null;
+}
+
+/**
+ * Build the renderable `ResourceScene` for the resource (load) view.
+ *
+ * Mirrors `assembleScene`'s contract (origin/scroll/holidays reuse the same
+ * time axis). The flattened `rows` list interleaves resource rows with a
+ * local task header and their expanded task lanes so the left list and right
+ * canvas stay pixel-aligned:
+ * each entry carries a global `yIndex` used for `yIndex * ROW_HEIGHT` layout.
+ * Resource rows keep their per-day load bars; task lanes carry the task's
+ * date span + the resource's load on it for the lane rectangle.
+ */
+export function assembleResourceScene(
+  file: GanttlyFile,
+  opts: AssembleResourceOptions,
+): ResourceScene {
+  const cal = resolveCalendar(getCalendar(file.calendar.id) ?? getCalendar('zh-CN'));
+  const loadMap = computeResourceLoad(file.tasks, file.resources, cal);
+
+  // Pre-compute which task ids have children once (used both for the
+  // leaf-only filter in `tasksByResource` and WBS numbering via buildTree).
+  const tree = buildTree(file.tasks);
+  const nodeByTaskId = new Map<string, (typeof tree)[number]>();
+  const indexTree = (nodes: ReadonlyArray<(typeof tree)[number]>): void => {
+    for (const n of nodes) {
+      nodeByTaskId.set(n.task.id, n);
+      indexTree(n.children);
+    }
+  };
+  indexTree(tree);
+  const hasChildren = (id: string) => {
+    const node = nodeByTaskId.get(id);
+    return !!node && node.children.length > 0;
+  };
+  const tasksByRes = tasksByResource(file.tasks, hasChildren);
+
+  const expanded = opts.expandedResourceIds ?? new Set<string>();
+  const rows: ResourceRow[] = [];
+  let yIndex = 0;
+
+  for (const r of file.resources) {
+    const perDay = loadMap.get(r.id) ?? new Map<string, number>();
+    const bars: ResourceLoadBar[] = [];
+    for (const [date, load] of perDay) {
+      if (load > 0) bars.push({ resourceId: r.id, date, load });
+    }
+    const resourceTasks = tasksByRes.get(r.id) ?? [];
+    rows.push({
+      kind: 'resource',
+      yIndex: yIndex++,
+      id: r.id,
+      name: r.name,
+      role: r.role,
+      capacity: r.capacity ?? 1,
+      bars,
+      expanded: expanded.has(r.id),
+      taskCount: resourceTasks.length,
+    });
+
+    // Drill-down task lanes (only when expanded).
+    if (expanded.has(r.id) && resourceTasks.length > 0) {
+      rows.push({
+        kind: 'task-header',
+        yIndex: yIndex++,
+        resourceId: r.id,
+      });
+      for (const t of resourceTasks) {
+        const assignment = t.assignments.find((a) => a.resourceId === r.id);
+        const node = nodeByTaskId.get(t.id);
+        rows.push({
+          kind: 'task',
+          yIndex: yIndex++,
+          taskId: t.id,
+          resourceId: r.id,
+          name: t.name,
+          wbsNumber: node?.wbsNumber ?? '',
+          start: t.start,
+          end: t.end,
+          duration: t.duration,
+          progress: t.progress,
+          isMilestone: t.isMilestone,
+          load: assignment?.load ?? 0,
+          capacity: r.capacity ?? 1,
+        });
+      }
+    }
+  }
+
+  // Note: rows are passed in full (not pre-sliced) so the renderer's row
+  // virtualization uses the correct global index for pixel positioning.
+  // Resource counts are typically small (<100), so the cost of iterating all
+  // rows to find the visible window is negligible.
+
+  return {
+    zoom: file.viewState.zoom,
+    originDate: originDateFor(file),
+    scrollLeft: file.viewState.scrollLeft,
+    scrollTop: opts.scrollTop,
+    viewportWidth: opts.viewportWidth,
+    viewportHeight: opts.viewportHeight,
+    today: opts.today,
+    holidays: file.calendar.holidays,
+    rows,
+    selectedResourceId: opts.selectedResourceId,
+    selectedTaskIdInResource: opts.selectedTaskIdInResource ?? null,
+  };
+}

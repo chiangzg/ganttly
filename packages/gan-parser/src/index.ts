@@ -184,7 +184,7 @@ function flattenTask(
     color,
     note,
     dependencies: deps,
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
   });

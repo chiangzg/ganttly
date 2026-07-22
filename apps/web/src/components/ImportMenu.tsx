@@ -10,10 +10,14 @@ import { useTranslation } from 'react-i18next';
 import { useRef } from 'react';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { useProjectStore } from '@/store/useProjectStore';
-import { validateGanttlyFile, formatAjvErrors } from '@ganttly/schema';
+import { validateGanttlyFile, formatAjvErrors, normalizeFile } from '@ganttly/schema';
 import { parseGan, GanImportError } from '@ganttly/gan-parser';
 import { getCalendar } from '@ganttly/calendar-data';
+import type { Holiday } from '@ganttly/schema';
 import type { GanttlyFile } from '@ganttly/schema';
+
+/** Holiday provider injected into normalizeFile (keeps schema pkg dependency-free). */
+const getHolidays = (region: string): Holiday[] => getCalendar(region).holidays;
 
 export function ImportMenu() {
   const { t } = useTranslation();
@@ -29,17 +33,15 @@ export function ImportMenu() {
     try {
       const text = await file.text();
       const data = JSON.parse(text) as unknown;
-      const result = validateGanttlyFile(data);
+      // Normalize BEFORE validation (G1): backfill missing optional fields so
+      // older files pass AJV. Holiday backfill is injected via getHolidays.
+      const normalized = normalizeFile(data as GanttlyFile, { getHolidays });
+      const result = validateGanttlyFile(normalized);
       if (!result.ok) {
         window.alert(t('errors.importFailed', { reason: formatAjvErrors(result.errors) }));
         return;
       }
-      const imported = data as GanttlyFile;
-      // Ensure calendar is populated (older exports may have empty holidays).
-      if (imported.calendar.holidays.length === 0 && imported.calendar.id === 'zh-CN') {
-        imported.calendar.holidays = getCalendar('zh-CN').holidays;
-      }
-      setFile(imported);
+      setFile(normalized);
       await save();
     } catch (err) {
       window.alert(t('errors.importFailed', { reason: (err as Error).message }));
@@ -53,7 +55,10 @@ export function ImportMenu() {
       // Apply bundled zh-CN calendar (PRD: ignore source calendar, use ours).
       const file2 = result.file;
       file2.calendar = getCalendar('zh-CN');
-      setFile(file2);
+      // Normalize for future P1 field defaults (holidays already set above; the
+      // normalize call keeps .gan imports consistent with the JSON path).
+      const normalized = normalizeFile(file2, { getHolidays });
+      setFile(normalized);
       await save();
       // Surface what was dropped.
       if (result.skipped.length > 0) {

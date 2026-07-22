@@ -17,7 +17,7 @@ function task(id: string, start: string, duration: number, deps: Dependency[] = 
     progress: 0,
     isMilestone: false,
     dependencies: deps,
-    constraints: {},
+    constraints: { type: 'none' },
     assignments: [],
     customFields: {},
   };
@@ -142,5 +142,59 @@ describe('computeCriticalPath — project duration', () => {
     const r = computeCriticalPath(tasks, calendar);
     // a 5 + b 5 = 10 working days
     expect(r.projectDurationDays).toBe(10);
+  });
+});
+
+describe('constraints in CPM (G18)', () => {
+  it('SNET pushes earliestStart forward to the constraint date', () => {
+    // a starts 1/5 but SNET says no earlier than 1/12 → earliestStart = 1/12.
+    const tasks = [
+      {
+        ...task('a', '2026-01-05', 5),
+        constraints: { type: 'startNoEarlierThan' as const, date: '2026-01-12' },
+      },
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.earliestStart.get('a')).toBe('2026-01-12');
+  });
+
+  it('MSO hard-anchor overrides the dependency-implied start', () => {
+    // b depends on a (FS, a ends 1/9 → b implied 1/12). MSO 1/5 forces b to 1/5.
+    const tasks = [
+      task('a', '2026-01-05', 5),
+      {
+        ...task('b', '2026-01-12', 5, [{ targetId: 'a', type: 'FS', lag: 0 }]),
+        constraints: { type: 'mustStartOn' as const, date: '2026-01-05' },
+      },
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    // MSO overrides → earliestStart = 1/5 (the hard anchor), not 1/12 (dep-implied).
+    expect(r.earliestStart.get('b')).toBe('2026-01-05');
+  });
+
+  it('MFO hard-anchor back-calculates earliestStart from the constraint end', () => {
+    // MFO 1/9, duration 5 → earliestStart = 1/5, earliestEnd = 1/9.
+    const tasks = [
+      {
+        ...task('a', '2026-01-12', 5),
+        constraints: { type: 'mustFinishOn' as const, date: '2026-01-09' },
+      },
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.earliestEnd.get('a')).toBe('2026-01-09');
+    expect(r.earliestStart.get('a')).toBe('2026-01-05');
+  });
+
+  it('FNLT tightens latestEnd in the backward pass', () => {
+    // a (1/5, dur 5) is a sink. Project end would normally be 1/9. FNLT 1/7
+    // caps latestEnd at 1/7 (earlier).
+    const tasks = [
+      {
+        ...task('a', '2026-01-05', 5),
+        constraints: { type: 'finishNoLaterThan' as const, date: '2026-01-07' },
+      },
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.latestEnd.get('a')! <= '2026-01-07').toBe(true);
   });
 });

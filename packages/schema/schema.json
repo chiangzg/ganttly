@@ -138,7 +138,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/dependency" }
         },
-        "constraints": { "type": "object" },
+        "constraints": { "$ref": "#/$defs/constraints" },
         "assignments": {
           "type": "array",
           "items": { "$ref": "#/$defs/assignment" }
@@ -156,6 +156,33 @@
         "lag": { "type": "integer" }
       }
     },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["none", "startNoEarlierThan", "mustStartOn", "mustFinishOn", "finishNoLaterThan"]
+        },
+        "date": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "none" } } },
+          "then": { "properties": { "date": { "type": "null" } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": ["startNoEarlierThan", "mustStartOn", "mustFinishOn", "finishNoLaterThan"]
+              }
+            }
+          },
+          "then": { "required": ["date"] }
+        }
+      ]
+    },
     "assignment": {
       "type": "object",
       "additionalProperties": false,
@@ -172,7 +199,10 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
-        "rate": { "type": "number", "minimum": 0 }
+        "rate": { "type": "number", "minimum": 0 },
+        "capacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "role": { "type": "string" },
+        "color": { "type": "string" }
       }
     },
     "baseline": {
