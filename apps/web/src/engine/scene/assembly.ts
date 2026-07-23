@@ -73,7 +73,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   );
   const visibleSlice = visible.slice(firstVisibleRow, lastVisibleRow);
 
-  const rows: TaskRow[] = visibleSlice.map((node) =>
+  const rows: TaskRow[] = visibleSlice.map((node, i) =>
     toTaskRow(
       node.task,
       node.depth,
@@ -82,10 +82,11 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
       summaryIds,
       allRollups,
       conflictIds,
+      firstVisibleRow + i, // global row index — drives pixel Y, mirrors ResourceRow.yIndex
     ),
   );
 
-  const arrows = computeArrows(file, opts, visible, firstVisibleRow, criticalIds, conflictIds);
+  const arrows = computeArrows(file, opts, visible, criticalIds, conflictIds);
 
   return {
     zoom: file.viewState.zoom,
@@ -97,6 +98,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
     today: opts.today,
     holidays: holidaysInRange(file.calendar.holidays, opts),
     rows,
+    totalRows: visible.length,
     arrows,
     showCriticalPath: file.viewState.showCriticalPath,
     selectedTaskId: file.viewState.selectedTaskId,
@@ -111,6 +113,7 @@ function toTaskRow(
   summaryIds: ReadonlySet<string>,
   allRollups: Map<string, { start: string; end: string; progress: number }>,
   conflictIds: ReadonlySet<string>,
+  yIndex: number,
 ): TaskRow {
   const isSummary = summaryIds.has(task.id);
   const rollup = allRollups.get(task.id);
@@ -127,6 +130,7 @@ function toTaskRow(
     wbsNumber: wbs,
     isCritical: criticalIds.has(task.id),
     isSummary,
+    yIndex,
     constraint: hasConstraint
       ? { type: task.constraints.type, date: task.constraints.date! }
       : undefined,
@@ -156,7 +160,6 @@ function computeArrows(
   file: GanttlyFile,
   opts: AssembleOptions,
   visible: ReturnType<typeof flattenVisible>,
-  firstVisibleRow: number,
   criticalIds: ReadonlySet<string>,
   conflictIds: ReadonlySet<string>,
 ): ArrowSpec[] {
@@ -184,8 +187,12 @@ function computeArrows(
         file.viewState.scrollLeft,
       );
       const toX = endpointX(successor, dep.type, 'to', originDate, zoom, file.viewState.scrollLeft);
-      const fromY = HEADER_HEIGHT + (fromIdx - firstVisibleRow + 0.5) * ROW_HEIGHT;
-      const toY = HEADER_HEIGHT + (toIdx - firstVisibleRow + 0.5) * ROW_HEIGHT;
+      // Y in viewport pixels: global row index → chart px, minus scrollTop.
+      // Matches bars.ts (`HEADER_HEIGHT + row.yIndex*ROW_HEIGHT - scrollTop`)
+      // so arrow endpoints land exactly on their bar centres, aligned with the
+      // left TaskTable during sub-row scroll.
+      const fromY = HEADER_HEIGHT + (fromIdx + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
+      const toY = HEADER_HEIGHT + (toIdx + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
 
       out.push({
         fromId: predecessor.id,

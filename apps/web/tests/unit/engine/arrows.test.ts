@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import type { GanttlyFile, Task } from '@ganttly/schema';
 import { assembleScene } from '@/engine/scene';
+import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 
 const ZH_CN_HOLIDAYS: GanttlyFile['calendar']['holidays'] = [];
 
@@ -144,5 +145,24 @@ describe('assembleScene arrow geometry — 4 dependency types', () => {
     // assembly's CPM pass, so just assert the flag is a boolean.
     const a = scene.arrows[0]!;
     expect(typeof a.isCritical).toBe('boolean');
+  });
+});
+
+describe('assembleScene arrow geometry — honours scrollTop', () => {
+  // Guards the desync fix: arrow Y must be GLOBAL row index → px, MINUS
+  // scrollTop (so arrows track their bars during sub-row scroll). The old code
+  // used a slice-local index with no scrollTop subtraction.
+  const A = baseTask('A', { order: 0 });
+  const B = baseTask('B', { order: 1, start: '2026-02-09', end: '2026-02-13', duration: 5 });
+
+  it('subtracts scrollTop from arrow Y (row 0 & row 1)', () => {
+    const scrollTop = 10; // sub-row offset
+    const file = makeFile([A, { ...B, dependencies: [{ targetId: 'A', type: 'FS', lag: 0 }] }]);
+    file.viewState.scrollTop = scrollTop;
+    const scene = assembleScene(file, OPTS);
+    const a = scene.arrows[0]!;
+    // A=row0 centre, B=row1 centre: 56 + (idx+0.5)*32, each minus scrollTop.
+    expect(a.fromY).toBe(HEADER_HEIGHT + (0 + 0.5) * ROW_HEIGHT - scrollTop);
+    expect(a.toY).toBe(HEADER_HEIGHT + (1 + 0.5) * ROW_HEIGHT - scrollTop);
   });
 });

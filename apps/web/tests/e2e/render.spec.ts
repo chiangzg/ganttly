@@ -207,3 +207,51 @@ test('100 tasks render without visual breakage', async ({ page }) => {
     maxDiffPixelRatio: 0.01,
   });
 });
+
+test('canvas wheel-pan keeps the left table scroll-aligned (sub-row sync)', async ({ page }) => {
+  // Regression guard for the left/right desync bug: the task-view canvas used
+  // to position bars by a slice-local index and ignore scrollTop, so the right
+  // bars snapped to whole rows while the left TaskTable scrolled smoothly.
+  // After the fix, a sub-row wheel-pan must (a) move scrollTop off 0 and (b)
+  // be mirrored onto the TaskTable's scroll container within 1px.
+  const tasks = Array.from({ length: 40 }, (_, i) => ({
+    id: `t${i}`,
+    name: `Task ${i}`,
+    parentId: null,
+    order: i,
+    start: '2026-02-02',
+    end: '2026-02-06',
+    duration: 5,
+    progress: 0,
+    isMilestone: false,
+    dependencies: [],
+    constraints: {},
+    assignments: [],
+    customFields: {},
+  }));
+  await loadFixture(page, { tasks });
+
+  const chart = page.locator('[data-gantt-chart] canvas');
+  const box = await chart.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  // A small vertical wheel — not a multiple of ROW_HEIGHT (32).
+  await page.mouse.wheel(0, 40);
+  await page.waitForTimeout(200);
+
+  const { storeTop, tableTop } = await page.evaluate(() => {
+    const store = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as {
+      getState: () => { file: { viewState: { scrollTop: number } } };
+    };
+    const storeTop = store.getState().file.viewState.scrollTop;
+    // The TaskTable body is the overflow-y-auto div under the table.
+    const scrollEl = document.querySelector(
+      '[data-task-table] .overflow-y-auto',
+    ) as HTMLElement | null;
+    return { storeTop, tableTop: scrollEl?.scrollTop ?? -1 };
+  });
+
+  expect(storeTop).toBeGreaterThan(0);
+  // The two must agree within the 1px tolerance the sync effect uses.
+  expect(Math.abs(storeTop - tableTop)).toBeLessThanOrEqual(1);
+});

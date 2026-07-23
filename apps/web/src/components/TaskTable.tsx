@@ -281,6 +281,7 @@ export function TaskTable() {
 
   return (
     <div
+      data-task-table
       className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
       style={{ width: tableWidth }}
     >
