@@ -8,8 +8,9 @@
  * - Selection focus ring
  *
  * Bars are positioned by their start/end date using the layout primitives.
- * The renderer is given pre-flattened rows in row-order; row index N maps
- * to pixel Y = HEADER_HEIGHT + N * ROW_HEIGHT.
+ * The renderer is given a pre-sliced set of rows; each row carries its GLOBAL
+ * `yIndex`, and its viewport pixel Y = HEADER_HEIGHT + yIndex*ROW_HEIGHT - scrollTop
+ * (mirrors resourceLoad.ts so bars track the left TaskTable during scroll).
  */
 import type { Scene, ThemeColors, TaskRow } from './types';
 import { COLUMN_WIDTH, HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dateRangeWidth } from '../layout';
@@ -21,9 +22,20 @@ const MILESTONE_HALF = 9; // half-width of the diamond
 export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: ThemeColors): void {
   const { zoom, originDate, scrollLeft, rows, selectedTaskId, showCriticalPath } = scene;
 
-  rows.forEach((row, index) => {
-    const y = HEADER_HEIGHT + index * ROW_HEIGHT;
-    // Virtualisation: skip rows entirely outside the viewport.
+  rows.forEach((row) => {
+    // Position by GLOBAL row index minus scrollTop, mirroring the resource
+    // view (`HEADER_HEIGHT + row.yIndex*ROW_HEIGHT - scrollTop` in
+    // resourceLoad.ts) so bars stay pixel-aligned with the left TaskTable
+    // during sub-row scroll. (Previously this used the slice-local `index`
+    // and ignored scrollTop, snapping bars to whole rows while the list
+    // scrolled smoothly — causing the left/right desync.)
+    const y = HEADER_HEIGHT + row.yIndex * ROW_HEIGHT - scene.scrollTop;
+    // Virtualisation: skip rows entirely outside the viewport. Bound against
+    // HEADER_HEIGHT (the fixed header occupies y<HEADER_HEIGHT and overlaps any
+    // row whose bottom < HEADER_HEIGHT, exactly mirroring the left TaskTable —
+    // whose scroll container starts below its own header, so such a row is also
+    // clipped there). Rows straddling the header still draw (their lower part
+    // shows below the header band).
     if (y + ROW_HEIGHT < HEADER_HEIGHT || y > scene.viewportHeight) return;
     drawRow(ctx, row, y, {
       zoom,
