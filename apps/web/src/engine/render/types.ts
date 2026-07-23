@@ -43,6 +43,13 @@ export interface TaskRow {
   wbsNumber: string;
   isCritical?: boolean;
   isSummary?: boolean;
+  /**
+   * Global 0-based index of this row in the flattened visible list (drives
+   * pixel Y = HEADER_HEIGHT + yIndex*ROW_HEIGHT - scrollTop). Mirrors
+   * `ResourceRowBase.yIndex` so task bars stay pixel-aligned with the left
+   * TaskTable during sub-row scroll.
+   */
+  yIndex: number;
   /** Scheduling constraint (P1 feature three). Present when type !== 'none'. */
   constraint?: { type: string; date: string };
   /** True when this task's constraint conflicts with its dependencies (G4). */
@@ -170,6 +177,12 @@ export interface Scene {
   holidays: Holiday[];
   /** Visible task rows in row-order (already flattened + filtered). */
   rows: TaskRow[];
+  /**
+   * Total number of flattened visible rows (before viewport virtualisation).
+   * `rows` is pre-sliced for performance, so its `.length` underestimates the
+   * real scroll extent; hosts use `totalRows * ROW_HEIGHT` to clamp scrollTop.
+   */
+  totalRows: number;
   /** Dependency arrows. */
   arrows: ArrowSpec[];
   /** Whether to highlight the critical path. */

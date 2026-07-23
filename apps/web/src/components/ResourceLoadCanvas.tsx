@@ -27,7 +27,7 @@ import { useProjectStore, setViewStateCommand } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { assembleResourceScene, originDateFor, chartEndDate } from '@/engine/scene';
 import { renderResourceLoad, resolveThemeColors } from '@/engine/render';
-import { todayISO, dateRangeWidth, ROW_HEIGHT } from '@/engine/layout';
+import { todayISO, dateRangeWidth, ROW_HEIGHT, clamp } from '@/engine/layout';
 import { buildTree } from '@/engine/scene/tree';
 import { tasksByResource } from '@/lib/resourceTasks';
 import { PAN_THRESHOLD } from '@/engine/interaction';
@@ -64,6 +64,11 @@ export function ResourceLoadCanvas() {
   // Keep a fresh scene ref so the holiday hover handler can read the latest
   // scene (zoom/origin/scroll/holidays) without re-binding the pointer handler.
   const sceneRef = useRef<ResourceScene | null>(null);
+
+  // Max valid scrollTop (contentHeight - viewportHeight). Clamps wheel/drag so
+  // the canvas can't scroll past the last resource row and desync from the
+  // ResourceList's native scrollbar.
+  const maxScrollTopRef = useRef(0);
 
   // Holiday hover tooltip — shared with the task view (PRD §3.5, §7.3).
   const {
@@ -122,7 +127,9 @@ export function ResourceLoadCanvas() {
       });
     }
     if (nextTop !== curTop) {
-      setResourceScrollTop(Math.max(0, nextTop));
+      // Clamp to [0, maxScrollTop] so the canvas can't drift past the last
+      // row and desync from ResourceList's native scrollbar.
+      setResourceScrollTop(clamp(nextTop, 0, maxScrollTopRef.current));
     }
   };
 
@@ -149,6 +156,7 @@ export function ResourceLoadCanvas() {
     });
     rowCountRef.current = scene.rows.length;
     sceneRef.current = scene;
+    maxScrollTopRef.current = Math.max(0, scene.rows.length * ROW_HEIGHT - size.height);
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.floor(size.width * dpr);
     canvas.height = Math.floor(size.height * dpr);

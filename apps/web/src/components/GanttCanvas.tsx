@@ -22,7 +22,15 @@ import {
 } from '@/store/useProjectStore';
 import { assembleScene, originDateFor, chartEndDate } from '@/engine/scene';
 import { renderScene, resolveThemeColors } from '@/engine/render';
-import { todayISO, dateRangeWidth, dateToPixel, pixelsPerDay, dayDiff } from '@/engine/layout';
+import {
+  todayISO,
+  dateRangeWidth,
+  dateToPixel,
+  pixelsPerDay,
+  dayDiff,
+  clamp,
+  ROW_HEIGHT,
+} from '@/engine/layout';
 import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
@@ -55,6 +63,12 @@ export function GanttCanvas() {
   // Keep a fresh scene ref so pointer handlers can read it without re-binding.
   const sceneRef = useRef<Scene | null>(null);
 
+  // Max valid scrollTop (contentHeight - viewportHeight), refreshed each
+  // render. Clamps wheel/drag pan so the canvas never scrolls past the last
+  // row — which would desync from the left TaskTable (its native scrollbar is
+  // browser-clamped to the same range).
+  const maxScrollTopRef = useRef(0);
+
   // Holiday hover tooltip — shared with the resource view (PRD §3.5, §7.3).
   const {
     onHoverMove,
@@ -86,7 +100,12 @@ export function GanttCanvas() {
     const f = fileRef.current;
     const next = {
       scrollLeft: scrollLeft ?? f.viewState.scrollLeft,
-      scrollTop: scrollTop ?? f.viewState.scrollTop,
+      // Clamp scrollTop to [0, maxScrollTop] so the canvas cannot drift past
+      // the last row and desync from the TaskTable's native scrollbar.
+      scrollTop:
+        scrollTop !== undefined
+          ? clamp(scrollTop, 0, maxScrollTopRef.current)
+          : f.viewState.scrollTop,
     };
     if (next.scrollLeft === f.viewState.scrollLeft && next.scrollTop === f.viewState.scrollTop) {
       return;
@@ -161,6 +180,7 @@ export function GanttCanvas() {
       today: todayISO(),
     });
     sceneRef.current = scene;
+    maxScrollTopRef.current = Math.max(0, scene.totalRows * ROW_HEIGHT - size.height);
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
   }, [file, size]);
