@@ -134,3 +134,8 @@ export function computeDateExtent(
 export function todayISO(now: Date = new Date()): string {
   return toISODate(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate());
 }
+
+/** Clamp `v` into `[lo, hi]`. Used to bound scrollTop to the real content range. */
+export function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}

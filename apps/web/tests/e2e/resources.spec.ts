@@ -104,6 +104,23 @@ test.describe('resource view', () => {
   });
 
   test('wheel-pan over the right pane scrolls vertically and horizontally', async ({ page }) => {
+    // Add enough resources that the list overflows the viewport, so vertical
+    // wheel-pan has room to scroll (scrollTop is clamped to [0, contentH-vh];
+    // with one row it would be 0 and the assertion below would be vacuous).
+    await page.evaluate(() => {
+      const store = (window as unknown as { __ganttlyStore: unknown }).__ganttlyStore as {
+        setState: (s: unknown) => void;
+        getState: () => { file: Record<string, unknown> };
+      };
+      const f = store.getState().file as { resources: unknown[] };
+      const extra = Array.from({ length: 30 }, (_, i) => ({
+        id: `extra-${i}`,
+        name: `R${i}`,
+        capacity: 1.0,
+        role: 'dev',
+      }));
+      store.setState({ file: { ...f, resources: [...f.resources, ...extra] } });
+    });
     // Switch to resource view and wait for the load canvas to mount.
     await page.getByRole('button', { name: '资源视图' }).click();
     const canvas = page.locator('canvas').first();

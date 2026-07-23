@@ -44,12 +44,13 @@ export function renderResourceLoad(
     zoom: scene.zoom,
     originDate: scene.originDate,
     scrollLeft: scene.scrollLeft,
-    scrollTop: 0, // grid rows are independent of scroll
+    scrollTop: scene.scrollTop, // so horizontal row separators follow the rows (aligned with ResourceList)
     viewportWidth: scene.viewportWidth,
     viewportHeight: scene.viewportHeight,
     today: scene.today,
     holidays: scene.holidays,
     rows: [],
+    totalRows: 0,
     arrows: [],
     showCriticalPath: false,
     selectedTaskId: null,

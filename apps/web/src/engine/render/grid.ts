@@ -71,12 +71,16 @@ export function renderGrid(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
   }
   ctx.globalAlpha = 1;
 
-  // 3. Horizontal row separators.
+  // 3. Horizontal row separators — follow the rows as they scroll, so the
+  // separators always sit on row boundaries (aligned with bars + the left
+  // list). Without `- offset` the lines would be pinned to the viewport while
+  // bars scroll smoothly, drifting by up to ROW_HEIGHT during sub-row scroll.
   ctx.strokeStyle = theme.border;
   ctx.globalAlpha = 0.4;
+  const offset = ((scene.scrollTop % ROW_HEIGHT) + ROW_HEIGHT) % ROW_HEIGHT;
   const visibleRows = Math.ceil((viewportHeight - HEADER_HEIGHT) / ROW_HEIGHT) + 1;
   for (let r = 0; r <= visibleRows; r++) {
-    const y = Math.round(HEADER_HEIGHT + r * ROW_HEIGHT) + 0.5;
+    const y = Math.round(HEADER_HEIGHT + r * ROW_HEIGHT - offset) + 0.5;
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(viewportWidth, y);
