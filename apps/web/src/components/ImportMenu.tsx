@@ -8,8 +8,9 @@
  */
 import { useTranslation } from 'react-i18next';
 import { useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ToolbarButton } from './ui/ToolbarButton';
-import { useProjectStore } from '@/store/useProjectStore';
+import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { validateGanttlyFile, formatAjvErrors, normalizeFile } from '@ganttly/schema';
 import { parseGan, GanImportError } from '@ganttly/gan-parser';
 import { getCalendar } from '@ganttly/calendar-data';
@@ -21,8 +22,8 @@ const getHolidays = (region: string): Holiday[] => getCalendar(region).holidays;
 
 export function ImportMenu() {
   const { t } = useTranslation();
-  const setFile = useProjectStore((s) => s.setFile);
-  const save = useProjectStore((s) => s.save);
+  const navigate = useNavigate();
+  const createProject = useProjectCatalogStore((s) => s.createProject);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const ganInputRef = useRef<HTMLInputElement>(null);
 
@@ -41,8 +42,9 @@ export function ImportMenu() {
         window.alert(t('errors.importFailed', { reason: formatAjvErrors(result.errors) }));
         return;
       }
-      setFile(normalized);
-      await save();
+      const name = normalized.project.name?.trim() || fileBaseName(file.name);
+      const id = await createProject(name, normalized);
+      navigate(`/projects/${id}`);
     } catch (err) {
       window.alert(t('errors.importFailed', { reason: (err as Error).message }));
     }
@@ -58,8 +60,13 @@ export function ImportMenu() {
       // Normalize for future P1 field defaults (holidays already set above; the
       // normalize call keeps .gan imports consistent with the JSON path).
       const normalized = normalizeFile(file2, { getHolidays });
-      setFile(normalized);
-      await save();
+      const importedName = normalized.project.name?.trim();
+      const name =
+        importedName && importedName !== 'Untitled project'
+          ? importedName
+          : fileBaseName(file.name);
+      const id = await createProject(name, normalized);
+      navigate(`/projects/${id}`);
       // Surface what was dropped.
       if (result.skipped.length > 0) {
         window.alert(
@@ -104,4 +111,8 @@ export function ImportMenu() {
       />
     </div>
   );
+}
+
+function fileBaseName(filename: string): string {
+  return filename.replace(/\.ganttly\.json$/i, '').replace(/\.(gan|xml|json)$/i, '') || '导入项目';
 }

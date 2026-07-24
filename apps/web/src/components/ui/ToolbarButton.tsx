@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -6,12 +6,16 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   pressed?: boolean;
 }
 
-export function ToolbarButton({ children, pressed, className, ...rest }: Props) {
+export const ToolbarButton = forwardRef<HTMLButtonElement, Props>(function ToolbarButton(
+  { children, pressed, className, ...rest },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       {...rest}
       className={cn(
-        'rounded px-2 py-1 text-sm transition-colors',
+        'shrink-0 whitespace-nowrap rounded px-2 py-1 text-sm transition-colors',
         'border border-transparent',
         'hover:bg-bg hover:text-fg',
         'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent',
@@ -22,4 +26,4 @@ export function ToolbarButton({ children, pressed, className, ...rest }: Props) 
       {children}
     </button>
   );
-}
+});
