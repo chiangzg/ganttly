@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /**
@@ -30,6 +29,7 @@ test('export JSON then re-import restores the task', async ({ page }) => {
   });
 
   // Trigger JSON export and intercept the download.
+  await page.getByRole('button', { name: '更多操作' }).click();
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByRole('button', { name: '导出 JSON' }).click(),
@@ -37,17 +37,10 @@ test('export JSON then re-import restores the task', async ({ page }) => {
   const downloadPath = await download.path();
   expect(downloadPath).toBeTruthy();
 
-  // Read the downloaded JSON back, inject it via the store directly
-  // (simulating an import round-trip).
-  const json = readFileSync(downloadPath!, 'utf-8');
-  await page.evaluate((payload) => {
-    const data = JSON.parse(payload);
-    const store = (window as unknown as { __ganttlyStore: unknown }).__ganttlyStore as {
-      setState: (s: unknown) => void;
-      getState: () => { file: unknown };
-    };
-    store.setState({ file: data });
-  }, json);
+  // Importing creates a new project instead of overwriting the current one.
+  const originalUrl = page.url();
+  await page.locator('input[type="file"][accept*="application/json"]').setInputFiles(downloadPath!);
+  await expect(page).not.toHaveURL(originalUrl);
 
   // Verify the row is still there with the same name.
   const restoredName = await page.evaluate(() => {
@@ -65,6 +58,7 @@ test('import .gan populates the task table', async ({ page }) => {
 
   // Drive the import through the real UI: set the file on the hidden <input>.
   // Playwright's setInputFiles handles the file picker path automatically.
+  await page.getByRole('button', { name: '更多操作' }).click();
   await page.locator('input[type="file"][accept*=".gan"]').setInputFiles(GAN_FIXTURE);
 
   // Several rows should now be present (the sample has many tasks).

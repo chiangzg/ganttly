@@ -19,6 +19,7 @@ ganttly 通过以下方式解决这些痛点:
 - ✅ **中国节假日一等公民** — 内置 2026 全年法定节假日与调休工作日,自动高亮、自动跳过工期计算。
 - ✅ **政治中立** — 工具软件不携带任何政治符号。
 - ✅ **本地优先** — 数据存浏览器 IndexedDB,天然离线,零后端、零运维。
+- ✅ **多项目工作区** — 项目中心、独立 URL、顶部快速切换、收藏/固定标签与回收站。
 - ✅ **完整甘特图特性** — WBS 任务树、4 种依赖(FS/SS/FF/SF)、关键路径(CPM)、撤销/重做、`.gan` 导入、JSON / CSV 导出。
 
 ## 快速上手
@@ -32,8 +33,8 @@ pnpm dev          # 启动 http://localhost:5173
 pnpm build
 
 # 跑测试
-pnpm test         # 单元测试 (135+)
-pnpm test:e2e     # Playwright + 截图回归 (37+ 用例)
+pnpm test         # 单元测试 (200+)
+pnpm test:e2e     # Playwright + 截图回归 (50+ 用例)
 ```
 
 环境要求:Node ≥ 18, pnpm ≥ 9。
@@ -51,6 +52,7 @@ pnpm test:e2e     # Playwright + 截图回归 (37+ 用例)
 | 撤销/重做    | ✅    | 命令模式,深度无限(含拖拽改期)                 |
 | 完整交互     | ✅    | 复制/剪切/粘贴、Alt+Up/Down 排序、右键菜单    |
 | 本地持久化   | ✅    | IndexedDB 自动保存                            |
+| 多项目管理   | ✅    | 项目中心、独立 URL、收藏、固定标签、回收站    |
 | 导入导出     | ✅    | JSON / CSV 导出,JSON / `.gan` 导入            |
 | 资源分配     | 🚧 P1 | 团队管理与负载图                              |
 | 基线对比     | 🚧 P1 | 计划 vs 实际                                  |
@@ -65,7 +67,8 @@ pnpm test:e2e     # Playwright + 截图回归 (37+ 用例)
 | 渲染内核 | Canvas(自研)+ DOM 叠层                   |
 | 框架     | React 18 + TypeScript 5                  |
 | 构建     | Vite 5                                   |
-| UI       | Tailwind CSS + 自定义组件(主题跟随系统)  |
+| UI       | Tailwind CSS + Radix UI + Lucide Icons   |
+| 路由     | React Router,每个项目独立 URL            |
 | 状态     | Zustand + Command pattern(撤销/重做)     |
 | 持久化   | IndexedDB(降级 LocalStorage)             |
 | 测试     | Vitest(单测)+ Playwright(E2E + 截图回归) |

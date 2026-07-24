@@ -7,19 +7,34 @@ import { expect, test } from '@playwright/test';
  * IndexedDB-backed persistence must survive a full reload.
  */
 
-test('task survives a page reload (IndexedDB persistence)', async ({ page, context }) => {
+test('task survives a page reload (IndexedDB persistence)', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible();
 
   // Clean IndexedDB to start fresh.
-  await context.clearCookies();
   await page.evaluate(async () => {
-    const dbs = await indexedDB.databases?.();
-    for (const db of dbs ?? []) {
-      if (db.name) indexedDB.deleteDatabase(db.name);
+    const store = (window as unknown as { __ganttlyStore: unknown }).__ganttlyStore as {
+      getState: () => {
+        repo: {
+          listProjects: (options: { includeDeleted: boolean }) => Promise<Array<{ id: string }>>;
+          deleteProjectPermanently: (id: string) => Promise<void>;
+          saveNavigationState: (state: unknown) => Promise<void>;
+        };
+      };
+    };
+    const repo = store.getState().repo;
+    for (const project of await repo.listProjects({ includeDeleted: true })) {
+      await repo.deleteProjectPermanently(project.id);
     }
+    await repo.saveNavigationState({
+      lastActiveProjectId: null,
+      openTabs: [],
+      favoriteProjectIds: [],
+      recentProjects: [],
+    });
   });
-  await page.reload();
-  await page.waitForTimeout(500);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible();
 
   // Add a uniquely-named task.
   const marker = `PERSIST-MARKER-${Date.now()}`;
