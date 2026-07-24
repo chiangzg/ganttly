@@ -20,7 +20,12 @@ import type {
 } from '@ganttly/schema';
 import { createEmptyFile, normalizeFile } from '@ganttly/schema';
 import { getCalendar } from '@ganttly/calendar-data';
-import { DEFAULT_PROJECT_ID, type ProjectRepository } from '@/data/repository';
+import {
+  DEFAULT_PROJECT_ID,
+  type ProjectId,
+  type ProjectRepository,
+  type ProjectRevision,
+} from '@/data/repository';
 import { computeCascadeRollup, recomputeSelfAndAncestors } from '@/lib/summary';
 import {
   cascadeSchedule,
@@ -58,10 +63,18 @@ export interface SaveState {
 interface ProjectStoreState {
   file: GanttlyFile;
   repo: ProjectRepository | null;
+  activeProjectId: ProjectId | null;
+  revision: ProjectRevision | null;
+  dirty: boolean;
+  loadState: 'idle' | 'loading' | 'ready' | 'missing' | 'error';
   saveState: SaveState;
 
   // Lifecycle
+  setRepository(repo: ProjectRepository): void;
   init(repo: ProjectRepository): Promise<void>;
+  loadProject(id: ProjectId): Promise<boolean>;
+  unloadProject(): void;
+  flushPendingSave(): Promise<void>;
   setFile(file: GanttlyFile): void;
 
   // Command dispatch (also pushes onto undo stack)
@@ -98,6 +111,22 @@ function withCalendar(file: GanttlyFile): GanttlyFile {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let loadGeneration = 0;
+let savePromise: Promise<void> | null = null;
+
+function clearSaveTimer(): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+}
+
+function scheduleSave(projectId: ProjectId | null): void {
+  clearSaveTimer();
+  if (!projectId) return;
+  saveTimer = setTimeout(() => {
+    const state = useProjectStore.getState();
+    if (state.activeProjectId === projectId) void state.save();
+  }, 500);
+}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -106,52 +135,106 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   file: withCalendar(createEmptyFile()),
   repo: null,
+  activeProjectId: null,
+  revision: null,
+  dirty: false,
+  loadState: 'idle',
   saveState: { status: 'idle' },
   undoStack: [],
   redoStack: [],
   lastSaveError: null,
 
-  async init(repo) {
+  setRepository(repo) {
     set({ repo });
-    let file = await repo.load(DEFAULT_PROJECT_ID);
-    if (!file) {
-      file = withCalendar(createEmptyFile({ name: '我的项目' }));
-      await repo.save(DEFAULT_PROJECT_ID, file);
-    }
-    const normalized = withCalendar(file!);
-    set({ file: normalized, saveState: { status: 'saved' } });
+  },
 
-    // G14: detect "sleeping" dependency violations in the loaded file (old files
-    // created before the cascade engine never auto-rescheduled successors).
-    // Prompt the user; if they accept, run a full cascade pass over every task.
-    const cal = resolveCalendar(getCalendar(normalized.calendar.id));
-    const violations = countDependencyViolations(normalized.tasks, cal);
-    if (violations > 0) {
-      // Defer the prompt so the store finishes initializing first.
-      setTimeout(() => {
-        const msg = `检测到 ${violations} 处依赖违反（后继任务日期早于前置任务暗示值），是否自动顺移？`;
-        if (typeof window !== 'undefined' && window.confirm(msg)) {
-          const current = get().file;
-          // Run cascade from every root task that has successors.
-          let tasks = current.tasks;
-          const captured = new Map<string, Partial<Task>>();
-          for (const t of current.tasks) {
-            const patches = cascadeSchedule(tasks, t.id, cal);
-            for (const cp of patches) {
-              tasks = applyPatchAndCapture(tasks, cp.id, cp.patch, captured);
-            }
-          }
-          if (captured.size > 0) {
-            get().setFile({ ...current, tasks });
-            void get().save();
-          }
-        }
-      }, 100);
+  async init(repo) {
+    ++loadGeneration;
+    clearSaveTimer();
+    set({
+      repo,
+      activeProjectId: null,
+      revision: null,
+      dirty: false,
+      loadState: 'idle',
+      undoStack: [],
+      redoStack: [],
+    });
+    let snapshot = await repo.loadProject(DEFAULT_PROJECT_ID);
+    if (!snapshot) {
+      snapshot = await repo.createProject({
+        id: DEFAULT_PROJECT_ID,
+        file: withCalendar(createEmptyFile({ name: '我的项目' })),
+      });
+    }
+    await get().loadProject(snapshot.summary.id);
+  },
+
+  async loadProject(id) {
+    const { repo, activeProjectId, dirty } = get();
+    if (!repo) return false;
+    if (activeProjectId === id && get().loadState === 'ready') return true;
+    if (activeProjectId && dirty) await get().flushPendingSave();
+
+    const generation = ++loadGeneration;
+    clearSaveTimer();
+    set({ loadState: 'loading', lastSaveError: null });
+    try {
+      const snapshot = await repo.loadProject(id);
+      if (generation !== loadGeneration) return false;
+      if (!snapshot || snapshot.summary.deletedAt) {
+        set({ loadState: 'missing' });
+        return false;
+      }
+      const normalized = withCalendar(snapshot.file);
+      set({
+        activeProjectId: id,
+        revision: snapshot.revision,
+        file: normalized,
+        dirty: false,
+        loadState: 'ready',
+        saveState: { status: 'saved' },
+        undoStack: [],
+        redoStack: [],
+      });
+      scheduleViolationCheck(normalized, get);
+      return true;
+    } catch (error) {
+      if (generation === loadGeneration) {
+        const message = (error as Error).message;
+        set({ loadState: 'error', lastSaveError: message });
+      }
+      return false;
+    }
+  },
+
+  unloadProject() {
+    ++loadGeneration;
+    clearSaveTimer();
+    set({
+      activeProjectId: null,
+      revision: null,
+      dirty: false,
+      loadState: 'idle',
+      undoStack: [],
+      redoStack: [],
+      saveState: { status: 'idle' },
+    });
+  },
+
+  async flushPendingSave() {
+    clearSaveTimer();
+    if (savePromise) await savePromise;
+    if (get().dirty) await get().save();
+    const state = get();
+    if (state.saveState.status === 'error') {
+      throw new Error(state.lastSaveError ?? 'Project save failed');
     }
   },
 
   setFile(file) {
-    set({ file });
+    set({ file, dirty: true, saveState: { status: 'saving' } });
+    scheduleSave(get().activeProjectId);
   },
 
   dispatch(command) {
@@ -161,15 +244,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       file: next,
       undoStack: [...get().undoStack, command],
       redoStack: [], // any new action clears redo
+      dirty: true,
       saveState: { status: 'saving' },
     });
-    // Debounced autosave (PRD §3.8 — 500ms).
-    if (saveTimer) clearTimeout(saveTimer);
-    const { repo } = get();
-    saveTimer = setTimeout(() => {
-      void get().save();
-    }, 500);
-    void repo; // satisfy lints
+    scheduleSave(get().activeProjectId);
   },
 
   undo() {
@@ -181,10 +259,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       file: reverted,
       undoStack: undoStack.slice(0, -1),
       redoStack: [...redoStack, command],
+      dirty: true,
       saveState: { status: 'saving' },
     });
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void get().save(), 500);
+    scheduleSave(get().activeProjectId);
   },
 
   redo() {
@@ -196,10 +274,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       file: applied,
       undoStack: [...undoStack, command],
       redoStack: redoStack.slice(0, -1),
+      dirty: true,
       saveState: { status: 'saving' },
     });
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void get().save(), 500);
+    scheduleSave(get().activeProjectId);
   },
 
   canUndo() {
@@ -221,22 +299,72 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   async save() {
-    const { repo, file } = get();
-    if (!repo) return;
-    set({ saveState: { status: 'saving' } });
+    if (savePromise) {
+      await savePromise;
+      if (get().dirty) await get().save();
+      return;
+    }
+    savePromise = performSave(get, set);
     try {
-      const stamped: GanttlyFile = {
-        ...file,
-        meta: { ...file.meta, updatedAt: new Date().toISOString() },
-      };
-      await repo.save(DEFAULT_PROJECT_ID, stamped);
-      set({ file: stamped, saveState: { status: 'saved' }, lastSaveError: null });
-    } catch (err) {
-      const msg = (err as Error).message;
-      set({ saveState: { status: 'error', error: msg }, lastSaveError: msg });
+      await savePromise;
+    } finally {
+      savePromise = null;
     }
   },
 }));
+
+async function performSave(
+  get: () => ProjectStoreState,
+  set: (partial: Partial<ProjectStoreState>) => void,
+): Promise<void> {
+  const { repo, file, activeProjectId, revision } = get();
+  if (!repo || !activeProjectId || revision === null) return;
+  clearSaveTimer();
+  set({ saveState: { status: 'saving' } });
+  try {
+    const stamped: GanttlyFile = {
+      ...file,
+      meta: { ...file.meta, updatedAt: new Date().toISOString() },
+    };
+    const snapshot = await repo.saveProject(activeProjectId, stamped, {
+      expectedRevision: revision,
+    });
+    const current = get();
+    if (current.activeProjectId !== activeProjectId) return;
+    const changedWhileSaving = current.file !== file;
+    set({
+      file: changedWhileSaving ? current.file : snapshot.file,
+      revision: snapshot.revision,
+      dirty: changedWhileSaving,
+      saveState: { status: changedWhileSaving ? 'saving' : 'saved' },
+      lastSaveError: null,
+    });
+    if (changedWhileSaving) scheduleSave(activeProjectId);
+  } catch (err) {
+    const msg = (err as Error).message;
+    set({ saveState: { status: 'error', error: msg }, lastSaveError: msg });
+  }
+}
+
+function scheduleViolationCheck(normalized: GanttlyFile, get: () => ProjectStoreState): void {
+  const cal = resolveCalendar(getCalendar(normalized.calendar.id));
+  const violations = countDependencyViolations(normalized.tasks, cal);
+  if (violations === 0) return;
+  setTimeout(() => {
+    const msg = `检测到 ${violations} 处依赖违反（后继任务日期早于前置任务暗示值），是否自动顺移？`;
+    if (typeof window === 'undefined' || !window.confirm(msg)) return;
+    const current = get().file;
+    let tasks = current.tasks;
+    const captured = new Map<string, Partial<Task>>();
+    for (const task of current.tasks) {
+      const patches = cascadeSchedule(tasks, task.id, cal);
+      for (const patch of patches) {
+        tasks = applyPatchAndCapture(tasks, patch.id, patch.patch, captured);
+      }
+    }
+    if (captured.size > 0) get().setFile({ ...current, tasks });
+  }, 100);
+}
 
 // ---------------------------------------------------------------------------
 // Built-in commands

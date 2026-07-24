@@ -65,6 +65,8 @@ interface ViewStoreState {
   /** Show the person-days column in TaskTable (G11: ephemeral, not persisted). */
   showCostColumns: boolean;
   setShowCostColumns(v: boolean): void;
+
+  resetForProjectSwitch(): void;
 }
 
 export const useViewStore = create<ViewStoreState>((set) => ({
@@ -99,4 +101,14 @@ export const useViewStore = create<ViewStoreState>((set) => ({
 
   showCostColumns: false,
   setShowCostColumns: (v) => set({ showCostColumns: v }),
+
+  resetForProjectSwitch: () =>
+    set({
+      drawer: 'closed',
+      contextMenu: null,
+      resourceScrollTop: 0,
+      selectedResourceId: null,
+      expandedResourceIds: new Set<string>(),
+      selectedTaskIdInResource: null,
+    }),
 }));
