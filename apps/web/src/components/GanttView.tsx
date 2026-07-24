@@ -16,7 +16,6 @@
  * on both sides). The Toolbar drives high-level actions; the StatusBar shows
  * save state and undo/redo availability.
  */
-import { useEffect } from 'react';
 import { Toolbar } from './Toolbar';
 import { TaskTable } from './TaskTable';
 import { GanttCanvas } from './GanttCanvas';
@@ -25,22 +24,15 @@ import { ResourceLoadCanvas } from './ResourceLoadCanvas';
 import { StatusBar } from './StatusBar';
 import { TaskDrawer } from './TaskDrawer';
 import { ContextMenu } from './ContextMenu';
-import { getRepository } from '@/data/createRepository';
-import { useProjectStore } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
+import { ProjectHeader } from './projects/ProjectHeader';
 
 export function GanttView() {
-  const init = useProjectStore((s) => s.init);
   const viewMode = useViewStore((s) => s.viewMode);
-
-  // Boot: open the default project (creating one if needed).
-  useEffect(() => {
-    const repo = getRepository();
-    void init(repo);
-  }, [init]);
 
   return (
     <div className="flex h-full flex-col">
+      <ProjectHeader />
       <Toolbar />
       <div className="flex flex-1 overflow-hidden">
         {viewMode === 'resource' ? (

@@ -24,6 +24,8 @@ import { ImportMenu } from './ImportMenu';
 import { nanoid } from 'nanoid';
 import { addTaskCommand } from '@/store/useProjectStore';
 import type { Task } from '@ganttly/schema';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { MoreHorizontal } from 'lucide-react';
 
 const ZOOM_ORDER: ZoomLevel[] = ['day', 'week', 'month', 'year'];
 
@@ -109,7 +111,7 @@ export function Toolbar() {
   const setShowCostColumns = useViewStore((s) => s.setShowCostColumns);
 
   return (
-    <div className="flex items-center gap-1 border-b border-border bg-bg-elevated px-3 py-2">
+    <div className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-border bg-bg-elevated px-3">
       <ToolbarButton onClick={jumpToToday} title={t('toolbar.today')}>
         {t('toolbar.today')}
       </ToolbarButton>
@@ -117,7 +119,7 @@ export function Toolbar() {
       <ToolbarButton onClick={zoomIn} title={t('toolbar.zoomIn')}>
         +
       </ToolbarButton>
-      <span className="px-2 text-sm font-medium text-fg">
+      <span className="shrink-0 whitespace-nowrap px-2 text-sm font-medium text-fg">
         {t(`toolbar.zoom${cap(file.viewState.zoom)}`)}
       </span>
       <ToolbarButton onClick={zoomOut} title={t('toolbar.zoomOut')}>
@@ -178,9 +180,31 @@ export function Toolbar() {
       <ToolbarButton onClick={() => void save()} title={t('toolbar.save')}>
         {t('toolbar.save')}
       </ToolbarButton>
-      <div className="ml-auto flex items-center gap-1">
-        <ImportMenu />
-        <ExportMenu />
+      <div className="ml-auto shrink-0">
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <ToolbarButton title="更多操作" aria-label="更多操作">
+              <MoreHorizontal size={17} />
+            </ToolbarButton>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={6}
+              className="z-40 min-w-64 rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
+            >
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                导入为新项目
+              </div>
+              <ImportMenu />
+              <DropdownMenu.Separator className="my-2 h-px bg-border" />
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                导出当前项目
+              </div>
+              <ExportMenu />
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
     </div>
   );

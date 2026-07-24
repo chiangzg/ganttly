@@ -166,16 +166,29 @@ UI 临时状态:抽屉开关、上下文菜单位置。不进 undo 栈。
 ## 4. 数据访问层抽象 (PRD §5.3)
 
 ```
-UI (React Context) ──→ ProjectRepository interface ──→ IndexedDBRepository (MVP)
-                                                  └─→ LocalStorageRepository (兜底)
-                                                  └─→ RemoteRepository (二期,未实现)
+项目中心 / 编辑器 ──→ Project Catalog Store ─┐
+                                               ├─→ ProjectRepository ─→ IndexedDBRepository
+Active Project Store ─────────────────────────┘                    └─→ RemoteRepository(二期)
+项目标签 / 收藏 / 最近访问 ─→ ProjectPreferencesRepository
 ```
 
-**为什么抽象**:节假日等"公共数据"将来要从云端拉取,但任务数据仍本地优先。Repository 接口让二期引入后端时,UI 零改动。
+**为什么抽象**:当前数据保存在本地,未来登录后可让服务端成为主存储。Repository 返回 opaque `revision`,本地使用递增版本号,未来可直接映射 HTTP `ETag / If-Match`,避免并发保存静默覆盖。
 
-**IndexedDB schema**:单 object store `projects`,key = `projectId`,值 = 完整 `GanttlyFile` 文档。**不拆表**——一个项目是一个文档,保证写入原子性。
+**IndexedDB v2 schema**:
 
-**降级**:`IndexedDBRepository.open()` 在隐私模式/配额不足时 reject,工厂 `createRepository` 自动回退到 `LocalStorageRepository`(容量小但兼容性好)。
+- `projects`:key 为 `projectId`,保存完整 `GanttlyFile`、列表摘要、revision 和 `deletedAt`。一个项目仍是一份原子文档。
+- `preferences`:保存当前用户的最近项目、打开标签、固定和收藏。用户偏好不进入导出的项目 JSON。
+- v1 的 `{ id, file }` 记录在读取时幂等补齐,旧 `default` 项目不改 ID。
+
+**Store 职责**:
+
+- `useProjectCatalogStore`:项目列表、创建/复制/重命名、回收站、收藏和标签导航。
+- `useProjectStore`:当前项目文件、revision、自动保存与项目内撤销/重做。
+- 项目切换先 flush 当前项目,随后加载目标快照并清空撤销历史。保存定时器绑定 projectId,避免快速切换时串写项目。
+
+**路由**:`/projects` 为项目中心,`/projects/trash` 为回收站,`/projects/:projectId` 为编辑器。根路径恢复最近项目,无项目时进入项目中心。
+
+**LocalStorage 实现**:保持相同接口和兼容迁移逻辑,用于不支持 IndexedDB 的环境。RemoteRepository 尚未实现。
 
 ---
 

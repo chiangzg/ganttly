@@ -5,13 +5,13 @@
  * On the server (SSR / Node test env), both are unavailable and we throw —
  * tests should inject a fake repository rather than rely on browser storage.
  */
-import type { ProjectRepository } from './repository';
+import type { DataRepository } from './repository';
 import { IndexedDBRepository } from './indexeddb';
 import { LocalStorageRepository } from './localstorage';
 
-let cached: ProjectRepository | null = null;
+let cached: DataRepository | null = null;
 
-export function getRepository(): ProjectRepository {
+export function getRepository(): DataRepository {
   if (cached) return cached;
   if (typeof indexedDB !== 'undefined') {
     cached = new IndexedDBRepository();
@@ -24,6 +24,6 @@ export function getRepository(): ProjectRepository {
 }
 
 /** Test-only: inject a fake repository. */
-export function setRepository(repo: ProjectRepository): void {
+export function setRepository(repo: DataRepository): void {
   cached = repo;
 }
