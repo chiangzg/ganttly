@@ -3,9 +3,8 @@
  * (PRD §3.9, M4.1-M4.2)
  *
  * These items render inside a Radix DropdownMenu.Content. We wrap them as
- * DropdownMenu.Item (asChild) so they pick up keyboard navigation/role and
- * match ImportMenu's interaction model. onSelect calls preventDefault to
- * keep the menu open across the (synchronous) download trigger.
+ * DropdownMenu.Item (asChild) so they pick up keyboard navigation and roles.
+ * onSelect keeps the menu mounted across the synchronous download trigger.
  */
 import { useTranslation } from 'react-i18next';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
