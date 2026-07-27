@@ -392,14 +392,15 @@ export function updateTaskCommand(taskId: string, patch: Partial<Task>): Command
     apply: (file) => {
       const existing = file.tasks.find((t) => t.id === taskId);
       if (!existing) return file;
+      const normalizedPatch = normalizeTaskPatch(existing, patch);
       // Capture the original values of every key we're about to overwrite.
       oldFields = {};
-      for (const key of Object.keys(patch) as Array<keyof Task>) {
+      for (const key of Object.keys(normalizedPatch) as Array<keyof Task>) {
         (oldFields as Record<string, unknown>)[key] = existing[key];
       }
       return {
         ...file,
-        tasks: file.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
+        tasks: file.tasks.map((t) => (t.id === taskId ? { ...t, ...normalizedPatch } : t)),
       };
     },
     invert: (file) => {
@@ -635,8 +636,9 @@ function applyPatchAndCapture(
 ): Task[] {
   return tasks.map((t) => {
     if (t.id !== id) return t;
+    const normalizedPatch = normalizeTaskPatch(t, patch);
     const old: Partial<Task> = {};
-    for (const key of Object.keys(patch) as Array<keyof Task>) {
+    for (const key of Object.keys(normalizedPatch) as Array<keyof Task>) {
       (old as Record<string, unknown>)[key] = t[key];
     }
     // Don't overwrite an earlier capture (a task may be patched more than once
@@ -644,8 +646,32 @@ function applyPatchAndCapture(
     // wants to capture its start/end). Keep the union of old values.
     const existing = captured.get(id);
     captured.set(id, existing ? { ...old, ...existing } : old);
-    return { ...t, ...patch };
+    return { ...t, ...normalizedPatch };
   });
+}
+
+/**
+ * Canonicalize task-local overtime whenever any command patches a task. This
+ * central path covers direct edits, drag, constraints and dependency cascades.
+ * Dates outside the resulting task range are removed, and milestones cannot
+ * retain overtime. Returning the implicit overtime patch is important so the
+ * caller captures it for undo/redo alongside the explicit date change.
+ */
+function normalizeTaskPatch(task: Task, patch: Partial<Task>): Partial<Task> {
+  const merged = { ...task, ...patch };
+  const candidate = merged.overtimeDates ?? [];
+  const overtimeDates = merged.isMilestone
+    ? []
+    : [...new Set(candidate)].filter((date) => date >= merged.start && date <= merged.end).sort();
+  const current = task.overtimeDates ?? [];
+  const overtimeChanged =
+    overtimeDates.length !== current.length ||
+    overtimeDates.some((date, index) => date !== current[index]);
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'overtimeDates') || overtimeChanged) {
+    return { ...patch, overtimeDates };
+  }
+  return patch;
 }
 
 /** Restore captured old values onto a tasks array (shared `invert` body). */

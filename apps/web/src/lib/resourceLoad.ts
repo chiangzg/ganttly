@@ -2,22 +2,23 @@
  * Resource load computation (P1 feature one).
  *
  * Aggregates per-resource daily load from `TaskAssignment`s. For each task, the
- * assignment's `load` (0-100, percent allocation) is added to every working day
- * in `[task.start, task.end]`. A resource assigned to two overlapping tasks
- * therefore accumulates load additively — e.g. load=30 on task X + load=70 on
- * task Y over the same days yields 100% (no overload) on those days.
+ * assignment's `load` (0-100, percent allocation) is added to every effective
+ * effort day: normal project-calendar working days plus explicitly marked
+ * task overtime dates. A resource assigned to two overlapping tasks therefore
+ * accumulates load additively — e.g. load=30 on task X + load=70 on task Y
+ * over the same days yields 100% (no overload) on those days.
  *
  * Output shape: `Map<resourceId, Map<dateISO, totalLoad>>` where `totalLoad`
  * may exceed 100 (overload). Consumers (the load-chart renderer) color bars
  * green ≤100, red >100.
  *
- * Performance: O(tasks × assignments × workingDays). For 100 tasks × 5
+ * Performance: O(tasks × assignments × effortDays). For 100 tasks × 5
  * assignments × 30 days ≈ 15k iterations — cheap enough to recompute during
  * scene assembly rather than every render frame.
  */
 import type { Task, Resource } from '@ganttly/schema';
 import type { ResolvedCalendar } from './calendar';
-import { iterateWorkingDays } from './calendar';
+import { effectiveTaskDays } from './calendar';
 
 export type ResourceLoadMap = Map<string, Map<string, number>>;
 
@@ -27,6 +28,9 @@ export type ResourceLoadMap = Map<string, Map<string, number>>;
  * `resources` is accepted (not just tasks) so the result map can be pre-seeded
  * with an entry for every known resource — even those with no assignments —
  * which simplifies downstream rendering (no `?. ?? 0` guards).
+ *
+ * A rest day produces a load bar only when the task explicitly lists it in
+ * `overtimeDates`; an unmarked weekend inside the task span remains unloaded.
  */
 export function computeResourceLoad(
   tasks: Task[],
@@ -44,7 +48,7 @@ export function computeResourceLoad(
     // (G13: double-count guard). The caller should avoid assigning to summary
     // tasks, but this keeps the math safe regardless.
     if (task.assignments.length === 0) continue;
-    const days = Array.from(iterateWorkingDays(task.start, task.end, cal));
+    const days = effectiveTaskDays(task, cal);
     for (const assignment of task.assignments) {
       const perDay = loadMap.get(assignment.resourceId);
       if (!perDay) continue; // assignment references an unknown resource

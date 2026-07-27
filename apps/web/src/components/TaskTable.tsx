@@ -28,6 +28,7 @@ import { cn } from '@/lib/cn';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
+import { resolveCalendar } from '@/lib/calendar';
 import { nanoid } from 'nanoid';
 import type { Task } from '@ganttly/schema';
 
@@ -52,6 +53,7 @@ export function TaskTable() {
 
   const gridTemplate = showCostColumns ? GRID_TEMPLATE_WITH_EFFORT : GRID_TEMPLATE;
   const tableWidth = showCostColumns ? TABLE_WIDTH_WITH_EFFORT : TABLE_WIDTH;
+  const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   const rows = useMemo(() => {
     const tree = buildTree(file.tasks);
@@ -60,8 +62,8 @@ export function TaskTable() {
 
   // Person-days rollup map (summary tasks use rolled-up children sum, G13).
   const effortMap = useMemo(
-    () => computeAllRollups(file.tasks, file.resources),
-    [file.tasks, file.resources],
+    () => computeAllRollups(file.tasks, file.resources, cal),
+    [file.tasks, file.resources, cal],
   );
 
   // Latest scrollTop kept in a ref so the store→DOM sync effect can decide
@@ -233,6 +235,7 @@ export function TaskTable() {
       start,
       end: start,
       duration: 1,
+      overtimeDates: [],
       progress: 0,
       isMilestone: false,
       dependencies: [],
@@ -406,7 +409,7 @@ export function TaskTable() {
                       const pd =
                         node.children.length > 0
                           ? effortMap.get(node.task.id)?.personDays
-                          : computeTaskPersonDays(node.task, file.resources);
+                          : computeTaskPersonDays(node.task, file.resources, cal);
                       return pd && pd > 0 ? `${pd}` : '—';
                     })()}
                   </div>

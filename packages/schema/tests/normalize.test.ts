@@ -149,4 +149,42 @@ describe('normalizeFile', () => {
     const out = normalizeFile(file, { getHolidays });
     expect(out.tasks[0]!.constraints).toEqual({ type: 'mustStartOn', date: '2026-01-05' });
   });
+
+  it('defaults and canonicalizes task overtime dates', () => {
+    const base = createEmptyFile();
+    const task = {
+      id: 't1',
+      name: 'T1',
+      parentId: null,
+      order: 0,
+      start: '2026-01-05',
+      end: '2026-01-12',
+      duration: 6,
+      progress: 0,
+      isMilestone: false,
+      dependencies: [],
+      constraints: { type: 'none' as const },
+      assignments: [],
+      customFields: {},
+    };
+    const file: GanttlyFile = {
+      ...base,
+      tasks: [
+        task,
+        {
+          ...task,
+          id: 't2',
+          overtimeDates: ['2026-01-10', '2026-01-04', '2026-01-10', '2026-01-11'],
+        },
+      ],
+    };
+    const snapshot = structuredClone(file);
+
+    const out = normalizeFile(file, { getHolidays });
+
+    expect(out.tasks[0]!.overtimeDates).toEqual([]);
+    expect(out.tasks[1]!.overtimeDates).toEqual(['2026-01-10', '2026-01-11']);
+    expect(file).toEqual(snapshot);
+    expect(normalizeFile(out, { getHolidays })).toEqual(out);
+  });
 });

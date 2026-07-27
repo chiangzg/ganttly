@@ -18,7 +18,6 @@ import { computeCriticalPath } from '@/lib/cpm';
 import { computeAllRollups } from '@/lib/summary';
 import { checkConstraintConflicts } from '@/lib/schedule';
 import { resolveCalendar } from '@/lib/calendar';
-import { getCalendar } from '@ganttly/calendar-data';
 
 export interface AssembleOptions {
   viewportWidth: number;
@@ -33,11 +32,14 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const collapsed = new Set(file.viewState.collapsedTaskIds);
   const visible = flattenVisible(tree, collapsed);
 
+  // Resolve the project's persisted calendar once for constraints and effort.
+  const cal = resolveCalendar(file.calendar);
+
   // Pre-compute rollup values for all summary tasks. Used for both CPM input
   // (so critical-path sees a summary's true aggregated start/duration) and for
   // canvas row rendering (especially important during drag mid-states where
   // the underlying Task data may be momentarily stale).
-  const allRollups = computeAllRollups(file.tasks, file.resources);
+  const allRollups = computeAllRollups(file.tasks, file.resources, cal);
 
   // Set of summary task ids, derived from the FULL task list (not just
   // visible rows) so that a summary whose children are all collapsed still
@@ -60,10 +62,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const criticalIds = opts.criticalTaskIds ?? cpm?.criticalTaskIds ?? new Set<string>();
 
   // Detect constraint-vs-dependency conflicts (G4 — for arrow/row highlighting).
-  const conflictIds = checkConstraintConflicts(
-    file.tasks,
-    resolveCalendar(getCalendar(file.calendar.id) ?? getCalendar('zh-CN')),
-  );
+  const conflictIds = checkConstraintConflicts(file.tasks, cal);
 
   // Virtualise rows: drop rows above/below the visible scroll area.
   const firstVisibleRow = Math.max(0, Math.floor(file.viewState.scrollTop / ROW_HEIGHT) - 5);
@@ -296,7 +295,7 @@ export function assembleResourceScene(
   file: GanttlyFile,
   opts: AssembleResourceOptions,
 ): ResourceScene {
-  const cal = resolveCalendar(getCalendar(file.calendar.id) ?? getCalendar('zh-CN'));
+  const cal = resolveCalendar(file.calendar);
   const loadMap = computeResourceLoad(file.tasks, file.resources, cal);
 
   // Pre-compute which task ids have children once (used both for the

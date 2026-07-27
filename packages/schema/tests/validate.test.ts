@@ -103,6 +103,15 @@ describe('validateTask', () => {
     ).toBe(true);
   });
 
+  it('accepts unique overtime dates and rejects duplicates', () => {
+    expect(validateTask({ ...baseTask, overtimeDates: ['2026-01-10', '2026-01-11'] }).ok).toBe(
+      true,
+    );
+    expect(validateTask({ ...baseTask, overtimeDates: ['2026-01-10', '2026-01-10'] }).ok).toBe(
+      false,
+    );
+  });
+
   it('rejects unknown dependency type', () => {
     const bad = {
       ...baseTask,
