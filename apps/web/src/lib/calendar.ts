@@ -12,7 +12,7 @@
  * - Durations are expressed in working days. `addWorkingDays` skips
  *   non-working days, counting only working days.
  */
-import type { Calendar, Holiday } from '@ganttly/schema';
+import type { Calendar, Holiday, Task } from '@ganttly/schema';
 
 export interface ResolvedCalendar {
   weekStart: 0 | 1;
@@ -171,4 +171,22 @@ export function* iterateWorkingDays(
     if (isWorkingDay(cursor, cal)) yield cursor;
     cursor = addCalendarDays(cursor, 1);
   }
+}
+
+/**
+ * Return the dates on which a task contributes effort and resource load.
+ * Normal project-calendar working days are included automatically. A
+ * non-working day is included only when it is explicitly listed in the task's
+ * `overtimeDates`. Invalid legacy values (working days or dates outside the
+ * task range) are ignored, and milestones never contribute effort.
+ */
+export function effectiveTaskDays(task: Task, cal: ResolvedCalendar): string[] {
+  if (task.isMilestone || task.end < task.start) return [];
+
+  const days = new Set(iterateWorkingDays(task.start, task.end, cal));
+  for (const date of task.overtimeDates ?? []) {
+    if (date < task.start || date > task.end || !isNonWorkingDay(date, cal)) continue;
+    days.add(date);
+  }
+  return [...days].sort();
 }

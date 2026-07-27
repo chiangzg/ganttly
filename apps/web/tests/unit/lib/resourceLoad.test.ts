@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { computeResourceLoad, loadOn, peakLoad } from '@/lib/resourceLoad';
+import type { Task, Resource } from '@ganttly/schema';
 import { resolveCalendar } from '@/lib/calendar';
-import { getCalendar } from '@ganttly/calendar-data';
-import type { Task, Resource, Calendar } from '@ganttly/schema';
 
-const cal = resolveCalendar(getCalendar('zh-CN') as Calendar);
+const cal = resolveCalendar({
+  id: 'test',
+  weekStart: 1,
+  weekends: [0, 6],
+  holidays: [],
+  workingHours: { start: '09:00', end: '18:00' },
+});
 
 function makeTask(id: string, overrides: Partial<Task> = {}): Task {
   return {
@@ -15,6 +20,7 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
     start: '2026-01-05', // Monday
     end: '2026-01-09', // Friday (5 working days)
     duration: 5,
+    overtimeDates: [],
     progress: 0,
     isMilestone: false,
     dependencies: [],
@@ -74,20 +80,20 @@ describe('computeResourceLoad', () => {
     expect(load.get('r1')?.size).toBe(0);
   });
 
-  it('respects non-working days (no load on weekends/holidays)', () => {
+  it('loads only explicitly marked rest days inside a cross-week task', () => {
     const resources: Resource[] = [{ id: 'r1', name: 'A', capacity: 1.0 }];
-    // 2026-01-05 (Mon) to 2026-01-12 (next Mon) spans a weekend.
     const tasks = [
       makeTask('t1', {
         start: '2026-01-05',
         end: '2026-01-12',
-        duration: 7,
+        duration: 6,
+        overtimeDates: ['2026-01-10'],
         assignments: [{ resourceId: 'r1', load: 100 }],
       }),
     ];
     const load = computeResourceLoad(tasks, resources, cal);
-    expect(loadOn(load, 'r1', '2026-01-10')).toBe(0); // Sat
-    expect(loadOn(load, 'r1', '2026-01-11')).toBe(0); // Sun
+    expect(loadOn(load, 'r1', '2026-01-10')).toBe(100); // Sat (overtime)
+    expect(loadOn(load, 'r1', '2026-01-11')).toBe(0); // Sun (unmarked)
     expect(loadOn(load, 'r1', '2026-01-05')).toBe(100); // Mon
   });
 

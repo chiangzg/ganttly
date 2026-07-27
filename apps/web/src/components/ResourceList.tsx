@@ -30,6 +30,7 @@ import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 import { buildTree } from '@/engine/scene/tree';
 import { tasksByResource } from '@/lib/resourceTasks';
 import { computeAssignmentPersonDays } from '@/lib/cost';
+import { resolveCalendar } from '@/lib/calendar';
 import { cn } from '@/lib/cn';
 import { nanoid } from 'nanoid';
 import { useTranslation } from 'react-i18next';
@@ -67,6 +68,7 @@ export function ResourceList() {
   const tableWidth = showCostColumns ? TABLE_WIDTH_WITH_EFFORT : TABLE_WIDTH;
   const taskGridTemplate = showCostColumns ? TASK_GRID_TEMPLATE_WITH_EFFORT : TASK_GRID_TEMPLATE;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   // Leaf-task reverse lookup (consistent with computeResourceLoad's leaf rule).
   const tasksByRes = useMemo(() => {
@@ -334,7 +336,12 @@ export function ResourceList() {
                 {showCostColumns && (
                   <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
                     {(() => {
-                      const pd = computeAssignmentPersonDays(task, row.resourceId, file.resources);
+                      const pd = computeAssignmentPersonDays(
+                        task,
+                        row.resourceId,
+                        file.resources,
+                        cal,
+                      );
                       return pd > 0 ? `${pd}` : '—';
                     })()}
                   </div>

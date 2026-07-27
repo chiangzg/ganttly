@@ -92,6 +92,7 @@ export function Toolbar() {
       start,
       end: start,
       duration: 1,
+      overtimeDates: [],
       progress: 0,
       isMilestone: false,
       dependencies: [],

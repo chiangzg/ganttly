@@ -1,8 +1,14 @@
 /**
  * Export menu — JSON (round-trip with `.ganttly.json`) and CSV (task table).
  * (PRD §3.9, M4.1-M4.2)
+ *
+ * These items render inside a Radix DropdownMenu.Content. We wrap them as
+ * DropdownMenu.Item (asChild) so they pick up keyboard navigation/role and
+ * match ImportMenu's interaction model. onSelect calls preventDefault to
+ * keep the menu open across the (synchronous) download trigger.
  */
 import { useTranslation } from 'react-i18next';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useProjectStore } from '@/store/useProjectStore';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { buildTree, flattenVisible } from '@/engine/scene';
@@ -19,7 +25,7 @@ export function ExportMenu() {
   const exportCsv = () => {
     const tree = buildTree(file.tasks);
     const flat = flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
-    const rows: string[] = ['WBS,Name,Start,End,Duration,Progress,Milestone,Color'];
+    const rows: string[] = ['WBS,Name,Start,End,Duration,Progress,Milestone,Color,OvertimeDates'];
     for (const node of flat) {
       const t = node.task;
       rows.push(
@@ -32,6 +38,7 @@ export function ExportMenu() {
           t.progress,
           t.isMilestone ? '1' : '0',
           t.color ?? '',
+          csv([...(t.overtimeDates ?? [])].sort().join(';')),
         ].join(','),
       );
     }
@@ -39,14 +46,23 @@ export function ExportMenu() {
     download(blob, `${file.project.name || 'ganttly'}.csv`);
   };
 
+  const onSelectJson = (e: Event) => {
+    e.preventDefault();
+    exportJson();
+  };
+  const onSelectCsv = (e: Event) => {
+    e.preventDefault();
+    exportCsv();
+  };
+
   return (
     <>
-      <ToolbarButton onClick={exportJson} title={t('toolbar.exportJson')}>
-        {t('toolbar.exportJson')}
-      </ToolbarButton>
-      <ToolbarButton onClick={exportCsv} title={t('toolbar.exportCsv')}>
-        {t('toolbar.exportCsv')}
-      </ToolbarButton>
+      <DropdownMenu.Item asChild onSelect={onSelectJson} className="outline-none">
+        <ToolbarButton title={t('toolbar.exportJson')}>{t('toolbar.exportJson')}</ToolbarButton>
+      </DropdownMenu.Item>
+      <DropdownMenu.Item asChild onSelect={onSelectCsv} className="outline-none">
+        <ToolbarButton title={t('toolbar.exportCsv')}>{t('toolbar.exportCsv')}</ToolbarButton>
+      </DropdownMenu.Item>
     </>
   );
 }

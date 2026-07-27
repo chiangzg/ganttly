@@ -5,10 +5,17 @@
  * `validateGanttlyFile` (for `.ganttly.json`) or `parseGan` (for `.gan`),
  * then sets the loaded file into the store. Errors surface via `window.alert`
  * for MVP — P1 can replace with a toast.
+ *
+ * These items render inside a Radix DropdownMenu.Content. We MUST call
+ * `e.preventDefault()` in `onSelect` so the menu stays mounted — otherwise
+ * Radix unmounts Content (and the hidden <input> with it) before the file
+ * picker has a chance to open, making the buttons look like no-ops. This is
+ * Radix's documented pattern for menu items that trigger non-closing behavior.
  */
 import { useTranslation } from 'react-i18next';
 import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { validateGanttlyFile, formatAjvErrors, normalizeFile } from '@ganttly/schema';
@@ -27,8 +34,17 @@ export function ImportMenu() {
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const ganInputRef = useRef<HTMLInputElement>(null);
 
-  const onPickJson = () => jsonInputRef.current?.click();
-  const onPickGan = () => ganInputRef.current?.click();
+  // onSelect (not onClick): Radix fires onSelect before closing the menu, so
+  // preventDefault here keeps Content — and the <input> it hosts — alive
+  // while the native file picker opens.
+  const onPickJson = (e: Event) => {
+    e.preventDefault();
+    jsonInputRef.current?.click();
+  };
+  const onPickGan = (e: Event) => {
+    e.preventDefault();
+    ganInputRef.current?.click();
+  };
 
   const handleJson = async (file: File) => {
     try {
@@ -80,13 +96,13 @@ export function ImportMenu() {
   };
 
   return (
-    <div className="flex items-center">
-      <ToolbarButton onClick={onPickJson} title={t('toolbar.importJson')}>
-        {t('toolbar.importJson')}
-      </ToolbarButton>
-      <ToolbarButton onClick={onPickGan} title={t('toolbar.importGan')}>
-        {t('toolbar.importGan')}
-      </ToolbarButton>
+    <>
+      <DropdownMenu.Item asChild onSelect={onPickJson} className="outline-none">
+        <ToolbarButton title={t('toolbar.importJson')}>{t('toolbar.importJson')}</ToolbarButton>
+      </DropdownMenu.Item>
+      <DropdownMenu.Item asChild onSelect={onPickGan} className="outline-none">
+        <ToolbarButton title={t('toolbar.importGan')}>{t('toolbar.importGan')}</ToolbarButton>
+      </DropdownMenu.Item>
       <input
         ref={jsonInputRef}
         type="file"
@@ -109,7 +125,7 @@ export function ImportMenu() {
           e.currentTarget.value = '';
         }}
       />
-    </div>
+    </>
   );
 }
 

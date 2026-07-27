@@ -65,18 +65,40 @@ export function normalizeFile(file: GanttlyFile, options: NormalizeFileOptions =
     if (mutated) next.resources = resources;
   }
 
-  // ---- task constraints ----------------------------------------------------
+  // ---- tasks ---------------------------------------------------------------
   // P1 TaskConstraints is now `{ type: ConstraintType; date?: string }`. Old
   // MVP files wrote `constraints: {}` (empty record) — which fails the new
   // `required: ["type"]`. Normalize empty/missing type to 'none'.
+  //
+  // Task.overtimeDates is optional on disk for schema-v1 compatibility. We
+  // materialize an empty array for older files and canonicalize valid arrays
+  // so effort calculations never see duplicate or out-of-range dates.
   if (next.tasks.length > 0) {
     let mutated = false;
     const tasks = next.tasks.map((t) => {
+      let normalized = t;
       if (!t.constraints || typeof t.constraints !== 'object' || t.constraints.type === undefined) {
         mutated = true;
-        return { ...t, constraints: { type: 'none' as const } };
+        normalized = { ...normalized, constraints: { type: 'none' as const } };
       }
-      return t;
+
+      if (t.overtimeDates === undefined) {
+        mutated = true;
+        normalized = { ...normalized, overtimeDates: [] };
+      } else if (t.overtimeDates.every((date) => typeof date === 'string')) {
+        const overtimeDates = [...new Set(t.overtimeDates)]
+          .filter((date) => date >= t.start && date <= t.end)
+          .sort();
+        if (
+          overtimeDates.length !== t.overtimeDates.length ||
+          overtimeDates.some((date, index) => date !== t.overtimeDates![index])
+        ) {
+          mutated = true;
+          normalized = { ...normalized, overtimeDates };
+        }
+      }
+
+      return normalized;
     });
     if (mutated) next.tasks = tasks;
   }

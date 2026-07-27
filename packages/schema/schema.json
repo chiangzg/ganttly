@@ -130,6 +130,11 @@
         "start": { "$ref": "#/$defs/isoDate" },
         "end": { "$ref": "#/$defs/isoDate" },
         "duration": { "type": "integer", "minimum": 0 },
+        "overtimeDates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/isoDate" },
+          "uniqueItems": true
+        },
         "progress": { "type": "number", "minimum": 0, "maximum": 100 },
         "isMilestone": { "type": "boolean" },
         "color": { "$ref": "#/$defs/cssColor" },

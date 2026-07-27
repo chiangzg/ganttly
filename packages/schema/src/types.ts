@@ -118,6 +118,11 @@ export interface Task {
   end: string;
   /** Duration in WORKING days (excludes holidays/weekends, includes 调休). */
   duration: number;
+  /**
+   * Explicit non-working dates on which this task is worked as overtime.
+   * Dates outside `[start, end]` or working days are ignored by effort math.
+   */
+  overtimeDates?: string[];
   /** 0-100 inclusive. */
   progress: number;
   isMilestone: boolean;
