@@ -31,6 +31,7 @@ async function injectFixture(page: Page) {
             start: '2026-02-02',
             end: '2026-02-06',
             duration: 5,
+            overtimeDates: [],
             progress: 0,
             isMilestone: false,
             dependencies: [],
@@ -102,6 +103,51 @@ test.describe('person-days column', () => {
     await page.waitForTimeout(200);
     await expect(taskLane.getByText('2.5')).toHaveCount(0);
     await expect(resourceList.getByText('人天', { exact: true })).toHaveCount(0);
+  });
+
+  test('explicit overtime is editable and affects effort without inferring the whole weekend', async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      const store = (window as unknown as { __ganttlyStore: unknown }).__ganttlyStore as {
+        setState: (s: unknown) => void;
+        getState: () => {
+          file: { tasks: Array<Record<string, unknown>> } & Record<string, unknown>;
+        };
+      };
+      const file = store.getState().file;
+      store.setState({
+        file: {
+          ...file,
+          tasks: file.tasks.map((task) =>
+            task.id === 't1'
+              ? { ...task, end: '2026-02-09', duration: 6, overtimeDates: [] }
+              : task,
+          ),
+        },
+      });
+    });
+
+    await page.getByText('开发').dblclick();
+    const drawer = page.locator('aside');
+    await expect(drawer.getByText('3', { exact: true })).toBeVisible();
+
+    const dateInputs = drawer.locator('input[type="date"]');
+    await dateInputs.nth(2).fill('2026-02-07'); // Saturday inside the task range
+    await drawer.getByRole('button', { name: '添加' }).click();
+    const removeOvertime = drawer.getByRole('button', { name: '删除加班日 2026-02-07' });
+    await expect(removeOvertime).toBeVisible();
+    await expect(drawer.getByText('3.5', { exact: true })).toBeVisible();
+
+    // A normal working day cannot be marked as an extra full overtime day.
+    await dateInputs.nth(2).fill('2026-02-06');
+    await drawer.getByRole('button', { name: '添加' }).click();
+    await expect(drawer.getByText('只能将项目日历中的休息日标记为加班日')).toBeVisible();
+
+    // Moving the end before the overtime date prunes the marker immediately.
+    await dateInputs.nth(1).fill('2026-02-06');
+    await expect(removeOvertime).toHaveCount(0);
+    await expect(drawer.getByText('2.5', { exact: true })).toBeVisible();
   });
 });
 

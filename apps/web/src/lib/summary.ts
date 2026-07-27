@@ -19,6 +19,7 @@
  *   duration = Σ(children.duration)
  */
 import type { Task, Resource } from '@ganttly/schema';
+import type { ResolvedCalendar } from './calendar';
 import { computeTaskPersonDays } from './cost';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,7 @@ export function computeRollup(
   children: ReadonlyArray<Task>,
   rollupMap?: Map<string, RollupResult>,
   resources: ReadonlyArray<Resource> = [],
+  cal?: ResolvedCalendar,
 ): RollupResult | null {
   if (children.length === 0) return null;
 
@@ -88,7 +90,9 @@ export function computeRollup(
     // average progress logic above (G9 risk #1).
     totalPersonDays += childRollup
       ? childRollup.personDays
-      : computeTaskPersonDays(child, resources);
+      : cal
+        ? computeTaskPersonDays(child, resources, cal)
+        : 0;
 
     if (childProgress < 100) allCompleteProgress = false;
   }
@@ -246,6 +250,7 @@ export function recomputeSelfAndAncestors(
 export function computeAllRollups(
   tasks: ReadonlyArray<Task>,
   resources: ReadonlyArray<Resource> = [],
+  cal?: ResolvedCalendar,
 ): Map<string, RollupResult> {
   const childrenOf = buildChildrenIndex(tasks);
   const rollupMap = new Map<string, RollupResult>();
@@ -265,7 +270,7 @@ export function computeAllRollups(
       visit(child.id);
     }
 
-    const rollup = computeRollup(children, rollupMap, resources);
+    const rollup = computeRollup(children, rollupMap, resources, cal);
     if (rollup) {
       rollupMap.set(taskId, rollup);
     }

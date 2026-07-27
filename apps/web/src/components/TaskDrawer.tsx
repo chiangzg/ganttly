@@ -4,10 +4,11 @@
  * Slides in from the right when the user double-clicks a task or clicks
  * "new task" in the toolbar. Lets them edit every field on a Task, including
  * dependencies (M2). For MVP it edits the basic fields — name, start, end,
- * duration, progress, milestone, color, note — and dispatches update commands.
+ * duration, progress, milestone, overtime dates, color, note — and dispatches
+ * update commands.
  */
 import { useTranslation } from 'react-i18next';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useProjectStore,
   updateTaskCommand,
@@ -21,14 +22,16 @@ import {
 } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import type { Task, DependencyType, Resource, ConstraintType } from '@ganttly/schema';
-import { resolveCalendar, endDateFromDuration, durationBetween } from '@/lib/calendar';
-import { getCalendar } from '@ganttly/calendar-data';
+import {
+  resolveCalendar,
+  endDateFromDuration,
+  durationBetween,
+  isNonWorkingDay,
+} from '@/lib/calendar';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
 import { snapConstraintDate } from '@/lib/schedule';
-
-const cal = resolveCalendar(getCalendar('zh-CN'));
 
 /** Fields whose edit must cascade rollup to ancestor summary tasks. */
 const ROLLUP_FIELDS = new Set(['progress', 'start', 'end', 'duration']);
@@ -41,11 +44,16 @@ export function TaskDrawer() {
   const dispatch = useProjectStore((s) => s.dispatch);
   const selectedId = file.viewState.selectedTaskId;
   const task = file.tasks.find((x) => x.id === selectedId) ?? null;
+  const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   // Local draft so typing is fast; commit on blur / explicit save.
   const [draft, setDraft] = useState<Task | null>(null);
+  const [overtimeDate, setOvertimeDate] = useState('');
+  const [overtimeError, setOvertimeError] = useState('');
   useEffect(() => {
     setDraft(task);
+    setOvertimeDate('');
+    setOvertimeError('');
   }, [task?.id, task]);
 
   if (drawer === 'closed' || !draft || !task) return null;
@@ -72,8 +80,39 @@ export function TaskDrawer() {
 
   // Person-days for this task: summary → rolled-up children sum; leaf → own.
   const personDays = hasChildren
-    ? (computeAllRollups(file.tasks, file.resources).get(task.id)?.personDays ?? 0)
-    : computeTaskPersonDays(task, file.resources);
+    ? (computeAllRollups(file.tasks, file.resources, cal).get(task.id)?.personDays ?? 0)
+    : computeTaskPersonDays(task, file.resources, cal);
+
+  const addOvertimeDate = () => {
+    if (!overtimeDate) {
+      setOvertimeError(t('drawer.overtimeDateRequired'));
+      return;
+    }
+    if (overtimeDate < draft.start || overtimeDate > draft.end) {
+      setOvertimeError(t('drawer.overtimeDateOutOfRange'));
+      return;
+    }
+    if (!isNonWorkingDay(overtimeDate, cal)) {
+      setOvertimeError(t('drawer.overtimeDateMustBeRestDay'));
+      return;
+    }
+    if ((draft.overtimeDates ?? []).includes(overtimeDate)) {
+      setOvertimeError(t('drawer.overtimeDateDuplicate'));
+      return;
+    }
+    const overtimeDates = [...(draft.overtimeDates ?? []), overtimeDate].sort();
+    setDraft({ ...draft, overtimeDates });
+    commit({ overtimeDates });
+    setOvertimeDate('');
+    setOvertimeError('');
+  };
+
+  const removeOvertimeDate = (date: string) => {
+    const overtimeDates = (draft.overtimeDates ?? []).filter((item) => item !== date);
+    setDraft({ ...draft, overtimeDates });
+    commit({ overtimeDates });
+    setOvertimeError('');
+  };
 
   return (
     <aside className="absolute right-0 top-0 z-10 flex h-full w-80 flex-col border-l border-border bg-bg-elevated shadow-lg">
@@ -103,7 +142,15 @@ export function TaskDrawer() {
             onChange={(e) => {
               const start = e.target.value;
               const end = endDateFromDuration(start, draft.duration || 1, cal);
-              const patch = { start, end, duration: durationBetween(start, end, cal) };
+              const overtimeDates = (draft.overtimeDates ?? []).filter(
+                (date) => date >= start && date <= end,
+              );
+              const patch = {
+                start,
+                end,
+                duration: durationBetween(start, end, cal),
+                overtimeDates,
+              };
               setDraft({ ...draft, ...patch });
               commit(patch);
             }}
@@ -117,7 +164,10 @@ export function TaskDrawer() {
             onChange={(e) => {
               const end = e.target.value;
               const duration = durationBetween(draft.start, end, cal);
-              const patch = { end, duration: Math.max(0, duration) };
+              const overtimeDates = (draft.overtimeDates ?? []).filter(
+                (date) => date >= draft.start && date <= end,
+              );
+              const patch = { end, duration: Math.max(0, duration), overtimeDates };
               setDraft({ ...draft, ...patch });
               commit(patch);
             }}
@@ -132,7 +182,10 @@ export function TaskDrawer() {
             onChange={(e) => {
               const duration = Math.max(0, Number(e.target.value) || 0);
               const end = endDateFromDuration(draft.start, duration, cal);
-              const patch = { duration, end };
+              const overtimeDates = (draft.overtimeDates ?? []).filter(
+                (date) => date >= draft.start && date <= end,
+              );
+              const patch = { duration, end, overtimeDates };
               setDraft({ ...draft, ...patch });
               commit(patch);
             }}
@@ -163,11 +216,64 @@ export function TaskDrawer() {
                 patch.duration = 0;
                 patch.end = draft.start;
                 patch.progress = draft.progress === 0 ? 100 : draft.progress;
+                patch.overtimeDates = [];
               }
               setDraft({ ...draft, ...patch });
               commit(patch);
             }}
           />
+        </Field>
+        <Field label={t('drawer.overtimeDates')}>
+          {hasChildren || draft.isMilestone ? (
+            <p className="text-xs text-fg-muted">
+              {hasChildren ? t('drawer.summaryNoOvertime') : t('drawer.milestoneNoOvertime')}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  className="input min-w-0 flex-1"
+                  min={draft.start}
+                  max={draft.end}
+                  value={overtimeDate}
+                  onChange={(e) => {
+                    setOvertimeDate(e.target.value);
+                    setOvertimeError('');
+                  }}
+                />
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 text-xs hover:bg-bg"
+                  onClick={addOvertimeDate}
+                >
+                  {t('drawer.addOvertimeDate')}
+                </button>
+              </div>
+              {overtimeError && <p className="text-xs text-danger">{overtimeError}</p>}
+              {(draft.overtimeDates ?? []).length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {[...(draft.overtimeDates ?? [])].sort().map((date) => (
+                    <span
+                      key={date}
+                      className="inline-flex items-center gap-1 rounded bg-warning/15 px-2 py-1 text-xs text-warning"
+                    >
+                      {date}
+                      <button
+                        type="button"
+                        aria-label={t('drawer.removeOvertimeDate', { date })}
+                        onClick={() => removeOvertimeDate(date)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-fg-muted">{t('drawer.noOvertimeDates')}</p>
+              )}
+            </div>
+          )}
         </Field>
         <Field label={t('drawer.color')}>
           <input

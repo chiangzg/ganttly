@@ -3,7 +3,7 @@
  *
  * Draws per-resource load bars across the same time axis as the Gantt view
  * (shared ZoomLevel + layout coordinates — Q4: zero new pxPerDay duplication).
- * For each working day a resource is loaded, a vertical bar fills from the row
+ * For each effective effort day a resource is loaded, a vertical bar fills from the row
  * baseline upward proportional to load% (absolute scale: the cell height = 100%
  * load, so a bar never exceeds its row). Bars are green when within capacity
  * (load ≤ 100×capacity) and red when overloaded. The 100% capacity line is drawn
