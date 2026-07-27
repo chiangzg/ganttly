@@ -8,7 +8,7 @@
  * - New task
  * - Undo / Redo (with status-bar descriptive labels)
  * - Save (manual, even though autosave is on)
- * - Import / Export menu (M4)
+ * - Export menu (M4; project imports live in the new-project dialog)
  */
 import { useTranslation } from 'react-i18next';
 import { useProjectStore, setViewStateCommand } from '@/store/useProjectStore';
@@ -20,7 +20,6 @@ import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
 import { ExportMenu } from './ExportMenu';
-import { ImportMenu } from './ImportMenu';
 import { nanoid } from 'nanoid';
 import { addTaskCommand } from '@/store/useProjectStore';
 import type { Task } from '@ganttly/schema';
@@ -92,6 +91,7 @@ export function Toolbar() {
       start,
       end: start,
       duration: 1,
+      overtimeDates: [],
       progress: 0,
       isMilestone: false,
       dependencies: [],
@@ -193,11 +193,6 @@ export function Toolbar() {
               sideOffset={6}
               className="z-40 min-w-64 rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
             >
-              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                导入为新项目
-              </div>
-              <ImportMenu />
-              <DropdownMenu.Separator className="my-2 h-px bg-border" />
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
                 导出当前项目
               </div>

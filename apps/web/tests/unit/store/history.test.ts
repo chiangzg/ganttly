@@ -24,6 +24,7 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
     start: '2026-01-05',
     end: '2026-01-09',
     duration: 5,
+    overtimeDates: [],
     progress: 0,
     isMilestone: false,
     dependencies: [],
@@ -181,6 +182,98 @@ describe('history — undo/redo basics', () => {
     expect(store().nextUndoLabel()).toBe('更新任务');
     store().undo();
     expect(store().nextRedoLabel()).toBe('更新任务');
+  });
+
+  it('prunes out-of-range overtime dates and restores them on undo', () => {
+    const store = useProjectStore.getState;
+    store().dispatch(
+      addTaskCommand(
+        makeTask('t1', {
+          end: '2026-01-12',
+          duration: 6,
+          overtimeDates: ['2026-01-10', '2026-01-11'],
+        }),
+        null,
+        0,
+      ),
+    );
+
+    store().dispatch(updateTaskWithRollupCommand('t1', { end: '2026-01-09', duration: 5 }));
+    expect(store().file.tasks[0]!.overtimeDates).toEqual([]);
+
+    store().undo();
+    expect(store().file.tasks[0]!.end).toBe('2026-01-12');
+    expect(store().file.tasks[0]!.overtimeDates).toEqual(['2026-01-10', '2026-01-11']);
+
+    store().redo();
+    expect(store().file.tasks[0]!.overtimeDates).toEqual([]);
+  });
+
+  it('clears milestone overtime atomically with undo', () => {
+    const store = useProjectStore.getState;
+    store().dispatch(
+      addTaskCommand(
+        makeTask('t1', {
+          end: '2026-01-12',
+          duration: 6,
+          overtimeDates: ['2026-01-10'],
+        }),
+        null,
+        0,
+      ),
+    );
+
+    store().dispatch(
+      updateTaskCommand('t1', {
+        isMilestone: true,
+        duration: 0,
+        end: '2026-01-05',
+      }),
+    );
+    expect(store().file.tasks[0]!.overtimeDates).toEqual([]);
+
+    store().undo();
+    expect(store().file.tasks[0]!.isMilestone).toBe(false);
+    expect(store().file.tasks[0]!.overtimeDates).toEqual(['2026-01-10']);
+  });
+
+  it('prunes successor overtime when a dependency cascade moves its date range', () => {
+    const store = useProjectStore.getState;
+    store().dispatch(
+      addTaskCommand(
+        makeTask('predecessor', {
+          start: '2026-01-19',
+          end: '2026-01-23',
+          duration: 5,
+        }),
+        null,
+        0,
+      ),
+    );
+    store().dispatch(
+      addTaskCommand(
+        makeTask('successor', {
+          start: '2026-01-12',
+          end: '2026-01-19',
+          duration: 6,
+          overtimeDates: ['2026-01-17'],
+        }),
+        null,
+        1,
+      ),
+    );
+
+    store().dispatch(
+      addDependencyCommand('successor', { targetId: 'predecessor', type: 'FS', lag: 0 }),
+    );
+    const moved = store().file.tasks.find((task) => task.id === 'successor')!;
+    expect(moved.start).toBe('2026-01-26');
+    expect(moved.overtimeDates).toEqual([]);
+
+    store().undo();
+    const restored = store().file.tasks.find((task) => task.id === 'successor')!;
+    expect(restored.start).toBe('2026-01-12');
+    expect(restored.overtimeDates).toEqual(['2026-01-17']);
   });
 });
 

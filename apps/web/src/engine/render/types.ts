@@ -75,7 +75,7 @@ export interface ArrowSpec {
 /** A single load bar for one resource on one date (P1 feature one). */
 export interface ResourceLoadBar {
   resourceId: string;
-  /** ISO date this bar covers (one working day). */
+  /** ISO date this bar covers (one working day or explicit overtime day). */
   date: string;
   /** Total load 0-100+ for this resource on this date (>100 = overload). */
   load: number;
@@ -109,7 +109,7 @@ export interface ResourceSummaryRow extends ResourceRowBase {
   role?: string;
   /** Capacity 0-1, default 1.0. Drives the 100% threshold line. */
   capacity: number;
-  /** Load bars for this resource (one per working day with any load). */
+  /** Load bars for this resource (one per effective effort day with any load). */
   bars: ResourceLoadBar[];
   /** Whether this resource is currently expanded (drilled down). */
   expanded: boolean;
