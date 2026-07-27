@@ -18,7 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import type { ProjectSummary } from '@/data/repository';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
-import { ConfirmDialog, ProjectNameDialog } from './ProjectDialogs';
+import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 import { ProjectDot } from './ProjectHeader';
 
 type Filter = 'all' | 'favorites' | 'recent';
@@ -222,14 +222,11 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         ) : null}
       </main>
 
-      <ProjectNameDialog
+      <CreateProjectDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        title="新建项目"
-        description="项目之间的数据、撤销历史和视图状态相互独立。"
-        submitLabel="创建并打开"
-        onSubmit={async (name) => {
-          const id = await createProject(name);
+        onCreate={async (name, source) => {
+          const id = await createProject(name, source);
           navigate(`/projects/${id}`);
         }}
       />

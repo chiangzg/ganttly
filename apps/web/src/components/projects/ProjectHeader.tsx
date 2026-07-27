@@ -23,7 +23,7 @@ import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { useProjectStore } from '@/store/useProjectStore';
 import type { ProjectSummary } from '@/data/repository';
-import { ConfirmDialog, ProjectNameDialog } from './ProjectDialogs';
+import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 
 export function ProjectHeader() {
   const navigate = useNavigate();
@@ -250,14 +250,11 @@ export function ProjectHeader() {
         </DropdownMenu.Root>
       </header>
 
-      <ProjectNameDialog
+      <CreateProjectDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        title="新建项目"
-        description="创建一个独立的甘特项目，之后可随时从顶部切换。"
-        submitLabel="创建并打开"
-        onSubmit={async (name) => {
-          const id = await createProject(name);
+        onCreate={async (name, source) => {
+          const id = await createProject(name, source);
           navigate(`/projects/${id}`);
         }}
       />
