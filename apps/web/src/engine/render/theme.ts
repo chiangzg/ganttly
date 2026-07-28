@@ -21,6 +21,7 @@ const COLOR_VARS: Array<{ key: keyof ThemeColors; varName: string }> = [
   { key: 'taskBar', varName: '--color-task-bar' },
   { key: 'taskProgress', varName: '--color-task-progress' },
   { key: 'critical', varName: '--color-critical' },
+  { key: 'baseline', varName: '--color-baseline' },
 ];
 
 export function resolveThemeColors(doc: Document = document): ThemeColors {
@@ -41,6 +42,7 @@ export function resolveThemeColors(doc: Document = document): ThemeColors {
     taskBar: 'rgb(96, 165, 250)',
     taskProgress: 'rgb(37, 99, 235)',
     critical: 'rgb(220, 38, 38)',
+    baseline: 'rgb(100, 116, 139)',
     todayLine: 'rgb(220, 38, 38)',
   };
 
