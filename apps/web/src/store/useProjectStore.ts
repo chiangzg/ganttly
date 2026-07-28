@@ -17,6 +17,7 @@ import type {
   Resource,
   TaskAssignment,
   TaskConstraints,
+  Baseline,
 } from '@ganttly/schema';
 import { createEmptyFile, normalizeFile } from '@ganttly/schema';
 import { getCalendar } from '@ganttly/calendar-data';
@@ -977,6 +978,86 @@ export function updateConstraintCommand(taskId: string, constraint: TaskConstrai
     invert: (file) => {
       if (!capturedOldValues) return file;
       return { ...file, tasks: restoreCaptured(file.tasks, capturedOldValues) };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Baseline commands (baseline-comparison spec §6.3)
+//
+// Baselines are immutable snapshots: create / rename / delete only — there is
+// intentionally NO `updateBaselineSnapshot` command (spec §2.1). The UI sets
+// `useViewStore.activeBaselineId` separately (it is ephemeral, not project
+// data), so these commands stay pure and never touch the view store.
+// ---------------------------------------------------------------------------
+
+/**
+ * Append a captured baseline snapshot to `file.baselines`. Undo removes it by
+ * id; redo re-appends the SAME snapshot object (stable reference).
+ */
+export function createBaselineCommand(baseline: Baseline): Command {
+  return {
+    label: `创建基线: ${baseline.name}`,
+    apply: (file) => ({ ...file, baselines: [...file.baselines, baseline] }),
+    invert: (file) => ({
+      ...file,
+      baselines: file.baselines.filter((b) => b.id !== baseline.id),
+    }),
+  };
+}
+
+/**
+ * Rename a baseline. Captures the prior name on first apply so undo restores
+ * it. Never touches `capturedAt` or the task snapshot.
+ */
+export function renameBaselineCommand(baselineId: string, name: string): Command {
+  let oldName: string | null = null;
+  return {
+    label: `重命名基线`,
+    apply: (file) => {
+      const existing = file.baselines.find((b) => b.id === baselineId);
+      if (!existing) return file;
+      oldName = existing.name;
+      return {
+        ...file,
+        baselines: file.baselines.map((b) => (b.id === baselineId ? { ...b, name } : b)),
+      };
+    },
+    invert: (file) => {
+      if (oldName === null) return file;
+      const restore = oldName;
+      return {
+        ...file,
+        baselines: file.baselines.map((b) => (b.id === baselineId ? { ...b, name: restore } : b)),
+      };
+    },
+  };
+}
+
+/**
+ * Delete a baseline. On first apply it captures the baseline object AND its
+ * original array position so undo restores both data and order (spec §6.3).
+ */
+export function deleteBaselineCommand(baselineId: string): Command {
+  let captured: { baseline: Baseline; index: number } | null = null;
+  return {
+    label: `删除基线`,
+    apply: (file) => {
+      const index = file.baselines.findIndex((b) => b.id === baselineId);
+      if (index === -1) return file;
+      captured = { baseline: file.baselines[index]!, index };
+      return {
+        ...file,
+        baselines: file.baselines.filter((b) => b.id !== baselineId),
+      };
+    },
+    invert: (file) => {
+      if (!captured) return file;
+      const { baseline, index } = captured;
+      const next = [...file.baselines];
+      // Clamp index in case the array shrank elsewhere; splice handles it.
+      next.splice(Math.min(index, next.length), 0, baseline);
+      return { ...file, baselines: next };
     },
   };
 }

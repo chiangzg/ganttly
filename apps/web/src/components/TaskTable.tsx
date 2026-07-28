@@ -29,17 +29,31 @@ import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/li
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
 import { resolveCalendar } from '@/lib/calendar';
+import {
+  findActiveBaseline,
+  buildEffectiveValues,
+  compareTaskToBaseline,
+  type TaskBaselineVariance,
+  type EffectiveTaskValue,
+} from '@/lib/baseline';
+import { deviationColumnCell, deviationToneClass } from './BaselineVariance';
+import * as Tooltip from '@radix-ui/react-tooltip';
 import { nanoid } from 'nanoid';
-import type { Task } from '@ganttly/schema';
+import type { Task, BaselineTask } from '@ganttly/schema';
 
 const TABLE_WIDTH = 420;
 const TABLE_WIDTH_WITH_EFFORT = 480;
+const TABLE_WIDTH_WITH_BASELINE = 492;
+const TABLE_WIDTH_WITH_EFFORT_AND_BASELINE = 552;
 /**
  * 共享列模板：表头与每行数据必须用同一个，否则列宽按行内容自适应，
  * 会导致 WBS/工期/进度列与表头错位、长任务名挤压（bug: 左侧明细挤在一起）。
+ * 基线偏差列（baseline-comparison spec §5.6）仅在比较模式开启时追加 70px。
  */
 const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 64px';
 const GRID_TEMPLATE_WITH_EFFORT = '44px minmax(0, 1fr) 72px 56px 56px';
+const GRID_TEMPLATE_WITH_BASELINE = '44px minmax(0, 1fr) 72px 64px 70px';
+const GRID_TEMPLATE_WITH_EFFORT_AND_BASELINE = '44px minmax(0, 1fr) 72px 56px 56px 70px';
 
 export function TaskTable() {
   const { t } = useTranslation();
@@ -48,11 +62,27 @@ export function TaskTable() {
   const openDrawer = useViewStore((s) => s.openDrawer);
   const openContextMenu = useViewStore((s) => s.openContextMenu);
   const showCostColumns = useViewStore((s) => s.showCostColumns);
+  const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renamingId = useRef<string | null>(null);
 
-  const gridTemplate = showCostColumns ? GRID_TEMPLATE_WITH_EFFORT : GRID_TEMPLATE;
-  const tableWidth = showCostColumns ? TABLE_WIDTH_WITH_EFFORT : TABLE_WIDTH;
+  const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
+  const hasBaseline = activeBaseline !== null;
+
+  const gridTemplate = showCostColumns
+    ? hasBaseline
+      ? GRID_TEMPLATE_WITH_EFFORT_AND_BASELINE
+      : GRID_TEMPLATE_WITH_EFFORT
+    : hasBaseline
+      ? GRID_TEMPLATE_WITH_BASELINE
+      : GRID_TEMPLATE;
+  const tableWidth = showCostColumns
+    ? hasBaseline
+      ? TABLE_WIDTH_WITH_EFFORT_AND_BASELINE
+      : TABLE_WIDTH_WITH_EFFORT
+    : hasBaseline
+      ? TABLE_WIDTH_WITH_BASELINE
+      : TABLE_WIDTH;
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   const rows = useMemo(() => {
@@ -65,6 +95,16 @@ export function TaskTable() {
     () => computeAllRollups(file.tasks, file.resources, cal),
     [file.tasks, file.resources, cal],
   );
+
+  // Baseline comparison: effective current values (summary rollup applied) +
+  // snapshot-by-id map, both built ONCE. Each row looks up its variance in
+  // O(1) (spec §9.4 — no nested find in the render loop).
+  const baselineCtx = useMemo(() => {
+    if (!activeBaseline) return null;
+    const effective = buildEffectiveValues(file, cal);
+    const byId = new Map(activeBaseline.tasks.map((bt) => [bt.id, bt]));
+    return { effective, byId };
+  }, [activeBaseline, file.tasks, file.resources, cal]);
 
   // Latest scrollTop kept in a ref so the store→DOM sync effect can decide
   // whether the change originated here (user scrolling) or elsewhere (canvas
@@ -298,7 +338,8 @@ export function TaskTable() {
         {showCostColumns && (
           <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
         )}
-        <div className="px-2 py-1">{t('table.columnProgress')}</div>
+        <div className="border-r border-border px-2 py-1">{t('table.columnProgress')}</div>
+        {hasBaseline && <div className="px-2 py-1">{t('baseline.columnDeviation')}</div>}
       </div>
       <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
         <div className="relative" style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}>
@@ -414,9 +455,16 @@ export function TaskTable() {
                     })()}
                   </div>
                 )}
-                <div className="px-2 text-right tabular-nums text-fg-muted">
+                <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
                   {node.task.progress}%
                 </div>
+                {hasBaseline && baselineCtx ? (
+                  <BaselineDeviationCell
+                    taskId={node.task.id}
+                    baselineCtx={baselineCtx}
+                    cal={cal}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -428,4 +476,84 @@ export function TaskTable() {
 
 function countChildren(parentId: string, tasks: ReadonlyArray<Task>): number {
   return tasks.filter((t) => t.parentId === parentId).length;
+}
+
+/**
+ * Deviation cell for the TaskTable (baseline-comparison spec §5.6).
+ *
+ * Shows the finish-deviation summary (`+3 天`, `−2 天`, `—`, `新增`) with the
+ * right tone. Hovering/focusing reveals a Radix Tooltip with the full start /
+ * finish / duration breakdown so the Canvas isn't the only place to read it.
+ */
+function BaselineDeviationCell({
+  taskId,
+  baselineCtx,
+  cal,
+}: {
+  taskId: string;
+  baselineCtx: { effective: Map<string, EffectiveTaskValue>; byId: Map<string, BaselineTask> };
+  cal: ReturnType<typeof resolveCalendar>;
+}) {
+  const eff = baselineCtx.effective.get(taskId);
+  if (!eff) return <div className="px-2 text-right tabular-nums text-fg-muted">—</div>;
+  const variance = compareTaskToBaseline(eff, baselineCtx.byId.get(taskId), cal);
+  const cell = deviationColumnCell(variance);
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <div
+          tabIndex={0}
+          className={cn(
+            'cursor-help px-2 text-right text-xs font-medium tabular-nums outline-none',
+            deviationToneClass(cell.tone),
+          )}
+        >
+          {cell.text}
+        </div>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content
+          side="top"
+          sideOffset={4}
+          className="z-50 rounded-lg border border-border bg-bg-elevated px-2.5 py-2 text-xs text-fg shadow-lg"
+        >
+          <DeviationDetail variance={variance} />
+          <Tooltip.Arrow className="fill-border" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+
+/** Compact deviation detail block, reused by the table tooltip. */
+function DeviationDetail({ variance }: { variance: TaskBaselineVariance }) {
+  const { t } = useTranslation();
+  if (variance.status === 'added') {
+    return <div className="font-medium">{t('baseline.deviationAdded')}</div>;
+  }
+  return (
+    <table className="border-collapse">
+      <tbody>
+        <tr>
+          <td className="pr-3 text-fg-muted">{t('baseline.varianceStart')}</td>
+          <td className="tabular-nums">{formatSigned(variance.startDelta)}</td>
+        </tr>
+        <tr>
+          <td className="pr-3 text-fg-muted">{t('baseline.varianceFinish')}</td>
+          <td className="tabular-nums font-medium">{formatSigned(variance.finishDelta)}</td>
+        </tr>
+        <tr>
+          <td className="pr-3 text-fg-muted">{t('baseline.varianceDuration')}</td>
+          <td className="tabular-nums">{formatSigned(variance.durationDelta)}</td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+const MINUS_CH = '\u2212';
+function formatSigned(n: number): string {
+  if (n > 0) return `+${n} 天`;
+  if (n < 0) return `${MINUS_CH}${Math.abs(n)} 天`;
+  return '0';
 }
