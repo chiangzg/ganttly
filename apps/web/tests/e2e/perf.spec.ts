@@ -113,3 +113,106 @@ test('1000-task canvas scrolls smoothly', async ({ page }) => {
 
   expect(fps, `measured FPS: ${fps.toFixed(1)}`).toBeGreaterThanOrEqual(FPS_FLOOR);
 });
+
+/**
+ * Baseline comparison performance (baseline-comparison spec §9.4).
+ *
+ * Loads 1000 tasks WITH an active baseline that also has 1000 BaselineTask
+ * records, then measures scroll FPS. This stresses the comparison assembly
+ * path (baseline map build + per-row variance lookup) on top of the normal
+ * render. The O(n) assembly must keep FPS near the non-baseline floor.
+ */
+test('1000-task canvas with active baseline scrolls smoothly', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible();
+
+  await page.evaluate(() => {
+    const store = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore;
+    const view = (window as unknown as { __ganttlyViewStore?: unknown }).__ganttlyViewStore as {
+      getState: () => { setActiveBaselineId(id: string | null): void };
+    };
+    const tasks = [];
+    const baselineTasks = [];
+    for (let i = 0; i < 1000; i++) {
+      tasks.push({
+        id: `t${i}`,
+        name: `Task ${i}`,
+        parentId: null,
+        order: i,
+        start: '2026-01-05',
+        end: '2026-01-09',
+        duration: 5,
+        progress: 0,
+        isMilestone: false,
+        dependencies: [],
+        constraints: {},
+        assignments: [],
+        customFields: {},
+      });
+      baselineTasks.push({
+        id: `t${i}`,
+        start: '2026-01-05',
+        end: '2026-01-09',
+        duration: 5,
+        progress: 0,
+      });
+    }
+    const file = (store as { getState: () => { file: unknown } }).getState().file as {
+      tasks: typeof tasks;
+      baselines: unknown[];
+    };
+    (store as { setState: (s: unknown) => void }).setState({
+      file: {
+        ...file,
+        tasks,
+        baselines: [
+          { id: 'b1', name: '基线', capturedAt: '2026-01-01T00:00:00.000Z', tasks: baselineTasks },
+        ],
+      },
+    });
+    view.getState().setActiveBaselineId('b1');
+  });
+
+  const { fps, finalScrollLeft } = await page.evaluate(
+    ({ warmup, measure, step }) => {
+      const store = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as {
+        getState: () => { file: { viewState: { scrollLeft: number } } };
+        setState: (patch: unknown) => void;
+      };
+      const pushScroll = (left: number) => {
+        const f = store.getState().file;
+        store.setState({ file: { ...f, viewState: { ...f.viewState, scrollLeft: left } } });
+      };
+      return new Promise<{ fps: number; finalScrollLeft: number }>((resolve) => {
+        let frame = 0;
+        let left = 0;
+        let measureStart = 0;
+        const tick = () => {
+          left += step;
+          pushScroll(left);
+          frame++;
+          if (frame === warmup) measureStart = performance.now();
+          if (frame >= warmup + measure) {
+            const elapsed = performance.now() - measureStart;
+            resolve({ fps: (measure / elapsed) * 1000, finalScrollLeft: left });
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+    },
+    { warmup: WARMUP_FRAMES, measure: MEASURE_FRAMES, step: SCROLL_STEP_PX },
+  );
+
+  expect(finalScrollLeft, 'scroll actually advanced during sampling').toBeGreaterThan(0);
+  // Allow headroom vs the plain 1000-task floor — baseline assembly adds work
+  // per frame (snapshot map + per-row variance), but it must stay well above
+  // the single-digit regression cliff. The local floor is a touch lower than
+  // the plain test because parallel E2E runs (default workers) cause CPU
+  // contention; CI runs serially (workers=1) so its floor stays tight.
+  const FPS_FLOOR_BASELINE = process.env.CI ? 12 : 20;
+  expect(fps, `measured FPS with baseline: ${fps.toFixed(1)}`).toBeGreaterThanOrEqual(
+    FPS_FLOOR_BASELINE,
+  );
+});

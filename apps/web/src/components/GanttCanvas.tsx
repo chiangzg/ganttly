@@ -36,9 +36,11 @@ import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
+import { findActiveBaseline } from '@/lib/baseline';
 import { cn } from '@/lib/cn';
 import { useHolidayHover } from '@/components/useHolidayHover';
-import type { ZoomLevel, DependencyType, Task } from '@ganttly/schema';
+import { useBaselineHover } from '@/components/useBaselineHover';
+import type { ZoomLevel, DependencyType, Task, Baseline } from '@ganttly/schema';
 
 export function GanttCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,6 +50,11 @@ export function GanttCanvas() {
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
   const openDrawer = useViewStore((s) => s.openDrawer);
+  // Active baseline is ephemeral UI state (spec §6.1) — read from viewStore,
+  // resolved against the file's baselines here so both assembleScene and the
+  // ScrollShim see the same active snapshot.
+  const activeBaselineId = useViewStore((s) => s.activeBaselineId);
+  const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
   const [, forceRerender] = useState(0);
   const dragRef = useRef<DragState>({ kind: 'idle' });
   const hoverConnectRef = useRef<string | null>(null);
@@ -71,8 +78,8 @@ export function GanttCanvas() {
 
   // Holiday hover tooltip — shared with the resource view (PRD §3.5, §7.3).
   const {
-    onHoverMove,
-    clearHover,
+    onHoverMove: onHolidayHoverMove,
+    clearHover: clearHolidayHover,
     tooltip: holidayTooltip,
   } = useHolidayHover({
     getSceneFields: () => {
@@ -86,6 +93,20 @@ export function GanttCanvas() {
       };
     },
     viewportWidth: size.width,
+  });
+
+  // Baseline hover tooltip (baseline-comparison spec §5.10). Takes priority
+  // over the holiday hover: when the pointer is over a live bar or baseline
+  // track, we show the deviation tooltip and suppress the holiday tooltip.
+  const {
+    onHoverMove: onBaselineHoverMove,
+    clearHover: clearBaselineHover,
+    tooltip: baselineTooltip,
+    hitBaseline,
+  } = useBaselineHover({
+    getScene: () => sceneRef.current,
+    viewportWidth: size.width,
+    activeBaselineName: activeBaseline?.name ?? null,
   });
 
   // Latest file kept in a ref so the non-passive wheel listener (added once)
@@ -178,12 +199,13 @@ export function GanttCanvas() {
       viewportWidth: size.width,
       viewportHeight: size.height,
       today: todayISO(),
+      activeBaseline,
     });
     sceneRef.current = scene;
     maxScrollTopRef.current = Math.max(0, scene.totalRows * ROW_HEIGHT - size.height);
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
-  }, [file, size]);
+  }, [file, size, activeBaseline]);
 
   // ----- Pointer interaction -----
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -249,9 +271,17 @@ export function GanttCanvas() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // When not dragging, detect holiday hover for the tooltip (PRD §3.5).
+    // When not dragging, detect baseline bar hover first (spec §5.10) — if the
+    // pointer is over a live bar or baseline track, show the deviation tooltip
+    // and suppress the holiday tooltip. Only fall back to holiday hover when no
+    // task/baseline is hit (empty time column).
     if (dragRef.current.kind === 'idle') {
-      onHoverMove(x, y);
+      onBaselineHoverMove(x, y);
+      if (!hitBaseline(x, y)) {
+        onHolidayHoverMove(x, y);
+      } else {
+        clearHolidayHover();
+      }
       return;
     }
 
@@ -393,16 +423,24 @@ export function GanttCanvas() {
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
         onPointerLeave={() => {
-          clearHover();
+          clearHolidayHover();
+          clearBaselineHover();
         }}
       />
       {holidayTooltip}
-      <ScrollShim viewportWidth={size.width} />
+      {baselineTooltip}
+      <ScrollShim viewportWidth={size.width} activeBaseline={activeBaseline} />
     </div>
   );
 }
 
-function ScrollShim({ viewportWidth }: { viewportWidth: number }) {
+function ScrollShim({
+  viewportWidth,
+  activeBaseline,
+}: {
+  viewportWidth: number;
+  activeBaseline: Baseline | null;
+}) {
   const file = useProjectStore((s) => s.file);
   const scrollLeft = file.viewState.scrollLeft;
   const shimRef = useRef<HTMLDivElement>(null);
@@ -410,8 +448,10 @@ function ScrollShim({ viewportWidth }: { viewportWidth: number }) {
 
   // Total scrollable width = chart extent + current viewport (so there's room
   // to scroll the last column into view). Replaces the old hardcoded 4000.
-  const originDate = originDateFor(file);
-  const endIso = chartEndDate(file, todayISO());
+  // Spec §6.5: the active baseline's date range extends origin/end so its
+  // reference bars aren't clipped — same inputs the renderer uses.
+  const originDate = originDateFor(file, { activeBaseline });
+  const endIso = chartEndDate(file, todayISO(), activeBaseline);
   const chartWidth = dateRangeWidth(originDate, endIso, file.viewState.zoom);
   const contentWidth = Math.max(chartWidth + viewportWidth, viewportWidth + 100);
 

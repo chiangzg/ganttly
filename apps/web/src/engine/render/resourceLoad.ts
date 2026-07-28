@@ -53,6 +53,9 @@ export function renderResourceLoad(
     totalRows: 0,
     arrows: [],
     showCriticalPath: false,
+    // Baseline comparison is a task-view feature; the resource view never
+    // renders baseline tracks, so this minimal projection is always false.
+    hasActiveBaseline: false,
     selectedTaskId: null,
   };
   renderGrid(ctx, gridScene, theme);

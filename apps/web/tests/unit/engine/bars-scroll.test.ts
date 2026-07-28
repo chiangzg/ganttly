@@ -27,6 +27,7 @@ const THEME: ThemeColors = {
   taskBar: '#3b82f6',
   taskProgress: '#1d4ed8',
   critical: '#dc2626',
+  baseline: '#64748b',
   todayLine: '#ef4444',
 };
 
@@ -41,6 +42,7 @@ interface Move {
  * `barY = yTop + BAR_INSET_Y`, giving us each row's top edge. */
 function makeCtx() {
   const moves: Move[] = [];
+  const translations: Move[] = [];
   let fillStyle = '';
   const handler: ProxyHandler<Record<string, unknown>> = {
     get(_t, prop) {
@@ -49,6 +51,10 @@ function makeCtx() {
           return fillStyle;
         case 'moves':
           return moves;
+        case 'translate':
+          return (x: number, y: number) => {
+            translations.push({ x, y });
+          };
         case 'moveTo':
           return (x: number, y: number) => {
             moves.push({ x, y });
@@ -65,7 +71,11 @@ function makeCtx() {
       return true;
     },
   };
-  return { ctx: new Proxy({}, handler) as unknown as CanvasRenderingContext2D, moves };
+  return {
+    ctx: new Proxy({}, handler) as unknown as CanvasRenderingContext2D,
+    moves,
+    translations,
+  };
 }
 
 /** One task bar at global row `yIndex`. start==end so width = min (1/2 col). */
@@ -97,6 +107,7 @@ function makeScene(rows: ReturnType<typeof row>[], scrollTop: number): Scene {
     totalRows: rows.length,
     arrows: [],
     showCriticalPath: false,
+    hasActiveBaseline: false,
     selectedTaskId: null,
   };
 }
@@ -152,5 +163,31 @@ describe('renderBars — vertical positioning honours scrollTop', () => {
     const { ctx, moves } = makeCtx();
     renderBars(ctx, makeScene([row(0), row(20)], 400), THEME);
     expect(barTops(moves)).toEqual([HEADER_HEIGHT + 20 * ROW_HEIGHT - 400]);
+  });
+});
+
+describe('renderBars — baseline milestone geometry', () => {
+  it('draws a moved baseline milestone at the captured date, not the current date', () => {
+    const { ctx, translations } = makeCtx();
+    const milestone = {
+      ...row(0, 'milestone'),
+      start: '2026-02-09',
+      end: '2026-02-09',
+      isMilestone: true,
+      baseline: {
+        id: 'milestone',
+        start: '2026-02-02',
+        end: '2026-02-02',
+        duration: 0,
+        progress: 0,
+      },
+    };
+    const scene = makeScene([milestone], 0);
+    scene.hasActiveBaseline = true;
+
+    renderBars(ctx, scene, THEME);
+
+    // week zoom = 20 px/day: captured 02-02 is x=0, current 02-09 is x=140.
+    expect(translations.map((point) => point.x)).toEqual([0, 140]);
   });
 });

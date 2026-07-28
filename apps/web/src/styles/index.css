@@ -26,6 +26,8 @@
     --color-task-bar: 96 165 250;
     --color-task-progress: 37 99 235;
     --color-critical: 220 38 38;
+    /* Baseline reference bars — neutral slate, lower visual weight than live bars. */
+    --color-baseline: 100 116 139;
 
     --font-size-base: 14px;
   }
@@ -46,6 +48,7 @@
       --color-task-bar: 51 110 200;
       --color-task-progress: 96 165 250;
       --color-critical: 248 113 113;
+      --color-baseline: 148 163 184;
     }
   }
 

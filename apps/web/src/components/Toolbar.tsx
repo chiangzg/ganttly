@@ -20,6 +20,8 @@ import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
 import { ExportMenu } from './ExportMenu';
+import { BaselineControl } from './BaselineControl';
+import { findActiveBaseline } from '@/lib/baseline';
 import { nanoid } from 'nanoid';
 import { addTaskCommand } from '@/store/useProjectStore';
 import type { Task } from '@ganttly/schema';
@@ -46,7 +48,13 @@ export function Toolbar() {
     // The previous code used file.tasks[0]?.start, which diverged from the
     // renderer's min(earliest task, project.startDate ?? '2026-01-05') and so
     // the "today" button landed on the wrong column (e.g. February).
-    const origin = originDateFor(file);
+    // Spec §6.5: include the active baseline so Today stays aligned when
+    // comparison extends the chart origin to the left.
+    const activeBaseline = findActiveBaseline(
+      file.baselines,
+      useViewStore.getState().activeBaselineId,
+    );
+    const origin = originDateFor(file, { activeBaseline });
     const today = todayISO();
     const px = dateToPixel(today, origin, file.viewState.zoom);
     // Center today in the chart viewport instead of a fixed -200px offset.
@@ -135,7 +143,15 @@ export function Toolbar() {
           ? t('toolbar.hideCriticalPath')
           : t('toolbar.showCriticalPath')}
       </ToolbarButton>
-      <ToolbarDivider />
+      {viewMode === 'task' ? (
+        <>
+          <ToolbarDivider />
+          <BaselineControl />
+          <ToolbarDivider />
+        </>
+      ) : (
+        <ToolbarDivider />
+      )}
       <ToolbarButton
         onClick={() => setViewMode('task')}
         title={t('toolbar.taskView')}

@@ -29,6 +29,7 @@ const THEME: ThemeColors = {
   taskBar: '#3b82f6',
   taskProgress: '#1d4ed8',
   critical: '#dc2626',
+  baseline: '#64748b',
   todayLine: '#ef4444',
 };
 
