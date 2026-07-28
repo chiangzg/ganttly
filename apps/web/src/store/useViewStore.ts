@@ -66,6 +66,17 @@ interface ViewStoreState {
   showCostColumns: boolean;
   setShowCostColumns(v: boolean): void;
 
+  /**
+   * Active baseline for comparison (baseline-comparison spec §6.1).
+   *
+   * `null` means "not comparing". This is ephemeral UI state — it does NOT go
+   * into the project file or the undo stack, so a page refresh or project
+   * switch naturally resets it to `null`. Selecting a different baseline does
+   * not mutate project data; it only changes which baseline the Scene/UI reads.
+   */
+  activeBaselineId: string | null;
+  setActiveBaselineId(id: string | null): void;
+
   resetForProjectSwitch(): void;
 }
 
@@ -102,6 +113,9 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   showCostColumns: false,
   setShowCostColumns: (v) => set({ showCostColumns: v }),
 
+  activeBaselineId: null,
+  setActiveBaselineId: (id) => set({ activeBaselineId: id }),
+
   resetForProjectSwitch: () =>
     set({
       drawer: 'closed',
@@ -110,5 +124,6 @@ export const useViewStore = create<ViewStoreState>((set) => ({
       selectedResourceId: null,
       expandedResourceIds: new Set<string>(),
       selectedTaskIdInResource: null,
+      activeBaselineId: null,
     }),
 }));

@@ -20,7 +20,15 @@ const BAR_RADIUS = 4;
 const MILESTONE_HALF = 9; // half-width of the diamond
 
 export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: ThemeColors): void {
-  const { zoom, originDate, scrollLeft, rows, selectedTaskId, showCriticalPath } = scene;
+  const {
+    zoom,
+    originDate,
+    scrollLeft,
+    rows,
+    selectedTaskId,
+    showCriticalPath,
+    hasActiveBaseline,
+  } = scene;
 
   rows.forEach((row) => {
     // Position by GLOBAL row index minus scrollTop, mirroring the resource
@@ -44,6 +52,7 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
       theme,
       selectedTaskId,
       showCriticalPath,
+      hasActiveBaseline,
       viewportWidth: scene.viewportWidth,
     });
   });
@@ -56,6 +65,8 @@ interface DrawCtx {
   theme: ThemeColors;
   selectedTaskId: string | null;
   showCriticalPath: boolean;
+  /** When true, rows draw a baseline reference track below the live bar. */
+  hasActiveBaseline: boolean;
   viewportWidth: number;
 }
 
@@ -76,17 +87,34 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
   const progressColor =
     env.showCriticalPath && row.isCritical ? darken(env.theme.critical) : env.theme.taskProgress;
 
+  // Baseline comparison layout (spec §5.9): when active, the baseline track is
+  // drawn FIRST (lower visual layer) at the bottom of the row, then the live
+  // bar is drawn on top in the upper region. The live bar is shrunk vertically
+  // so both fit within the 32px row without overlap.
+  const compare = env.hasActiveBaseline;
+
   if (row.isMilestone) {
-    drawMilestone(ctx, xStart, yTop + ROW_HEIGHT / 2, barColor, env.theme);
+    // Draw the reference from the SNAPSHOT geometry. A moved milestone must
+    // show two diamonds at different dates, and a task whose milestone status
+    // changed since capture must retain the baseline's original shape.
+    if (compare && row.baseline) drawBaselineReference(ctx, row.baseline, yTop, env);
+    const cy = compare ? yTop + ROW_HEIGHT / 2 - 3 : yTop + ROW_HEIGHT / 2;
+    drawMilestone(ctx, xStart, cy, barColor, env.theme, compare ? 8 : MILESTONE_HALF);
     if (row.id === env.selectedTaskId) {
-      drawSelectionRing(ctx, xStart, yTop + ROW_HEIGHT / 2, MILESTONE_HALF + 4, env.theme);
+      drawSelectionRing(ctx, xStart, cy, (compare ? 8 : MILESTONE_HALF) + 4, env.theme);
     }
+    drawRowLabel(ctx, row, xStart, width, yTop, env);
     return;
   }
 
-  // Task bar
-  const barY = yTop + BAR_INSET_Y;
-  const barH = ROW_HEIGHT - 2 * BAR_INSET_Y;
+  // Task bar. In compare mode: yTop+4, height ~16, leaving room for the 4px
+  // baseline track at yTop+24 with a ≥3px gap (spec §5.9).
+  const barY = compare ? yTop + 4 : yTop + BAR_INSET_Y;
+  const barH = compare ? 16 : ROW_HEIGHT - 2 * BAR_INSET_Y;
+
+  // Baseline reference track first (lower layer).
+  if (compare && row.baseline) drawBaselineReference(ctx, row.baseline, yTop, env);
+
   drawRoundedRect(ctx, xStart, barY, width, barH, BAR_RADIUS);
   ctx.fillStyle = barColor;
   ctx.globalAlpha = 0.35;
@@ -119,20 +147,88 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
     drawConstraintMarker(ctx, markerX, barY, isStartType, markerColor);
   }
 
-  // Label (clipped to viewport; ellipsised if too long)
+  drawRowLabel(ctx, row, xStart, width, yTop, env);
+}
+
+/**
+ * Draw the baseline reference track — a thin neutral bar at the bottom of the
+ * row (spec §5.9). Alpha ~0.55, 4px tall, 2px radius, optional 1px low-contrast
+ * outline. No dashed lines (they fragment at month/year zoom).
+ */
+function drawBaselineTrack(
+  ctx: CanvasRenderingContext2D,
+  startISO: string,
+  endISO: string,
+  yTop: number,
+  env: DrawCtx,
+): void {
+  const xStart = dateToPixel(startISO, env.originDate, env.zoom) - env.scrollLeft;
+  const width = Math.max(dateRangeWidth(startISO, endISO, env.zoom), COLUMN_WIDTH[env.zoom] / 2);
+  const trackY = yTop + 24; // spec §5.9
+  const trackH = 4;
+  drawRoundedRect(ctx, xStart, trackY, width, trackH, 2);
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = env.theme.baseline;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = env.theme.baseline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+/** Draw the captured shape independently from the task's current milestone state. */
+function drawBaselineReference(
+  ctx: CanvasRenderingContext2D,
+  baseline: TaskRow['baseline'],
+  yTop: number,
+  env: DrawCtx,
+): void {
+  if (!baseline) return;
+  if (baseline.duration === 0) {
+    const baselineX = dateToPixel(baseline.start, env.originDate, env.zoom) - env.scrollLeft;
+    drawBaselineMilestone(ctx, baselineX, yTop + ROW_HEIGHT - 8, env.theme.baseline);
+    return;
+  }
+  drawBaselineTrack(ctx, baseline.start, baseline.end, yTop, env);
+}
+
+/** Small hollow baseline milestone diamond (spec §5.9). */
+function drawBaselineMilestone(
+  ctx: CanvasRenderingContext2D,
+  cxBase: number,
+  cy: number,
+  color: string,
+): void {
+  const half = 5;
+  ctx.save();
+  ctx.translate(cxBase, cy);
+  ctx.rotate(Math.PI / 4);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-half, -half, half * 2, half * 2);
+  ctx.restore();
+}
+
+/** Shared row-label drawing (extracted to avoid duplication in compare paths). */
+function drawRowLabel(
+  ctx: CanvasRenderingContext2D,
+  row: TaskRow,
+  xStart: number,
+  width: number,
+  yTop: number,
+  env: DrawCtx,
+): void {
   const label = row.name;
-  if (label) {
-    ctx.fillStyle = env.theme.fg;
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
-    const labelX = xStart + width + 6;
-    // Available label width = right edge of viewport - label start.
-    const maxLabelWidth = env.viewportWidth - labelX;
-    if (maxLabelWidth > 20) {
-      const truncated = ellipsis(ctx, label, Math.max(20, maxLabelWidth));
-      ctx.fillText(truncated, labelX, yTop + ROW_HEIGHT / 2);
-    }
+  if (!label) return;
+  ctx.fillStyle = env.theme.fg;
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const labelX = xStart + width + 6;
+  const maxLabelWidth = env.viewportWidth - labelX;
+  if (maxLabelWidth > 20) {
+    const truncated = ellipsis(ctx, label, Math.max(20, maxLabelWidth));
+    ctx.fillText(truncated, labelX, yTop + ROW_HEIGHT / 2);
   }
 }
 
@@ -150,8 +246,16 @@ function drawSummaryBar(
     env.showCriticalPath && row.isCritical ? darken(env.theme.critical) : env.theme.taskProgress;
 
   const summaryBarH = Math.round((ROW_HEIGHT - 2 * BAR_INSET_Y) * 0.45);
-  const summaryBarY = yTop + ROW_HEIGHT / 2;
+  // In compare mode, nudge the live summary bar up so the baseline track fits
+  // below (spec §5.9 — "当前摘要条继续使用较深实色...在比较模式中适当上移").
+  const summaryBarY = env.hasActiveBaseline ? yTop + 8 : yTop + ROW_HEIGHT / 2;
   const darkColor = darken(barColor);
+
+  // Baseline summary track FIRST (lower layer): a 3-4px thin track with small
+  // end caps (spec §5.9). Only when a snapshot exists for this summary.
+  if (env.hasActiveBaseline && row.baseline) {
+    drawBaselineSummaryTrack(ctx, row.baseline.start, row.baseline.end, yTop, env);
+  }
 
   // Main bar (dark fill)
   drawRoundedRect(ctx, xStart, summaryBarY, width, summaryBarH, 1);
@@ -187,6 +291,29 @@ function drawSummaryBar(
       ctx.fillText(truncated, labelX, yTop + ROW_HEIGHT / 2);
     }
   }
+}
+
+/** Thin baseline summary track with small end caps (spec §5.9). */
+function drawBaselineSummaryTrack(
+  ctx: CanvasRenderingContext2D,
+  startISO: string,
+  endISO: string,
+  yTop: number,
+  env: DrawCtx,
+): void {
+  const xStart = dateToPixel(startISO, env.originDate, env.zoom) - env.scrollLeft;
+  const width = Math.max(dateRangeWidth(startISO, endISO, env.zoom), COLUMN_WIDTH[env.zoom] / 2);
+  const trackY = yTop + ROW_HEIGHT - 8;
+  const trackH = 3;
+  ctx.globalAlpha = 0.55;
+  drawRoundedRect(ctx, xStart, trackY, width, trackH, 1);
+  ctx.fillStyle = env.theme.baseline;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  // Small end caps.
+  ctx.fillStyle = env.theme.baseline;
+  ctx.fillRect(xStart - 1, trackY - 1, 1.5, trackH + 2);
+  ctx.fillRect(xStart + width - 0.5, trackY - 1, 1.5, trackH + 2);
 }
 
 function drawDownTriangle(
@@ -243,12 +370,13 @@ function drawMilestone(
   cy: number,
   color: string,
   _theme: ThemeColors,
+  half: number = MILESTONE_HALF,
 ): void {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(Math.PI / 4);
   ctx.fillStyle = color;
-  ctx.fillRect(-MILESTONE_HALF, -MILESTONE_HALF, MILESTONE_HALF * 2, MILESTONE_HALF * 2);
+  ctx.fillRect(-half, -half, half * 2, half * 2);
   ctx.restore();
 }
 

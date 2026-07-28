@@ -10,14 +10,16 @@
  * - Compute arrow geometry from dependency specs
  * - Resolve holidays within the visible date range
  */
-import type { GanttlyFile, Holiday, Task } from '@ganttly/schema';
+import type { GanttlyFile, Holiday, Task, Baseline, BaselineTask } from '@ganttly/schema';
 import type { Scene, TaskRow, ArrowSpec } from '../render/types';
+import type { TaskBaselineVariance } from '@/lib/baseline';
 import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff, pixelsPerDay } from '../layout';
 import { buildTree, flattenVisible } from './tree';
 import { computeCriticalPath } from '@/lib/cpm';
 import { computeAllRollups } from '@/lib/summary';
 import { checkConstraintConflicts } from '@/lib/schedule';
 import { resolveCalendar } from '@/lib/calendar';
+import { compareTaskToBaseline, buildEffectiveValues } from '@/lib/baseline';
 
 export interface AssembleOptions {
   viewportWidth: number;
@@ -25,6 +27,12 @@ export interface AssembleOptions {
   today: string;
   /** Set of task ids that are on the critical path (M3). */
   criticalTaskIds?: ReadonlySet<string>;
+  /**
+   * Active baseline for comparison (baseline-comparison spec §6.4). When
+   * provided, each TaskRow carries its baseline snapshot + variance. Pass
+   * `null`/`undefined` to disable comparison entirely.
+   */
+  activeBaseline?: Baseline | null;
 }
 
 export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
@@ -64,6 +72,19 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   // Detect constraint-vs-dependency conflicts (G4 — for arrow/row highlighting).
   const conflictIds = checkConstraintConflicts(file.tasks, cal);
 
+  // Baseline comparison prep (spec §6.4). Build the snapshot map ONCE (O(n))
+  // and look up by id inside toTaskRow — never `baseline.tasks.find()` per row.
+  // Effective current values (summary rollup applied) are shared between the
+  // variance calc and the row so both see the same dates.
+  const activeBaseline = opts.activeBaseline ?? null;
+  const hasActiveBaseline = activeBaseline !== null;
+  const baselineById = hasActiveBaseline
+    ? new Map<string, BaselineTask>(activeBaseline.tasks.map((bt) => [bt.id, bt]))
+    : null;
+  // Reuse the rollups already computed above. Recomputing them here would add
+  // a second full tree traversal to every scroll-driven scene assembly.
+  const effectiveValues = hasActiveBaseline ? buildEffectiveValues(file, cal, allRollups) : null;
+
   // Virtualise rows: drop rows above/below the visible scroll area.
   const firstVisibleRow = Math.max(0, Math.floor(file.viewState.scrollTop / ROW_HEIGHT) - 5);
   const lastVisibleRow = Math.min(
@@ -82,6 +103,9 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
       allRollups,
       conflictIds,
       firstVisibleRow + i, // global row index — drives pixel Y, mirrors ResourceRow.yIndex
+      baselineById,
+      effectiveValues,
+      cal,
     ),
   );
 
@@ -100,6 +124,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
     totalRows: visible.length,
     arrows,
     showCriticalPath: file.viewState.showCriticalPath,
+    hasActiveBaseline,
     selectedTaskId: file.viewState.selectedTaskId,
   };
 }
@@ -113,11 +138,14 @@ function toTaskRow(
   allRollups: Map<string, { start: string; end: string; progress: number }>,
   conflictIds: ReadonlySet<string>,
   yIndex: number,
+  baselineById: Map<string, BaselineTask> | null,
+  effectiveValues: Map<string, { id: string; start: string; end: string; duration: number }> | null,
+  cal: ReturnType<typeof resolveCalendar>,
 ): TaskRow {
   const isSummary = summaryIds.has(task.id);
   const rollup = allRollups.get(task.id);
   const hasConstraint = task.constraints.type !== 'none' && !!task.constraints.date;
-  return {
+  const row: TaskRow = {
     id: task.id,
     name: task.name,
     start: isSummary && rollup ? rollup.start : task.start,
@@ -135,6 +163,21 @@ function toTaskRow(
       : undefined,
     hasConstraintConflict: conflictIds.has(task.id),
   };
+
+  // Baseline fields: only attach when a baseline is active. Summary tasks
+  // compare their live rollup (already set on `row`) against the captured
+  // snapshot; leaves compare their own fields. Added tasks get variance only.
+  if (baselineById && effectiveValues) {
+    const bt = baselineById.get(task.id);
+    if (bt) row.baseline = bt;
+    const eff = effectiveValues.get(task.id);
+    if (eff) {
+      const variance: TaskBaselineVariance = compareTaskToBaseline(eff, bt, cal);
+      row.baselineVariance = variance;
+    }
+  }
+
+  return row;
 }
 
 /**
@@ -230,26 +273,58 @@ function endpointX(
   return px - scrollLeft;
 }
 
-export function originDateFor(file: GanttlyFile, _opts?: AssembleOptions): string {
+export function originDateFor(
+  file: GanttlyFile,
+  opts?: AssembleOptions | { activeBaseline?: Baseline | null },
+): string {
   // Anchor at the project start date if present, otherwise the earliest task.
   const fallback = file.project.startDate ?? '2026-01-05';
-  if (file.tasks.length === 0) return fallback;
-  const minStart = file.tasks.reduce(
-    (min, t) => (t.start < min ? t.start : min),
-    file.tasks[0]!.start,
-  );
-  return minStart < fallback ? minStart : fallback;
+  let minStart = fallback;
+  if (file.tasks.length > 0) {
+    minStart = file.tasks.reduce((min, t) => (t.start < min ? t.start : min), file.tasks[0]!.start);
+    if (fallback < minStart) minStart = fallback;
+  }
+  // Baseline-comparison spec §6.5: only the ACTIVE baseline's earliest start
+  // extends the origin (so its reference bar isn't clipped on the left).
+  // Inactive baselines are deliberately ignored — historical snapshots must
+  // not permanently widen the scroll range.
+  const activeBaseline = opts?.activeBaseline ?? null;
+  if (activeBaseline && activeBaseline.tasks.length > 0) {
+    const blMin = activeBaseline.tasks.reduce(
+      (min, bt) => (bt.start < min ? bt.start : min),
+      activeBaseline.tasks[0]!.start,
+    );
+    if (blMin < minStart) minStart = blMin;
+  }
+  return minStart;
 }
 
 /**
  * The latest task end (or today, whichever is later) — used to size the
  * horizontal scroll extent so the ScrollShim reflects the real date range.
  * Exposed for the chart host (GanttCanvas) and the Today button.
+ *
+ * Baseline-comparison spec §6.5: when a baseline is active, its latest end
+ * also extends the range so reference bars aren't clipped on the right.
  */
-export function chartEndDate(file: GanttlyFile, today: string): string {
-  if (file.tasks.length === 0) return today;
-  const maxEnd = file.tasks.reduce((max, t) => (t.end > max ? t.end : max), file.tasks[0]!.end);
-  return maxEnd > today ? maxEnd : today;
+export function chartEndDate(
+  file: GanttlyFile,
+  today: string,
+  activeBaseline?: Baseline | null,
+): string {
+  let maxEnd = today;
+  if (file.tasks.length > 0) {
+    const taskMax = file.tasks.reduce((max, t) => (t.end > max ? t.end : max), file.tasks[0]!.end);
+    if (taskMax > maxEnd) maxEnd = taskMax;
+  }
+  if (activeBaseline && activeBaseline.tasks.length > 0) {
+    const blMax = activeBaseline.tasks.reduce(
+      (max, bt) => (bt.end > max ? bt.end : max),
+      activeBaseline.tasks[0]!.end,
+    );
+    if (blMax > maxEnd) maxEnd = blMax;
+  }
+  return maxEnd;
 }
 
 /** Filter holidays to those within `[today-365, today+365]`. */

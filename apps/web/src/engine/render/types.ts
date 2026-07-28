@@ -10,7 +10,8 @@
  * works automatically. The host component resolves them to RGB strings
  * before passing to the renderer (Canvas cannot read CSS vars directly).
  */
-import type { ZoomLevel, Holiday } from '@ganttly/schema';
+import type { ZoomLevel, Holiday, BaselineTask } from '@ganttly/schema';
+import type { TaskBaselineVariance } from '@/lib/baseline';
 
 /** Resolved theme colors — CSS-variable values converted to rgb() strings. */
 export interface ThemeColors {
@@ -27,6 +28,8 @@ export interface ThemeColors {
   taskBar: string;
   taskProgress: string;
   critical: string;
+  /** Neutral reference color for baseline bars (baseline-comparison spec §5.11). */
+  baseline: string;
   todayLine: string;
 }
 
@@ -54,6 +57,14 @@ export interface TaskRow {
   constraint?: { type: string; date: string };
   /** True when this task's constraint conflicts with its dependencies (G4). */
   hasConstraintConflict?: boolean;
+  /**
+   * Baseline snapshot for this task (baseline-comparison spec §6.4). Present
+   * only when a baseline is active AND this task existed at capture time.
+   * `undefined` for added tasks (no baseline record) — do NOT fabricate one.
+   */
+  baseline?: BaselineTask;
+  /** Deviation vs. the baseline snapshot. Present when baseline is active. */
+  baselineVariance?: TaskBaselineVariance;
 }
 
 /** A dependency arrow in the rendered scene. */
@@ -187,6 +198,12 @@ export interface Scene {
   arrows: ArrowSpec[];
   /** Whether to highlight the critical path. */
   showCriticalPath: boolean;
+  /**
+   * Whether baseline comparison mode is active (baseline-comparison spec §6.4).
+   * When true, rows may carry `baseline` + `baselineVariance` and the renderer
+   * draws dual-layer bars; when false, no baseline geometry is drawn at all.
+   */
+  hasActiveBaseline: boolean;
   /** Currently selected task id (draws a focus ring). */
   selectedTaskId: string | null;
 }

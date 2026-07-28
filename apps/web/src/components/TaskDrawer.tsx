@@ -21,7 +21,7 @@ import {
   updateConstraintCommand,
 } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
-import type { Task, DependencyType, Resource, ConstraintType } from '@ganttly/schema';
+import type { Task, DependencyType, Resource, ConstraintType, BaselineTask } from '@ganttly/schema';
 import {
   resolveCalendar,
   endDateFromDuration,
@@ -32,6 +32,12 @@ import { wouldCreateCycle } from '@/lib/schedule';
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
 import { snapConstraintDate } from '@/lib/schedule';
+import {
+  findActiveBaseline,
+  buildEffectiveValues,
+  compareTaskToBaseline,
+  type TaskBaselineVariance,
+} from '@/lib/baseline';
 
 /** Fields whose edit must cascade rollup to ancestor summary tasks. */
 const ROLLUP_FIELDS = new Set(['progress', 'start', 'end', 'duration']);
@@ -42,6 +48,7 @@ export function TaskDrawer() {
   const closeDrawer = useViewStore((s) => s.closeDrawer);
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
+  const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const selectedId = file.viewState.selectedTaskId;
   const task = file.tasks.find((x) => x.id === selectedId) ?? null;
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
@@ -55,6 +62,19 @@ export function TaskDrawer() {
     setOvertimeDate('');
     setOvertimeError('');
   }, [task?.id, task]);
+
+  // Baseline variance for the selected task (baseline-comparison spec §5.7).
+  // Computed from the live effective value so summary tasks compare against
+  // their current rollup, exactly like the Canvas / table.
+  const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
+  const baselineVariance = useMemo(() => {
+    if (!task || !activeBaseline) return null;
+    const effective = buildEffectiveValues(file, cal);
+    const eff = effective.get(task.id);
+    if (!eff) return null;
+    const byId = new Map(activeBaseline.tasks.map((bt) => [bt.id, bt]));
+    return compareTaskToBaseline(eff, byId.get(task.id), cal);
+  }, [task, activeBaseline, file, cal]);
 
   if (drawer === 'closed' || !draft || !task) return null;
 
@@ -191,6 +211,13 @@ export function TaskDrawer() {
             }}
           />
         </Field>
+        {activeBaseline && baselineVariance ? (
+          <BaselineVarianceBlock
+            name={activeBaseline.name}
+            variance={baselineVariance}
+            baselineTask={activeBaseline.tasks.find((bt) => bt.id === task.id) ?? null}
+          />
+        ) : null}
         <Field label={t('drawer.progress')}>
           <input
             type="range"
@@ -493,6 +520,80 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 block text-xs font-medium text-fg-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+const MINUS_SIGN = '\u2212';
+
+/**
+ * Read-only baseline variance block (baseline-comparison spec §5.7).
+ *
+ * Shown beneath the date/duration editors when a baseline is active. Three
+ * columns (start / finish / duration deltas) + the baseline date range. Delay
+ * values use danger, early values success, zero muted. No editing affordance
+ * — baseline management stays in its own dialogs.
+ */
+function BaselineVarianceBlock({
+  name,
+  variance,
+  baselineTask,
+}: {
+  name: string;
+  variance: TaskBaselineVariance;
+  baselineTask: BaselineTask | null;
+}) {
+  const { t } = useTranslation();
+
+  if (variance.status === 'added') {
+    return (
+      <div className="rounded-lg border border-border bg-bg p-3 text-xs text-fg-muted">
+        <div className="mb-1 font-medium text-fg">{t('baseline.drawerTitle', { name })}</div>
+        <p>{t('baseline.drawerAdded')}</p>
+      </div>
+    );
+  }
+
+  const fmt = (n: number) => {
+    if (n > 0) return { text: `+${n}`, tone: 'text-danger' };
+    if (n < 0) return { text: `${MINUS_SIGN}${Math.abs(n)}`, tone: 'text-success' };
+    return { text: '0', tone: 'text-fg-muted' };
+  };
+  const start = fmt(variance.startDelta);
+  const finish = fmt(variance.finishDelta);
+  const duration = fmt(variance.durationDelta);
+
+  return (
+    <div className="rounded-lg border border-border bg-bg p-3">
+      <div className="mb-2 text-xs font-medium text-fg">{t('baseline.drawerTitle', { name })}</div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div className="text-[11px] text-fg-muted">{t('baseline.varianceStart')}</div>
+          <div className={`mt-0.5 text-sm font-medium tabular-nums ${start.tone}`}>
+            {start.text}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] text-fg-muted">{t('baseline.varianceFinish')}</div>
+          <div className={`mt-0.5 text-sm font-medium tabular-nums ${finish.tone}`}>
+            {finish.text}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] text-fg-muted">{t('baseline.varianceDuration')}</div>
+          <div className={`mt-0.5 text-sm font-medium tabular-nums ${duration.tone}`}>
+            {duration.text}
+          </div>
+        </div>
+      </div>
+      {baselineTask ? (
+        <div className="mt-2 text-[11px] text-fg-muted">
+          {t('baseline.drawerBaselineRange', {
+            start: baselineTask.start,
+            end: baselineTask.end,
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
