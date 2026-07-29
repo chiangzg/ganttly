@@ -41,19 +41,16 @@ import * as Tooltip from '@radix-ui/react-tooltip';
 import { nanoid } from 'nanoid';
 import type { Task, BaselineTask } from '@ganttly/schema';
 
-const TABLE_WIDTH = 420;
-const TABLE_WIDTH_WITH_EFFORT = 480;
-const TABLE_WIDTH_WITH_BASELINE = 492;
-const TABLE_WIDTH_WITH_EFFORT_AND_BASELINE = 552;
+const TABLE_WIDTH = 480;
+const TABLE_WIDTH_WITH_BASELINE = 552;
 /**
  * 共享列模板：表头与每行数据必须用同一个，否则列宽按行内容自适应，
  * 会导致 WBS/工期/进度列与表头错位、长任务名挤压（bug: 左侧明细挤在一起）。
- * 基线偏差列（baseline-comparison spec §5.6）仅在比较模式开启时追加 70px。
+ * “人天”列（56px）恒驻于工期与进度之间；基线偏差列（baseline-comparison spec
+ * §5.6）仅在比较模式开启时追加 70px。
  */
-const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 64px';
-const GRID_TEMPLATE_WITH_EFFORT = '44px minmax(0, 1fr) 72px 56px 56px';
-const GRID_TEMPLATE_WITH_BASELINE = '44px minmax(0, 1fr) 72px 64px 70px';
-const GRID_TEMPLATE_WITH_EFFORT_AND_BASELINE = '44px minmax(0, 1fr) 72px 56px 56px 70px';
+const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 56px 56px';
+const GRID_TEMPLATE_WITH_BASELINE = '44px minmax(0, 1fr) 72px 56px 56px 70px';
 
 export function TaskTable() {
   const { t } = useTranslation();
@@ -61,7 +58,6 @@ export function TaskTable() {
   const dispatch = useProjectStore((s) => s.dispatch);
   const openDrawer = useViewStore((s) => s.openDrawer);
   const openContextMenu = useViewStore((s) => s.openContextMenu);
-  const showCostColumns = useViewStore((s) => s.showCostColumns);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renamingId = useRef<string | null>(null);
@@ -69,20 +65,8 @@ export function TaskTable() {
   const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
   const hasBaseline = activeBaseline !== null;
 
-  const gridTemplate = showCostColumns
-    ? hasBaseline
-      ? GRID_TEMPLATE_WITH_EFFORT_AND_BASELINE
-      : GRID_TEMPLATE_WITH_EFFORT
-    : hasBaseline
-      ? GRID_TEMPLATE_WITH_BASELINE
-      : GRID_TEMPLATE;
-  const tableWidth = showCostColumns
-    ? hasBaseline
-      ? TABLE_WIDTH_WITH_EFFORT_AND_BASELINE
-      : TABLE_WIDTH_WITH_EFFORT
-    : hasBaseline
-      ? TABLE_WIDTH_WITH_BASELINE
-      : TABLE_WIDTH;
+  const gridTemplate = hasBaseline ? GRID_TEMPLATE_WITH_BASELINE : GRID_TEMPLATE;
+  const tableWidth = hasBaseline ? TABLE_WIDTH_WITH_BASELINE : TABLE_WIDTH;
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   const rows = useMemo(() => {
@@ -335,9 +319,7 @@ export function TaskTable() {
         <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
         <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
         <div className="border-r border-border px-2 py-1">{t('table.columnDuration')}</div>
-        {showCostColumns && (
-          <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
-        )}
+        <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
         <div className="border-r border-border px-2 py-1">{t('table.columnProgress')}</div>
         {hasBaseline && <div className="px-2 py-1">{t('baseline.columnDeviation')}</div>}
       </div>
@@ -444,17 +426,15 @@ export function TaskTable() {
                 <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
                   {node.task.isMilestone ? '—' : `${node.task.duration}d`}
                 </div>
-                {showCostColumns && (
-                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
-                    {(() => {
-                      const pd =
-                        node.children.length > 0
-                          ? effortMap.get(node.task.id)?.personDays
-                          : computeTaskPersonDays(node.task, file.resources, cal);
-                      return pd && pd > 0 ? `${pd}` : '—';
-                    })()}
-                  </div>
-                )}
+                <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
+                  {(() => {
+                    const pd =
+                      node.children.length > 0
+                        ? effortMap.get(node.task.id)?.personDays
+                        : computeTaskPersonDays(node.task, file.resources, cal);
+                    return pd && pd > 0 ? `${pd}` : '—';
+                  })()}
+                </div>
                 <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
                   {node.task.progress}%
                 </div>

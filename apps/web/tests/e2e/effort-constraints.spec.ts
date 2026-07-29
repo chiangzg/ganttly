@@ -4,7 +4,8 @@ import { expect, test, type Page } from '@playwright/test';
  * Person-days column + constraint editor E2E (P1 features two & three).
  *
  * Verifies:
- * - The Toolbar "人天列" toggle button exists and is clickable.
+ * - The person-days column is shown by default (the toolbar toggle was
+ *   removed — the column now always renders in task and resource views).
  * - The effort column displays computed person-days for assigned tasks.
  * - The TaskDrawer exposes the constraint editor section.
  */
@@ -51,19 +52,13 @@ test.describe('person-days column', () => {
     await injectFixture(page);
   });
 
-  test('toggling the effort column adds the 人天 header and shows the value', async ({ page }) => {
-    // Toggle on via the toolbar button.
-    await page.getByRole('button', { name: '人天列' }).click();
-    await page.waitForTimeout(300);
+  test('the effort column shows the 人天 header and value by default', async ({ page }) => {
+    // The person-days column is always shown now — no toolbar toggle required.
     // t1: load=50%, capacity=1.0, duration=5 → 0.5 × 1.0 × 5 = 2.5 person-days.
     // Verify via the DOM that "2.5" appears somewhere in the task table area.
     // Use a broad search since the value renders inside a grid cell.
     const tableArea = page.locator('.border-r.border-border').first();
     await expect(tableArea.getByText('2.5')).toBeVisible({ timeout: 5000 });
-
-    // Toggle off.
-    await page.getByRole('button', { name: '人天列' }).click();
-    await page.waitForTimeout(300);
   });
 
   test('resource-view drill-down shows per-resource person-days in task lanes', async ({
@@ -73,9 +68,7 @@ test.describe('person-days column', () => {
     await page.getByRole('button', { name: '资源视图' }).click();
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
 
-    // Enable the person-days column — it must take effect in the resource view.
-    await page.getByRole('button', { name: '人天列' }).click();
-    await page.waitForTimeout(200);
+    // The person-days column is always shown — no toggle needed.
     const resourceList = page.locator('[data-resource-list]');
     // Task columns belong to the expanded resource group, not the fixed
     // resource summary header.
@@ -97,12 +90,6 @@ test.describe('person-days column', () => {
     // for THIS resource on this task. Scope the assertion to the task lane so
     // it isn't confused by the StatusBar's project-total "2.5 人天".
     await expect(taskLane.getByText('2.5')).toBeVisible({ timeout: 5000 });
-
-    // Toggle off — the column and its value disappear from the task lane.
-    await page.getByRole('button', { name: '人天列' }).click();
-    await page.waitForTimeout(200);
-    await expect(taskLane.getByText('2.5')).toHaveCount(0);
-    await expect(resourceList.getByText('人天', { exact: true })).toHaveCount(0);
   });
 
   test('explicit overtime is editable and affects effort without inferring the whole weekend', async ({

@@ -21,7 +21,6 @@ export const en = {
     hideCriticalPath: 'Hide critical path',
     taskView: 'Task view',
     resourceView: 'Resource view',
-    effortColumn: 'Effort col',
     newTask: 'New task',
     undo: 'Undo',
     redo: 'Redo',

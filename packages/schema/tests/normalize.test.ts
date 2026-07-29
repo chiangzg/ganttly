@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createEmptyFile, normalizeFile, validateGanttlyFile } from '../src/index.js';
+import {
+  createEmptyFile,
+  normalizeFile,
+  stripUnknownFields,
+  validateGanttlyFile,
+} from '../src/index.js';
 import type { GanttlyFile, Holiday } from '../src/index.js';
 
 const HOLIDAYS: Holiday[] = [
@@ -186,5 +191,124 @@ describe('normalizeFile', () => {
     expect(out.tasks[1]!.overtimeDates).toEqual(['2026-01-10', '2026-01-11']);
     expect(file).toEqual(snapshot);
     expect(normalizeFile(out, { getHolidays })).toEqual(out);
+  });
+
+  // ----- forward-compatibility: unknown-field stripping ---------------------
+  it('strips unknown task keys and reports them via onStripped', () => {
+    const base = createEmptyFile();
+    // @ts-expect-error — simulating a NEWER app's export carrying unknown fields
+    const file: GanttlyFile = {
+      ...base,
+      tasks: [
+        {
+          ...base.tasks[0],
+          id: 't1',
+          name: 'T1',
+          parentId: null,
+          order: 0,
+          start: '2026-01-05',
+          end: '2026-01-09',
+          duration: 5,
+          progress: 0,
+          isMilestone: false,
+          dependencies: [],
+          constraints: { type: 'none' },
+          assignments: [],
+          customFields: {},
+          overtimeDates: ['2026-01-06'], // KNOWN to current schema -> must stay
+          legacyField: 'oops', // unknown -> strip
+          anotherUnknown: 123, // unknown -> strip
+        },
+      ],
+    };
+    const snapshot = structuredClone(file);
+    const stripped: string[] = [];
+
+    const out = normalizeFile(file, { getHolidays, onStripped: (p) => stripped.push(...p) });
+
+    expect(out.tasks[0]!.overtimeDates).toEqual(['2026-01-06']); // preserved
+    expect('legacyField' in out.tasks[0]!).toBe(false);
+    expect('anotherUnknown' in out.tasks[0]!).toBe(false);
+    // Reports both unknown keys, at the task path.
+    expect(stripped).toContain('tasks[0].legacyField');
+    expect(stripped).toContain('tasks[0].anotherUnknown');
+    // Does not mutate the input.
+    expect(file).toEqual(snapshot);
+    // The normalized file now validates.
+    expect(validateGanttlyFile(out).ok).toBe(true);
+  });
+
+  it('strips nested unknown keys (assignment / dependency)', () => {
+    const base = createEmptyFile();
+    // @ts-expect-error — injecting nested unknown fields
+    const file: GanttlyFile = {
+      ...base,
+      tasks: [
+        {
+          ...base.tasks[0],
+          id: 't1',
+          name: 'T1',
+          parentId: null,
+          order: 0,
+          start: '2026-01-05',
+          end: '2026-01-09',
+          duration: 5,
+          progress: 0,
+          isMilestone: false,
+          dependencies: [
+            { targetId: 'p1', type: 'FS', lag: 0, stray: 'x' }, // stray -> strip
+          ],
+          constraints: { type: 'none' },
+          assignments: [
+            { resourceId: 'r1', load: 100, bogus: true }, // bogus -> strip
+          ],
+          customFields: {},
+        },
+      ],
+    };
+    const stripped: string[] = [];
+    const out = normalizeFile(file, { onStripped: (p) => stripped.push(...p) });
+
+    expect('stray' in out.tasks[0]!.dependencies[0]!).toBe(false);
+    expect('bogus' in out.tasks[0]!.assignments[0]!).toBe(false);
+    expect(stripped).toEqual(
+      expect.arrayContaining(['tasks[0].dependencies[0].stray', 'tasks[0].assignments[0].bogus']),
+    );
+    expect(validateGanttlyFile(out).ok).toBe(true);
+  });
+
+  it('does not call onStripped when there is nothing to strip', () => {
+    const file = createEmptyFile();
+    const stripped: string[] = [];
+    normalizeFile(file, { onStripped: (p) => stripped.push(...p) });
+    expect(stripped).toEqual([]);
+  });
+
+  it('leaves a schema-valid file unchanged via stripUnknownFields', () => {
+    const file = createEmptyFile();
+    const { file: out, removed } = stripUnknownFields(file);
+    expect(removed).toEqual([]);
+    expect(out).toEqual(file);
+  });
+});
+
+describe('stripUnknownFields', () => {
+  it('is idempotent', () => {
+    const base = createEmptyFile();
+    // @ts-expect-error — injecting an unknown key
+    const file: GanttlyFile = { ...base, tasks: [{ ...base.tasks[0], legacy: 1 }] };
+    const once = stripUnknownFields(file);
+    const twice = stripUnknownFields(once.file);
+    expect(twice.removed).toEqual([]);
+    expect(twice.file).toEqual(once.file);
+  });
+
+  it('does not mutate the input', () => {
+    const base = createEmptyFile();
+    // @ts-expect-error — injecting an unknown key
+    const file: GanttlyFile = { ...base, tasks: [{ ...base.tasks[0], legacy: 1 }] };
+    const snapshot = structuredClone(file);
+    stripUnknownFields(file);
+    expect(file).toEqual(snapshot);
   });
 });
