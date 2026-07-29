@@ -53,8 +53,14 @@ function parseGanttlyJson(filename: string, content: string): ProjectImportResul
   }
 
   try {
+    // Collect forward-compat stripped fields so we can warn the user.
+    const skipped: string[] = [];
+    const onStripped = (paths: string[]): void => {
+      for (const p of paths) skipped.push(`忽略未知字段: ${p}`);
+    };
+
     // Normalize before AJV validation so older additive schema-v1 files load.
-    const file = normalizeFile(data, { getHolidays });
+    const file = normalizeFile(data, { getHolidays, onStripped });
     const validation = validateGanttlyFile(file);
     if (!validation.ok) {
       throw new ProjectImportError(`项目数据校验失败：${formatAjvErrors(validation.errors)}`);
@@ -64,7 +70,7 @@ function parseGanttlyJson(filename: string, content: string): ProjectImportResul
       file,
       name: file.project.name?.trim() || projectNameFromFilename(filename),
       taskCount: file.tasks.length,
-      skipped: [],
+      skipped,
     };
   } catch (error) {
     if (error instanceof ProjectImportError) throw error;

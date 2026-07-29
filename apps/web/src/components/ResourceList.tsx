@@ -37,19 +37,17 @@ import { useTranslation } from 'react-i18next';
 
 // The fixed pane header describes resource summary rows. Expanded groups add
 // a second, local task header in the scrolling body. Keep the pane wide enough
-// for both sets of labels when the person-days column is enabled.
-const TABLE_WIDTH = 360;
-const TABLE_WIDTH_WITH_EFFORT = 420;
+// for both sets of labels (the person-days column is always shown).
+const TABLE_WIDTH = 420;
 const GRID_TEMPLATE = 'minmax(0, 1fr) 76px 64px 28px';
-/** Task-lane grid: expand arrow | WBS | name | duration | progress. */
-const TASK_GRID_TEMPLATE = '20px 44px minmax(0, 1fr) 52px 44px';
 /**
- * Task-lane grid with the person-days column inserted between duration and
- * progress (mirrors TaskTable's effort column placement). The resource-row
- * grid (GRID_TEMPLATE) is unaffected — only the local task header and
- * drilled-down task lanes get the column, consistent with TaskTable.
+ * Task-lane grid: expand arrow | WBS | name | duration | person-days | progress.
+ * The person-days column sits between duration and progress (mirrors
+ * TaskTable's effort column placement). The resource-row grid (GRID_TEMPLATE)
+ * is unaffected — only the local task header and drilled-down task lanes get
+ * the column, consistent with TaskTable.
  */
-const TASK_GRID_TEMPLATE_WITH_EFFORT = '20px 44px minmax(0, 1fr) 52px 52px 44px';
+const TASK_GRID_TEMPLATE = '20px 44px minmax(0, 1fr) 52px 52px 44px';
 
 export function ResourceList() {
   const { t } = useTranslation();
@@ -64,9 +62,8 @@ export function ResourceList() {
   const selectedTaskIdInResource = useViewStore((s) => s.selectedTaskIdInResource);
   const setSelectedTaskIdInResource = useViewStore((s) => s.setSelectedTaskIdInResource);
   const openDrawer = useViewStore((s) => s.openDrawer);
-  const showCostColumns = useViewStore((s) => s.showCostColumns);
-  const tableWidth = showCostColumns ? TABLE_WIDTH_WITH_EFFORT : TABLE_WIDTH;
-  const taskGridTemplate = showCostColumns ? TASK_GRID_TEMPLATE_WITH_EFFORT : TASK_GRID_TEMPLATE;
+  const tableWidth = TABLE_WIDTH;
+  const taskGridTemplate = TASK_GRID_TEMPLATE;
   const scrollRef = useRef<HTMLDivElement>(null);
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
@@ -282,11 +279,9 @@ export function ResourceList() {
                   <div className="border-r border-border/70 px-1 text-right">
                     {t('table.columnDuration')}
                   </div>
-                  {showCostColumns && (
-                    <div className="border-r border-border/70 px-1 text-right">
-                      {t('table.columnEffort')}
-                    </div>
-                  )}
+                  <div className="border-r border-border/70 px-1 text-right">
+                    {t('table.columnEffort')}
+                  </div>
                   <div className="px-1 text-right">{t('table.columnProgress')}</div>
                 </div>
               );
@@ -333,19 +328,17 @@ export function ResourceList() {
                 <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
                   {task.isMilestone ? '—' : `${task.duration}d`}
                 </div>
-                {showCostColumns && (
-                  <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
-                    {(() => {
-                      const pd = computeAssignmentPersonDays(
-                        task,
-                        row.resourceId,
-                        file.resources,
-                        cal,
-                      );
-                      return pd > 0 ? `${pd}` : '—';
-                    })()}
-                  </div>
-                )}
+                <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
+                  {(() => {
+                    const pd = computeAssignmentPersonDays(
+                      task,
+                      row.resourceId,
+                      file.resources,
+                      cal,
+                    );
+                    return pd > 0 ? `${pd}` : '—';
+                  })()}
+                </div>
                 <div className="px-1 text-right tabular-nums text-fg-muted">{task.progress}%</div>
               </div>
             );

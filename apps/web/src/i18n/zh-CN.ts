@@ -20,7 +20,6 @@ export const zhCN = {
     hideCriticalPath: '隐藏关键路径',
     taskView: '任务视图',
     resourceView: '资源视图',
-    effortColumn: '人天列',
     newTask: '新建任务',
     undo: '撤销',
     redo: '重做',

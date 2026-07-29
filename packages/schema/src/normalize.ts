@@ -7,6 +7,10 @@
  * migration machinery we need: it fills in defaults for fields an old file
  * omits, leaving everything else untouched.
  *
+ * It ALSO strips forward-incompatible keys (fields a NEWER app may have added)
+ * via `stripUnknownFields`, so a file exported by a newer version still loads
+ * in an older version. Stripped paths are reported through `options.onStripped`.
+ *
  * Why this lives in the schema package (and takes an injected holiday
  * provider): the schema package has no dependency on `@ganttly/calendar-data`,
  * so the zh-CN holiday backfill is injected by the caller (the web app, which
@@ -17,6 +21,7 @@
  * TaskConstraints.type), add the default-fill for the new field here IN THE
  * SAME change set, so old files load cleanly.
  */
+import { stripUnknownFields } from './stripUnknown.js';
 import type { GanttlyFile, Holiday } from './types.js';
 
 export interface NormalizeFileOptions {
@@ -27,6 +32,14 @@ export interface NormalizeFileOptions {
    * schema → calendar-data dependency.
    */
   getHolidays?: (region: string) => Holiday[];
+  /**
+   * Invoked with the list of unknown fields stripped for forward compatibility
+   * (see `stripUnknownFields`). A newer app may export optional fields an
+   * older app's strict schema rejects; we drop them before validation and
+   * report the paths here so the caller can warn the user. Only called when at
+   * least one field was removed. No-op when omitted.
+   */
+  onStripped?: (paths: string[]) => void;
 }
 
 /**
@@ -40,6 +53,17 @@ export interface NormalizeFileOptions {
  * that has already been normalized (idempotent).
  */
 export function normalizeFile(file: GanttlyFile, options: NormalizeFileOptions = {}): GanttlyFile {
+  // Forward-compatibility: drop any keys the current schema does not know
+  // (e.g. a field a newer app added). Must run FIRST so the additive
+  // default-fills below see a schema-clean object. Report what was dropped.
+  if (options.onStripped) {
+    const { file: stripped, removed } = stripUnknownFields(file);
+    if (removed.length > 0) options.onStripped(removed);
+    file = stripped;
+  } else {
+    file = stripUnknownFields(file).file;
+  }
+
   // Shallow clone so we never mutate the caller's object.
   const next: GanttlyFile = { ...file };
 

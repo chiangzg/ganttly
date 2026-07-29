@@ -24,7 +24,6 @@ test.describe('modern editor navigation', () => {
     await expect(page.getByRole('button', { name: '关键路径', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '任务视图', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '资源视图', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '人天列', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '新建任务', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: '重做', exact: true })).toBeDisabled();
@@ -37,11 +36,9 @@ test.describe('modern editor navigation', () => {
 
     await expect(page.getByRole('button', { name: '放大', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '关键路径', exact: true })).toBeHidden();
-    await expect(page.getByRole('button', { name: '人天列', exact: true })).toBeHidden();
 
     await page.getByRole('button', { name: '更多操作' }).click();
     await expect(page.getByRole('menuitemcheckbox', { name: '关键路径' })).toBeVisible();
-    await expect(page.getByRole('menuitemcheckbox', { name: '人天列' })).toBeVisible();
     await expectNoHorizontalToolbarOverflow(page);
   });
 

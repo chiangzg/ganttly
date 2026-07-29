@@ -62,10 +62,6 @@ interface ViewStoreState {
   selectedTaskIdInResource: string | null;
   setSelectedTaskIdInResource(id: string | null): void;
 
-  /** Show the person-days column in TaskTable (G11: ephemeral, not persisted). */
-  showCostColumns: boolean;
-  setShowCostColumns(v: boolean): void;
-
   /**
    * Active baseline for comparison (baseline-comparison spec §6.1).
    *
@@ -109,9 +105,6 @@ export const useViewStore = create<ViewStoreState>((set) => ({
 
   selectedTaskIdInResource: null,
   setSelectedTaskIdInResource: (id) => set({ selectedTaskIdInResource: id }),
-
-  showCostColumns: false,
-  setShowCostColumns: (v) => set({ showCostColumns: v }),
 
   activeBaselineId: null,
   setActiveBaselineId: (id) => set({ activeBaselineId: id }),

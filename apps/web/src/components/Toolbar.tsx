@@ -30,7 +30,6 @@ import {
   CalendarDays,
   Check,
   CircleAlert,
-  Columns3,
   GitBranch,
   ListTree,
   LoaderCircle,
@@ -133,8 +132,6 @@ export function Toolbar() {
 
   const viewMode = useViewStore((s) => s.viewMode);
   const setViewMode = useViewStore((s) => s.setViewMode);
-  const showCostColumns = useViewStore((s) => s.showCostColumns);
-  const setShowCostColumns = useViewStore((s) => s.setShowCostColumns);
 
   return (
     <div
@@ -215,16 +212,6 @@ export function Toolbar() {
           >
             <Users size={14} />
             {t('toolbar.resourceView')}
-          </ToolbarButton>
-        </div>
-        <div className="hidden xl:block">
-          <ToolbarButton
-            onClick={() => setShowCostColumns(!showCostColumns)}
-            title={t('toolbar.effortColumn')}
-            pressed={showCostColumns}
-          >
-            <Columns3 size={15} />
-            {t('toolbar.effortColumn')}
           </ToolbarButton>
         </div>
       </ToolbarGroup>
@@ -315,17 +302,6 @@ export function Toolbar() {
                 >
                   <GitBranch size={15} className="text-fg-muted" />
                   {t('toolbar.criticalPath')}
-                  <DropdownMenu.ItemIndicator className="ml-auto">
-                    <Check size={14} className="text-primary" />
-                  </DropdownMenu.ItemIndicator>
-                </DropdownMenu.CheckboxItem>
-                <DropdownMenu.CheckboxItem
-                  checked={showCostColumns}
-                  onCheckedChange={() => setShowCostColumns(!showCostColumns)}
-                  className={menuItemClass}
-                >
-                  <Columns3 size={15} className="text-fg-muted" />
-                  {t('toolbar.effortColumn')}
                   <DropdownMenu.ItemIndicator className="ml-auto">
                     <Check size={14} className="text-primary" />
                   </DropdownMenu.ItemIndicator>
