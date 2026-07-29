@@ -57,10 +57,14 @@ export function ExportMenu() {
   return (
     <>
       <DropdownMenu.Item asChild onSelect={onSelectJson} className="outline-none">
-        <ToolbarButton title={t('toolbar.exportJson')}>{t('toolbar.exportJson')}</ToolbarButton>
+        <ToolbarButton className="w-full justify-start" title={t('toolbar.exportJson')}>
+          {t('toolbar.exportJson')}
+        </ToolbarButton>
       </DropdownMenu.Item>
       <DropdownMenu.Item asChild onSelect={onSelectCsv} className="outline-none">
-        <ToolbarButton title={t('toolbar.exportCsv')}>{t('toolbar.exportCsv')}</ToolbarButton>
+        <ToolbarButton className="w-full justify-start" title={t('toolbar.exportCsv')}>
+          {t('toolbar.exportCsv')}
+        </ToolbarButton>
       </DropdownMenu.Item>
     </>
   );

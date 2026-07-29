@@ -15,7 +15,7 @@
  */
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useEffect, useMemo, useState } from 'react';
-import { Layers3, Check, Plus, Settings2 } from 'lucide-react';
+import { Layers3, Check, ChevronRight, Plus, Settings2 } from 'lucide-react';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { findActiveBaseline, summarizeBaselineVariance } from '@/lib/baseline';
@@ -33,7 +33,11 @@ import type { Baseline } from '@ganttly/schema';
 /** Max display width for the active baseline name before ellipsis (spec §5.2). */
 const NAME_MAX_WIDTH = 120;
 
-export function BaselineControl() {
+export function BaselineControl({
+  presentation = 'toolbar',
+}: {
+  presentation?: 'toolbar' | 'menu';
+}) {
   const file = useProjectStore((s) => s.file);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const setActiveBaselineId = useViewStore((s) => s.setActiveBaselineId);
@@ -99,13 +103,74 @@ export function BaselineControl() {
   const triggerTitle = triggerDisabled ? '至少添加一个任务后才能创建基线' : label;
 
   const openCreate = () => setCreateOpen(true);
+  const menuContent = (
+    <>
+      <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+        基线对比
+      </div>
+
+      {active && summaryText ? (
+        <div className="px-2 pb-2 text-xs text-fg-muted">{summaryText}</div>
+      ) : null}
+      {active && structureSummaryText ? (
+        <div className="px-2 pb-2 text-xs text-fg-muted">{structureSummaryText}</div>
+      ) : null}
+
+      <DropdownMenu.RadioGroup
+        value={activeBaselineId ?? '__none__'}
+        onValueChange={(v) => switchBaseline(v === '__none__' ? null : v)}
+      >
+        <DropdownMenu.RadioItem
+          value="__none__"
+          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
+        >
+          <RadioIndicator />
+          不比较
+        </DropdownMenu.RadioItem>
+        {sortedBaselines.map((b) => (
+          <DropdownMenu.RadioItem
+            key={b.id}
+            value={b.id}
+            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
+          >
+            <RadioIndicator />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate" title={b.name}>
+                {b.name}
+              </span>
+              <span className="text-[11px] text-fg-muted">
+                {b.capturedAt.slice(0, 10)} · {b.tasks.length} 任务
+              </span>
+            </span>
+          </DropdownMenu.RadioItem>
+        ))}
+      </DropdownMenu.RadioGroup>
+
+      <DropdownMenu.Separator className="my-1 h-px bg-border" />
+      <DropdownMenu.Item
+        onSelect={() => openCreate()}
+        disabled={!hasTasks}
+        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
+      >
+        <Plus size={15} />
+        保存当前计划为基线…
+      </DropdownMenu.Item>
+      <DropdownMenu.Item
+        onSelect={() => setManageOpen(true)}
+        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
+      >
+        <Settings2 size={15} />
+        管理基线…
+      </DropdownMenu.Item>
+    </>
+  );
 
   return (
     <>
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger asChild>
-          <ToolbarButton pressed={pressed} disabled={triggerDisabled} title={triggerTitle}>
-            <span className="flex items-center gap-1.5">
+      {presentation === 'toolbar' ? (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <ToolbarButton pressed={pressed} disabled={triggerDisabled} title={triggerTitle}>
               <Layers3 size={15} />
               <span
                 className="max-w-[var(--baseline-name-max)] truncate"
@@ -113,75 +178,39 @@ export function BaselineControl() {
               >
                 {label}
               </span>
-            </span>
-          </ToolbarButton>
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content
-            align="start"
-            sideOffset={6}
-            className="z-40 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
+            </ToolbarButton>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="start"
+              sideOffset={6}
+              className="z-40 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
+            >
+              {menuContent}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      ) : (
+        <DropdownMenu.Sub>
+          <DropdownMenu.SubTrigger
+            disabled={triggerDisabled}
+            className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[state=open]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
           >
-            <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-              基线对比
-            </div>
-
-            {active && summaryText ? (
-              <div className="px-2 pb-2 text-xs text-fg-muted">{summaryText}</div>
-            ) : null}
-            {active && structureSummaryText ? (
-              <div className="px-2 pb-2 text-xs text-fg-muted">{structureSummaryText}</div>
-            ) : null}
-
-            <DropdownMenu.RadioGroup
-              value={activeBaselineId ?? '__none__'}
-              onValueChange={(v) => switchBaseline(v === '__none__' ? null : v)}
+            <Layers3 size={15} className="text-fg-muted" />
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <ChevronRight size={14} className="text-fg-muted" />
+          </DropdownMenu.SubTrigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.SubContent
+              sideOffset={8}
+              alignOffset={-6}
+              className="z-50 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
             >
-              <DropdownMenu.RadioItem
-                value="__none__"
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
-              >
-                <RadioIndicator />
-                不比较
-              </DropdownMenu.RadioItem>
-              {sortedBaselines.map((b) => (
-                <DropdownMenu.RadioItem
-                  key={b.id}
-                  value={b.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
-                >
-                  <RadioIndicator />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate" title={b.name}>
-                      {b.name}
-                    </span>
-                    <span className="text-[11px] text-fg-muted">
-                      {b.capturedAt.slice(0, 10)} · {b.tasks.length} 任务
-                    </span>
-                  </span>
-                </DropdownMenu.RadioItem>
-              ))}
-            </DropdownMenu.RadioGroup>
-
-            <DropdownMenu.Separator className="my-1 h-px bg-border" />
-            <DropdownMenu.Item
-              onSelect={() => openCreate()}
-              disabled={!hasTasks}
-              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
-            >
-              <Plus size={15} />
-              保存当前计划为基线…
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              onSelect={() => setManageOpen(true)}
-              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
-            >
-              <Settings2 size={15} />
-              管理基线…
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
+              {menuContent}
+            </DropdownMenu.SubContent>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Sub>
+      )}
 
       <CreateBaselineDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ManageBaselinesDialog

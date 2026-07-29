@@ -71,15 +71,19 @@ export function ProjectHeader() {
 
   return (
     <>
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-bg-elevated px-2 shadow-[0_1px_0_rgb(var(--color-border)/0.35)]">
+      <header
+        data-project-header
+        className="flex h-12 shrink-0 items-center gap-1.5 border-b border-border/80 bg-bg-elevated px-2.5"
+      >
         <button
           type="button"
           onClick={() => navigate('/projects')}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold text-white shadow-sm"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary outline-none transition hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary/35"
           title="项目中心"
         >
           G
         </button>
+        <div className="mx-1 h-5 w-px shrink-0 bg-border/80" aria-hidden="true" />
 
         <Popover.Root
           open={switcherOpen}
@@ -91,7 +95,7 @@ export function ProjectHeader() {
           <Popover.Trigger asChild>
             <button
               type="button"
-              className="flex min-w-0 max-w-[260px] items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-left transition hover:border-border hover:bg-bg"
+              className="flex h-8 min-w-0 max-w-[260px] items-center gap-2 rounded-lg px-2 text-left outline-none transition hover:bg-bg focus-visible:ring-2 focus-visible:ring-primary/35"
             >
               <ProjectDot id={activeProjectId ?? 'empty'} />
               <span className="truncate text-sm font-semibold text-fg">{activeName}</span>
@@ -124,7 +128,7 @@ export function ProjectHeader() {
           </Popover.Portal>
         </Popover.Root>
 
-        <div className="hidden min-w-0 flex-1 items-center gap-1 overflow-hidden md:flex">
+        <div className="hidden min-w-0 flex-1 items-center gap-0.5 overflow-hidden pl-1 md:flex">
           {visibleTabs.map((tab) => (
             <div
               key={tab.projectId}
@@ -137,17 +141,17 @@ export function ProjectHeader() {
                 setDraggedTab(null);
               }}
               className={cn(
-                'group flex h-8 max-w-[180px] shrink-0 items-center gap-1 rounded-lg border px-2 transition',
+                'group relative flex h-8 max-w-[180px] shrink-0 items-center gap-1 rounded-lg px-2 transition',
                 tab.projectId === activeProjectId
-                  ? 'border-primary/25 bg-primary/10 text-primary'
-                  : 'border-transparent text-fg-muted hover:border-border hover:bg-bg hover:text-fg',
+                  ? 'bg-primary/10 text-fg after:absolute after:-bottom-2 after:inset-x-2 after:h-0.5 after:rounded-full after:bg-primary'
+                  : 'text-fg-muted hover:bg-bg hover:text-fg',
                 draggedTab === tab.projectId && 'opacity-50',
               )}
             >
               {tab.pinned ? <Pin size={12} className="shrink-0" /> : null}
               <button
                 type="button"
-                className="min-w-0 flex-1 truncate text-left text-xs font-medium"
+                className="min-w-0 flex-1 truncate rounded text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                 onClick={() => goToProject(tab.projectId)}
                 title={tab.project.name}
               >
@@ -157,7 +161,12 @@ export function ProjectHeader() {
                 <button
                   type="button"
                   onClick={() => handleCloseTab(tab.projectId)}
-                  className="rounded p-0.5 opacity-0 hover:bg-border/60 group-hover:opacity-100 focus:opacity-100"
+                  className={cn(
+                    'rounded p-0.5 outline-none transition hover:bg-border/60 focus-visible:ring-2 focus-visible:ring-primary/35',
+                    tab.projectId === activeProjectId
+                      ? 'opacity-60 hover:opacity-100'
+                      : 'opacity-0 group-hover:opacity-60 group-focus-within:opacity-60 hover:opacity-100',
+                  )}
                   aria-label={`关闭 ${tab.project.name}`}
                 >
                   <X size={12} />
@@ -168,7 +177,7 @@ export function ProjectHeader() {
           {overflowTabs.length > 0 ? (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
-                <button className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs text-fg-muted hover:bg-bg hover:text-fg">
+                <button className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs text-fg-muted outline-none hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35">
                   更多 <ChevronDown size={13} />
                 </button>
               </DropdownMenu.Trigger>
@@ -192,7 +201,7 @@ export function ProjectHeader() {
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted hover:bg-bg hover:text-fg"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted outline-none transition hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35"
           title="新建项目"
         >
           <Plus size={17} />
@@ -202,7 +211,7 @@ export function ProjectHeader() {
           <DropdownMenu.Trigger asChild>
             <button
               type="button"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted hover:bg-bg hover:text-fg"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted outline-none transition hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35"
               title="项目操作"
             >
               <MoreHorizontal size={18} />
