@@ -32,8 +32,10 @@ export function GanttView() {
 
   return (
     <div className="flex h-full flex-col">
-      <ProjectHeader />
-      <Toolbar />
+      <div data-editor-navigation className="shrink-0">
+        <ProjectHeader />
+        <Toolbar />
+      </div>
       <div className="flex flex-1 overflow-hidden">
         {viewMode === 'resource' ? (
           <>
