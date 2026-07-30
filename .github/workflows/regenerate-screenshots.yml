@@ -1,0 +1,68 @@
+name: Regenerate screenshot baselines
+
+# One-shot workflow: runs on ubuntu-latest (same env as ci.yml e2e job),
+# updates Playwright screenshot baselines with --update-snapshots, and opens
+# a PR with the regenerated PNGs. Intended to be manually triggered when
+# baselines need to be (re)generated from the CI rendering environment.
+#
+# Usage: Actions tab → "Regenerate screenshot baselines" → Run workflow
+# Delete this file after the PR is merged.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-snapshots:
+    name: Regenerate Playwright baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @ganttly/web exec playwright install --with-deps chromium
+
+      - name: Update screenshot baselines
+        run: pnpm --filter @ganttly/web exec playwright test --update-snapshots
+
+      - name: Create PR with updated baselines
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: |
+            chore(e2e): regenerate screenshot baselines from CI
+
+            Update Playwright screenshot baselines using the CI rendering
+            environment (ubuntu-latest + chromium) so local/CI pixel diffs
+            stay tractable, per playwright.config.ts and PRD §7.1.
+          branch: chore/regenerate-screenshot-baselines
+          title: 'chore(e2e): regenerate screenshot baselines from CI'
+          body: |
+            Regenerated Playwright screenshot baselines from the CI environment
+            (`ubuntu-latest` + chromium) via `playwright test --update-snapshots`.
+
+            Context: the `editor-navigation-light` baseline was previously
+            generated on macOS, causing a deterministic ~2% pixel diff on CI.
+            This regenerates all baselines from CI so future diffs are
+            meaningful.
+
+            Review: confirm only PNG files under
+            `apps/web/tests/e2e/*-snapshots/` changed.
+          add-paths: |
+            apps/web/tests/e2e/*-snapshots/*.png
