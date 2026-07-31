@@ -35,8 +35,10 @@ const NAME_MAX_WIDTH = 120;
 
 export function BaselineControl({
   presentation = 'toolbar',
+  disabledReason,
 }: {
   presentation?: 'toolbar' | 'menu';
+  disabledReason?: string;
 }) {
   const file = useProjectStore((s) => s.file);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
@@ -97,10 +99,11 @@ export function BaselineControl({
         .join(' · ')
     : '';
 
-  // The trigger is disabled only when there are no tasks (spec §4.1: empty
-  // projects can't create baselines). With baselines present, it opens the menu.
-  const triggerDisabled = !hasTasks && !hasBaselines;
-  const triggerTitle = triggerDisabled ? '至少添加一个任务后才能创建基线' : label;
+  // Empty projects cannot create a baseline (spec §4.1). The toolbar can also
+  // disable this task-only control while keeping its width stable in other views.
+  const triggerDisabled = Boolean(disabledReason) || (!hasTasks && !hasBaselines);
+  const triggerTitle =
+    disabledReason ?? (triggerDisabled ? '至少添加一个任务后才能创建基线' : label);
 
   const openCreate = () => setCreateOpen(true);
   const menuContent = (
@@ -168,32 +171,35 @@ export function BaselineControl({
   return (
     <>
       {presentation === 'toolbar' ? (
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <ToolbarButton pressed={pressed} disabled={triggerDisabled} title={triggerTitle}>
-              <Layers3 size={15} />
-              <span
-                className="max-w-[var(--baseline-name-max)] truncate"
-                style={{ ['--baseline-name-max' as string]: `${NAME_MAX_WIDTH}px` }}
+        <span title={triggerTitle}>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <ToolbarButton pressed={pressed} disabled={triggerDisabled} title={triggerTitle}>
+                <Layers3 size={15} />
+                <span
+                  className="max-w-[var(--baseline-name-max)] truncate"
+                  style={{ ['--baseline-name-max' as string]: `${NAME_MAX_WIDTH}px` }}
+                >
+                  {label}
+                </span>
+              </ToolbarButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                align="start"
+                sideOffset={6}
+                className="z-40 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
               >
-                {label}
-              </span>
-            </ToolbarButton>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              align="start"
-              sideOffset={6}
-              className="z-40 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
-            >
-              {menuContent}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+                {menuContent}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </span>
       ) : (
         <DropdownMenu.Sub>
           <DropdownMenu.SubTrigger
             disabled={triggerDisabled}
+            title={triggerTitle}
             className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[state=open]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
           >
             <Layers3 size={15} className="text-fg-muted" />

@@ -16,6 +16,7 @@ export const ToolbarButton = forwardRef<HTMLButtonElement, Props>(function Toolb
     <button
       ref={ref}
       {...rest}
+      aria-pressed={pressed}
       className={cn(
         'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg text-sm font-medium outline-none transition',
         'focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-1 focus-visible:ring-offset-bg-elevated',

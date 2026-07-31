@@ -1,0 +1,1141 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "运营支撑部项目",
+    "locale": "zh-CN"
+  },
+  "calendar": {
+    "id": "zh-CN",
+    "weekStart": 1,
+    "weekends": [
+      0,
+      6
+    ],
+    "holidays": [
+      {
+        "date": "2026-01-01",
+        "name": "元旦",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-01-02",
+        "name": "元旦",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-01-03",
+        "name": "元旦",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-15",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-16",
+        "name": "春节（除夕）",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-17",
+        "name": "春节（正月初一）",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-18",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-19",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-20",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-21",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-22",
+        "name": "春节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-02-14",
+        "name": "春节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-02-28",
+        "name": "春节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-04-04",
+        "name": "清明节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-04-05",
+        "name": "清明节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-04-06",
+        "name": "清明节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-01",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-02",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-03",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-04",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-05-05",
+        "name": "劳动节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-04-26",
+        "name": "劳动节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-06-19",
+        "name": "端午节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-06-20",
+        "name": "端午节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-06-21",
+        "name": "端午节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-25",
+        "name": "中秋节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-26",
+        "name": "中秋节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-27",
+        "name": "中秋节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-01",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-02",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-03",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-04",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-05",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-06",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-07",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-10-08",
+        "name": "国庆节",
+        "type": "holiday"
+      },
+      {
+        "date": "2026-09-19",
+        "name": "国庆节调休上班",
+        "type": "working"
+      },
+      {
+        "date": "2026-10-10",
+        "name": "国庆节调休上班",
+        "type": "working"
+      }
+    ],
+    "workingHours": {
+      "start": "09:00",
+      "end": "18:00"
+    }
+  },
+  "tasks": [
+    {
+      "id": "R_R1Vs-_Kp",
+      "name": "框架下单",
+      "parentId": null,
+      "order": 0,
+      "start": "2026-07-26",
+      "end": "2026-08-20",
+      "duration": 26,
+      "progress": 4,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "_8WNE1MfU9",
+      "name": "二期定点配送OEM保存、详情接口联调",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 0,
+      "start": "2026-07-27",
+      "end": "2026-07-29",
+      "duration": 3,
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "JJK4zjydfe",
+          "load": 100
+        },
+        {
+          "resourceId": "kDkDVsiNq4",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "j7Jdjndy2U",
+      "name": "二期充值订单预览、统一校验提示开发",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 1,
+      "start": "2026-07-30",
+      "end": "2026-07-30",
+      "duration": 1,
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "JJK4zjydfe",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "GJNWkMgeYs",
+      "name": "二期充值订单预览、统一校验提示联调",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 2,
+      "start": "2026-07-31",
+      "end": "2026-08-01",
+      "duration": 1,
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "JJK4zjydfe",
+          "load": 100
+        },
+        {
+          "resourceId": "kDkDVsiNq4",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "1OPhNR8wU-",
+      "name": "二期平台变更联调",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 3,
+      "start": "2026-07-26",
+      "end": "2026-07-28",
+      "duration": 2,
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "BMnBkiYYUg",
+          "load": 50
+        },
+        {
+          "resourceId": "oI31BD_7te",
+          "load": 50
+        }
+      ],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "WuOPi8v4l-",
+      "name": "历史数据补偿",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 4,
+      "start": "2026-08-01",
+      "end": "2026-08-01",
+      "duration": 0,
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "o7addgAbDB",
+      "name": "二期一阶段平台变更冒烟",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 5,
+      "start": "2026-07-29",
+      "end": "2026-07-29",
+      "duration": 1,
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "BMnBkiYYUg",
+          "load": 100
+        },
+        {
+          "resourceId": "oI31BD_7te",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "overtimeDates": []
+    },
+    {
+      "id": "pL1aNyB6fX",
+      "name": "一期测试",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 6,
+      "start": "2026-07-28",
+      "end": "2026-07-30",
+      "duration": 3,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "mustFinishOn",
+        "date": "2026-07-30"
+      },
+      "assignments": [
+        {
+          "resourceId": "2RxQ0WLJXb",
+          "load": 100
+        }
+      ],
+      "customFields": {}
+    },
+    {
+      "id": "yMa5ZKfgEh",
+      "name": "二期测试",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 7,
+      "start": "2026-07-31",
+      "end": "2026-08-05",
+      "duration": 4,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [
+        {
+          "targetId": "pL1aNyB6fX",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "finishNoLaterThan",
+        "date": "2026-08-05"
+      },
+      "assignments": [
+        {
+          "resourceId": "2RxQ0WLJXb",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "note": ""
+    },
+    {
+      "id": "XXnmEI_ST2",
+      "name": "stage 测试（整体）",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 8,
+      "start": "2026-08-06",
+      "end": "2026-08-12",
+      "duration": 5,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [
+        {
+          "targetId": "yMa5ZKfgEh",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "2RxQ0WLJXb",
+          "load": 100
+        }
+      ],
+      "customFields": {}
+    },
+    {
+      "id": "ODlk8LYWl4",
+      "name": "灰度验证",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 9,
+      "start": "2026-08-13",
+      "end": "2026-08-19",
+      "duration": 5,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [
+        {
+          "targetId": "XXnmEI_ST2",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "finishNoLaterThan",
+        "date": "2026-08-19"
+      },
+      "assignments": [],
+      "customFields": {}
+    },
+    {
+      "id": "DEtdvLy3P7",
+      "name": "发布生产",
+      "parentId": "R_R1Vs-_Kp",
+      "order": 10,
+      "start": "2026-08-20",
+      "end": "2026-08-20",
+      "duration": 1,
+      "overtimeDates": [],
+      "progress": 100,
+      "isMilestone": true,
+      "dependencies": [
+        {
+          "targetId": "ODlk8LYWl4",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "mustFinishOn",
+        "date": "2026-08-20"
+      },
+      "assignments": [
+        {
+          "resourceId": "JJK4zjydfe",
+          "load": 100
+        },
+        {
+          "resourceId": "BMnBkiYYUg",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "color": "#fb608e"
+    },
+    {
+      "id": "Lv49jJ2-od",
+      "name": "CEM用户体验管理系统【一期】",
+      "parentId": "CuyGlDJasA",
+      "order": 0,
+      "start": "2026-07-28",
+      "end": "2026-08-13",
+      "duration": 13,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "DTZB35OXq6",
+          "load": 100
+        },
+        {
+          "resourceId": "cH9dSieHeK",
+          "load": 10
+        }
+      ],
+      "customFields": {}
+    },
+    {
+      "id": "7qWz9a6Bin",
+      "name": "CEM 一期发布",
+      "parentId": "CuyGlDJasA",
+      "order": 1,
+      "start": "2026-08-20",
+      "end": "2026-08-20",
+      "duration": 1,
+      "overtimeDates": [],
+      "progress": 100,
+      "isMilestone": true,
+      "dependencies": [
+        {
+          "targetId": "Lv49jJ2-od",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {}
+    },
+    {
+      "id": "cY-G77T2uS",
+      "name": "客服工单V2.4迭代（第一阶段 - 七鱼 Agent 接口支持）",
+      "parentId": "CuyGlDJasA",
+      "order": 2,
+      "start": "2026-07-28",
+      "end": "2026-08-05",
+      "duration": 7,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "cH9dSieHeK",
+          "load": 100
+        }
+      ],
+      "customFields": {}
+    },
+    {
+      "id": "PqwWtGf4HW",
+      "name": "客服工单 V2.4 第一阶段发布",
+      "parentId": "CuyGlDJasA",
+      "order": 3,
+      "start": "2026-08-06",
+      "end": "2026-08-06",
+      "duration": 1,
+      "overtimeDates": [],
+      "progress": 100,
+      "isMilestone": true,
+      "dependencies": [
+        {
+          "targetId": "cY-G77T2uS",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {}
+    },
+    {
+      "id": "Pfle_LtxRG",
+      "name": "客服工单V2.4迭代（第二阶段 - 七鱼外呼组件对接）",
+      "parentId": "CuyGlDJasA",
+      "order": 4,
+      "start": "2026-08-21",
+      "end": "2026-08-26",
+      "duration": 6,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [
+        {
+          "targetId": "cY-G77T2uS",
+          "type": "FS",
+          "lag": 0
+        },
+        {
+          "targetId": "hdde9PxuMC",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "cH9dSieHeK",
+          "load": 100
+        }
+      ],
+      "customFields": {},
+      "color": "#a6fb60"
+    },
+    {
+      "id": "wS8sANpsEb",
+      "name": "客服工单 V2.4 第二阶段发布",
+      "parentId": "CuyGlDJasA",
+      "order": 5,
+      "start": "2026-09-03",
+      "end": "2026-09-03",
+      "duration": 1,
+      "overtimeDates": [],
+      "progress": 100,
+      "isMilestone": true,
+      "dependencies": [
+        {
+          "targetId": "Pfle_LtxRG",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {}
+    },
+    {
+      "id": "Zqz8xoHwbh",
+      "name": "百福得数据看板 - 指标上报",
+      "parentId": "IAzSB0kySH",
+      "order": 0,
+      "start": "2026-08-03",
+      "end": "2026-08-10",
+      "duration": 8,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "LDwykJxMlI",
+          "load": 100
+        }
+      ],
+      "customFields": {}
+    },
+    {
+      "id": "PNiF1GdoRO",
+      "name": "百福得数据看板 - 指标上报 -发布",
+      "parentId": "IAzSB0kySH",
+      "order": 1,
+      "start": "2026-08-27",
+      "end": "2026-08-27",
+      "duration": 0,
+      "overtimeDates": [],
+      "progress": 100,
+      "isMilestone": true,
+      "dependencies": [
+        {
+          "targetId": "Zqz8xoHwbh",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {}
+    },
+    {
+      "id": "hdde9PxuMC",
+      "name": "百福得数据看板 - CRM 入口开发",
+      "parentId": "IAzSB0kySH",
+      "order": 2,
+      "start": "2026-08-06",
+      "end": "2026-08-20",
+      "duration": 11,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [
+        {
+          "targetId": "cY-G77T2uS",
+          "type": "FS",
+          "lag": 0
+        }
+      ],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [
+        {
+          "resourceId": "cH9dSieHeK",
+          "load": 100
+        }
+      ],
+      "customFields": {}
+    },
+    {
+      "id": "CuyGlDJasA",
+      "name": "客服需求",
+      "parentId": null,
+      "order": 10,
+      "start": "2026-07-28",
+      "end": "2026-09-03",
+      "duration": 29,
+      "overtimeDates": [],
+      "progress": 10,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {}
+    },
+    {
+      "id": "IAzSB0kySH",
+      "name": "百福得数据看板",
+      "parentId": null,
+      "order": 5,
+      "start": "2026-08-03",
+      "end": "2026-08-27",
+      "duration": 19,
+      "overtimeDates": [],
+      "progress": 0,
+      "isMilestone": false,
+      "dependencies": [],
+      "constraints": {
+        "type": "none"
+      },
+      "assignments": [],
+      "customFields": {}
+    }
+  ],
+  "resources": [
+    {
+      "id": "BMnBkiYYUg",
+      "name": "孟祥俊",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "DNQ8OnOHUe",
+      "name": "张能",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "JJK4zjydfe",
+      "name": "乔锃函",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "Hqm-EmoLuN",
+      "name": "葛怀秋",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "LDwykJxMlI",
+      "name": "沈嘉琦",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "xkI7Ll6qzN",
+      "name": "韦亮亮",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "MiHoctesne",
+      "name": "赵永峰",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "cH9dSieHeK",
+      "name": "王凯旋",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "DTZB35OXq6",
+      "name": "徐鑫",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "FdxjGbFDA9",
+      "name": "崔伯寅",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "-rGiLx2Ejp",
+      "name": "邓纳多",
+      "capacity": 1,
+      "role": "后端研发"
+    },
+    {
+      "id": "kDkDVsiNq4",
+      "name": "朱亭亭",
+      "capacity": 1,
+      "role": "前端研发"
+    },
+    {
+      "id": "2RxQ0WLJXb",
+      "name": "李晨",
+      "capacity": 1,
+      "role": "测试"
+    },
+    {
+      "id": "oI31BD_7te",
+      "name": "单张飞",
+      "capacity": 1,
+      "role": "前端研发"
+    }
+  ],
+  "baselines": [
+    {
+      "id": "jgCWYmd86O",
+      "name": "框架下单延期计划",
+      "capturedAt": "2026-07-28T09:28:53.372Z",
+      "tasks": [
+        {
+          "id": "R_R1Vs-_Kp",
+          "start": "2026-07-26",
+          "end": "2026-08-20",
+          "duration": 26,
+          "progress": 4
+        },
+        {
+          "id": "_8WNE1MfU9",
+          "start": "2026-07-27",
+          "end": "2026-07-29",
+          "duration": 3,
+          "progress": 0
+        },
+        {
+          "id": "j7Jdjndy2U",
+          "start": "2026-07-30",
+          "end": "2026-07-30",
+          "duration": 1,
+          "progress": 0
+        },
+        {
+          "id": "GJNWkMgeYs",
+          "start": "2026-07-31",
+          "end": "2026-08-01",
+          "duration": 1,
+          "progress": 0
+        },
+        {
+          "id": "1OPhNR8wU-",
+          "start": "2026-07-26",
+          "end": "2026-07-28",
+          "duration": 2,
+          "progress": 0
+        },
+        {
+          "id": "WuOPi8v4l-",
+          "start": "2026-08-01",
+          "end": "2026-08-01",
+          "duration": 0,
+          "progress": 0
+        },
+        {
+          "id": "o7addgAbDB",
+          "start": "2026-07-29",
+          "end": "2026-07-29",
+          "duration": 1,
+          "progress": 0
+        },
+        {
+          "id": "pL1aNyB6fX",
+          "start": "2026-07-28",
+          "end": "2026-07-30",
+          "duration": 3,
+          "progress": 0
+        },
+        {
+          "id": "yMa5ZKfgEh",
+          "start": "2026-07-31",
+          "end": "2026-08-05",
+          "duration": 4,
+          "progress": 0
+        },
+        {
+          "id": "XXnmEI_ST2",
+          "start": "2026-08-06",
+          "end": "2026-08-12",
+          "duration": 5,
+          "progress": 0
+        },
+        {
+          "id": "ODlk8LYWl4",
+          "start": "2026-08-13",
+          "end": "2026-08-19",
+          "duration": 5,
+          "progress": 0
+        },
+        {
+          "id": "DEtdvLy3P7",
+          "start": "2026-08-20",
+          "end": "2026-08-20",
+          "duration": 1,
+          "progress": 100
+        }
+      ]
+    },
+    {
+      "id": "r_uyj7-yjS",
+      "name": "CEM、百福得数据看板、CRM 资源盘点资源平衡",
+      "capturedAt": "2026-07-29T08:09:21.844Z",
+      "tasks": [
+        {
+          "id": "R_R1Vs-_Kp",
+          "start": "2026-07-26",
+          "end": "2026-08-20",
+          "duration": 26,
+          "progress": 4
+        },
+        {
+          "id": "_8WNE1MfU9",
+          "start": "2026-07-27",
+          "end": "2026-07-29",
+          "duration": 3,
+          "progress": 0
+        },
+        {
+          "id": "j7Jdjndy2U",
+          "start": "2026-07-30",
+          "end": "2026-07-30",
+          "duration": 1,
+          "progress": 0
+        },
+        {
+          "id": "GJNWkMgeYs",
+          "start": "2026-07-31",
+          "end": "2026-08-01",
+          "duration": 1,
+          "progress": 0
+        },
+        {
+          "id": "1OPhNR8wU-",
+          "start": "2026-07-26",
+          "end": "2026-07-28",
+          "duration": 2,
+          "progress": 0
+        },
+        {
+          "id": "WuOPi8v4l-",
+          "start": "2026-08-01",
+          "end": "2026-08-01",
+          "duration": 0,
+          "progress": 0
+        },
+        {
+          "id": "o7addgAbDB",
+          "start": "2026-07-29",
+          "end": "2026-07-29",
+          "duration": 1,
+          "progress": 0
+        },
+        {
+          "id": "pL1aNyB6fX",
+          "start": "2026-07-28",
+          "end": "2026-07-30",
+          "duration": 3,
+          "progress": 0
+        },
+        {
+          "id": "yMa5ZKfgEh",
+          "start": "2026-07-31",
+          "end": "2026-08-05",
+          "duration": 4,
+          "progress": 0
+        },
+        {
+          "id": "XXnmEI_ST2",
+          "start": "2026-08-06",
+          "end": "2026-08-12",
+          "duration": 5,
+          "progress": 0
+        },
+        {
+          "id": "ODlk8LYWl4",
+          "start": "2026-08-13",
+          "end": "2026-08-19",
+          "duration": 5,
+          "progress": 0
+        },
+        {
+          "id": "DEtdvLy3P7",
+          "start": "2026-08-20",
+          "end": "2026-08-20",
+          "duration": 1,
+          "progress": 100
+        },
+        {
+          "id": "Lv49jJ2-od",
+          "start": "2026-07-28",
+          "end": "2026-08-13",
+          "duration": 13,
+          "progress": 0
+        },
+        {
+          "id": "7qWz9a6Bin",
+          "start": "2026-08-20",
+          "end": "2026-08-20",
+          "duration": 1,
+          "progress": 100
+        },
+        {
+          "id": "cY-G77T2uS",
+          "start": "2026-07-28",
+          "end": "2026-08-05",
+          "duration": 7,
+          "progress": 0
+        },
+        {
+          "id": "PqwWtGf4HW",
+          "start": "2026-08-06",
+          "end": "2026-08-06",
+          "duration": 1,
+          "progress": 100
+        },
+        {
+          "id": "Pfle_LtxRG",
+          "start": "2026-08-21",
+          "end": "2026-08-26",
+          "duration": 6,
+          "progress": 0
+        },
+        {
+          "id": "wS8sANpsEb",
+          "start": "2026-09-03",
+          "end": "2026-09-03",
+          "duration": 1,
+          "progress": 100
+        },
+        {
+          "id": "Zqz8xoHwbh",
+          "start": "2026-08-03",
+          "end": "2026-08-10",
+          "duration": 8,
+          "progress": 0
+        },
+        {
+          "id": "PNiF1GdoRO",
+          "start": "2026-08-27",
+          "end": "2026-08-27",
+          "duration": 0,
+          "progress": 100
+        },
+        {
+          "id": "hdde9PxuMC",
+          "start": "2026-08-06",
+          "end": "2026-08-20",
+          "duration": 11,
+          "progress": 0
+        }
+      ]
+    }
+  ],
+  "viewState": {
+    "zoom": "day",
+    "scrollLeft": 6219.44482421875,
+    "scrollTop": 0,
+    "selectedTaskId": null,
+    "showCriticalPath": true,
+    "collapsedTaskIds": [
+      "R_R1Vs-_Kp"
+    ]
+  },
+  "meta": {
+    "createdAt": "2026-07-27T03:27:36.927Z",
+    "updatedAt": "2026-07-29T09:26:51.125Z",
+    "appVersion": "0.1.0"
+  }
+}

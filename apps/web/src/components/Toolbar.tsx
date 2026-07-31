@@ -132,6 +132,8 @@ export function Toolbar() {
 
   const viewMode = useViewStore((s) => s.viewMode);
   const setViewMode = useViewStore((s) => s.setViewMode);
+  const taskViewControlsDisabled = viewMode !== 'task';
+  const taskViewOnlyTitle = t('toolbar.taskViewOnly');
 
   return (
     <div
@@ -170,12 +172,16 @@ export function Toolbar() {
 
       <ToolbarDivider className="hidden lg:block" />
       <ToolbarGroup className="hidden lg:flex" aria-label="计划显示">
-        <div className="hidden xl:block">
+        <div
+          className="hidden xl:block"
+          title={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+        >
           <ToolbarButton
             onClick={toggleCriticalPath}
-            title={t('toolbar.criticalPath')}
+            title={taskViewControlsDisabled ? taskViewOnlyTitle : t('toolbar.criticalPath')}
             aria-label={t('toolbar.criticalPath')}
             pressed={file.viewState.showCriticalPath}
+            disabled={taskViewControlsDisabled}
           >
             <GitBranch size={15} />
             {file.viewState.showCriticalPath
@@ -183,7 +189,9 @@ export function Toolbar() {
               : t('toolbar.showCriticalPath')}
           </ToolbarButton>
         </div>
-        {viewMode === 'task' ? <BaselineControl /> : null}
+        <BaselineControl
+          disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+        />
       </ToolbarGroup>
 
       <ToolbarDivider className="hidden lg:block" />
@@ -288,7 +296,10 @@ export function Toolbar() {
                   <Minus size={15} className="text-fg-muted" />
                   {t('toolbar.zoomOut')}
                 </DropdownMenu.Item>
-                {viewMode === 'task' ? <BaselineControl presentation="menu" /> : null}
+                <BaselineControl
+                  presentation="menu"
+                  disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+                />
                 <DropdownMenu.Separator className="my-1 h-px bg-border" />
               </div>
               <div className="xl:hidden">
@@ -298,6 +309,8 @@ export function Toolbar() {
                 <DropdownMenu.CheckboxItem
                   checked={file.viewState.showCriticalPath}
                   onCheckedChange={toggleCriticalPath}
+                  disabled={taskViewControlsDisabled}
+                  title={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
                   className={menuItemClass}
                 >
                   <GitBranch size={15} className="text-fg-muted" />
@@ -325,7 +338,7 @@ function cap(s: string): string {
 }
 
 const menuItemClass =
-  'flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg';
+  'flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40';
 
 function ToolbarGroup({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div {...props} className={cn('flex shrink-0 items-center gap-1', className)} />;

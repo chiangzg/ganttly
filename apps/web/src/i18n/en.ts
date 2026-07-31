@@ -21,6 +21,7 @@ export const en = {
     hideCriticalPath: 'Hide critical path',
     taskView: 'Task view',
     resourceView: 'Resource view',
+    taskViewOnly: 'Only available in task view',
     newTask: 'New task',
     undo: 'Undo',
     redo: 'Redo',
