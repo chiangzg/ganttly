@@ -40,6 +40,7 @@ import { deviationColumnCell, deviationToneClass } from './BaselineVariance';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { nanoid } from 'nanoid';
 import type { Task, BaselineTask } from '@ganttly/schema';
+import { DeleteTaskConfirm } from './DeleteTaskConfirm';
 
 const TABLE_WIDTH = 480;
 const TABLE_WIDTH_WITH_BASELINE = 552;
@@ -61,6 +62,7 @@ export function TaskTable() {
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renamingId = useRef<string | null>(null);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
 
   const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
   const hasBaseline = activeBaseline !== null;
@@ -193,9 +195,7 @@ export function TaskTable() {
       createSibling(task.id);
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      if (window.confirm(t('table.confirmDelete'))) {
-        dispatch(deleteTaskCommand(task.id));
-      }
+      setConfirmDeleteTaskId(task.id);
     } else if (e.key === 'F2') {
       e.preventDefault();
       renamingId.current = task.id;
@@ -307,150 +307,158 @@ export function TaskTable() {
   };
 
   return (
-    <div
-      data-task-table
-      className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
-      style={{ width: tableWidth }}
-    >
+    <>
       <div
-        className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
-        style={{ height: HEADER_HEIGHT, gridTemplateColumns: gridTemplate }}
+        data-task-table
+        className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
+        style={{ width: tableWidth }}
       >
-        <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
-        <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
-        <div className="border-r border-border px-2 py-1">{t('table.columnDuration')}</div>
-        <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
-        <div className="border-r border-border px-2 py-1">{t('table.columnProgress')}</div>
-        {hasBaseline && <div className="px-2 py-1">{t('baseline.columnDeviation')}</div>}
-      </div>
-      <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
-        <div className="relative" style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}>
-          {rows.map((node, i) => {
-            const y = i * ROW_HEIGHT;
-            const selected = file.viewState.selectedTaskId === node.task.id;
-            const isRenaming = renamingId.current === node.task.id;
-            return (
-              <div
-                key={node.task.id}
-                role="row"
-                tabIndex={0}
-                draggable
-                onDragStart={(e) => onDragStart(e, node)}
-                onDrop={(e) => onDrop(e, node)}
-                onDragOver={(e) => e.preventDefault()}
-                onClick={() => select(node.task.id)}
-                onDoubleClick={() => {
-                  select(node.task.id);
-                  openDrawer();
-                }}
-                onKeyDown={(e) => onKeyDown(e, node)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  select(node.task.id);
-                  openContextMenu(node.task.id, e.clientX, e.clientY);
-                }}
-                onBlur={() => {
-                  if (isRenaming) {
-                    renamingId.current = null;
-                    forceRerender();
-                  }
-                }}
-                style={{
-                  height: ROW_HEIGHT,
-                  transform: `translateY(${y}px)`,
-                  gridTemplateColumns: gridTemplate,
-                }}
-                className={cn(
-                  'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
-                  'hover:bg-bg',
-                  selected && 'bg-bg ring-1 ring-inset ring-primary',
-                  node.children.length > 0 && 'bg-bg-elevated',
-                )}
-              >
+        <div
+          className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
+          style={{ height: HEADER_HEIGHT, gridTemplateColumns: gridTemplate }}
+        >
+          <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
+          <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
+          <div className="border-r border-border px-2 py-1">{t('table.columnDuration')}</div>
+          <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
+          <div className="border-r border-border px-2 py-1">{t('table.columnProgress')}</div>
+          {hasBaseline && <div className="px-2 py-1">{t('baseline.columnDeviation')}</div>}
+        </div>
+        <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
+          <div className="relative" style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}>
+            {rows.map((node, i) => {
+              const y = i * ROW_HEIGHT;
+              const selected = file.viewState.selectedTaskId === node.task.id;
+              const isRenaming = renamingId.current === node.task.id;
+              return (
                 <div
+                  key={node.task.id}
+                  role="row"
+                  tabIndex={0}
+                  draggable
+                  onDragStart={(e) => onDragStart(e, node)}
+                  onDrop={(e) => onDrop(e, node)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onClick={() => select(node.task.id)}
+                  onDoubleClick={() => {
+                    select(node.task.id);
+                    openDrawer();
+                  }}
+                  onKeyDown={(e) => onKeyDown(e, node)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    select(node.task.id);
+                    openContextMenu(node.task.id, e.clientX, e.clientY);
+                  }}
+                  onBlur={() => {
+                    if (isRenaming) {
+                      renamingId.current = null;
+                      forceRerender();
+                    }
+                  }}
+                  style={{
+                    height: ROW_HEIGHT,
+                    transform: `translateY(${y}px)`,
+                    gridTemplateColumns: gridTemplate,
+                  }}
                   className={cn(
-                    'flex items-center overflow-hidden border-r border-border px-2 text-fg-muted',
-                    node.children.length > 0 && 'font-semibold',
-                  )}
-                  style={{ paddingLeft: 8 + node.depth * 16 }}
-                >
-                  {node.children.length > 0 && (
-                    <button
-                      type="button"
-                      className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
-                      style={{ width: 14, height: 14 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleCollapse(node.task.id);
-                      }}
-                    >
-                      {file.viewState.collapsedTaskIds.includes(node.task.id) ? '▶' : '▼'}
-                    </button>
-                  )}
-                  {node.wbsNumber}
-                </div>
-                <div
-                  className={cn(
-                    'min-w-0 truncate border-r border-border px-2 font-medium',
-                    node.children.length > 0 && 'font-semibold',
+                    'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
+                    'hover:bg-bg',
+                    selected && 'bg-bg ring-1 ring-inset ring-primary',
+                    node.children.length > 0 && 'bg-bg-elevated',
                   )}
                 >
-                  {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
-                  {isRenaming ? (
-                    <input
-                      autoFocus
-                      defaultValue={node.task.name}
-                      onBlur={(e) => {
-                        dispatch(updateTaskCommand(node.task.id, { name: e.target.value }));
-                        renamingId.current = null;
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === 'Escape') {
-                          if (e.key === 'Enter') {
-                            dispatch(
-                              updateTaskCommand(node.task.id, {
-                                name: (e.target as HTMLInputElement).value,
-                              }),
-                            );
-                          }
+                  <div
+                    className={cn(
+                      'flex items-center overflow-hidden border-r border-border px-2 text-fg-muted',
+                      node.children.length > 0 && 'font-semibold',
+                    )}
+                    style={{ paddingLeft: 8 + node.depth * 16 }}
+                  >
+                    {node.children.length > 0 && (
+                      <button
+                        type="button"
+                        className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
+                        style={{ width: 14, height: 14 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCollapse(node.task.id);
+                        }}
+                      >
+                        {file.viewState.collapsedTaskIds.includes(node.task.id) ? '▶' : '▼'}
+                      </button>
+                    )}
+                    {node.wbsNumber}
+                  </div>
+                  <div
+                    className={cn(
+                      'min-w-0 truncate border-r border-border px-2 font-medium',
+                      node.children.length > 0 && 'font-semibold',
+                    )}
+                  >
+                    {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
+                    {isRenaming ? (
+                      <input
+                        autoFocus
+                        defaultValue={node.task.name}
+                        onBlur={(e) => {
+                          dispatch(updateTaskCommand(node.task.id, { name: e.target.value }));
                           renamingId.current = null;
-                          forceRerender();
-                        }
-                      }}
-                      className="w-full bg-transparent outline-none"
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'Escape') {
+                            if (e.key === 'Enter') {
+                              dispatch(
+                                updateTaskCommand(node.task.id, {
+                                  name: (e.target as HTMLInputElement).value,
+                                }),
+                              );
+                            }
+                            renamingId.current = null;
+                            forceRerender();
+                          }
+                        }}
+                        className="w-full bg-transparent outline-none"
+                      />
+                    ) : (
+                      node.task.name || t('table.placeholderName')
+                    )}
+                  </div>
+                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
+                    {node.task.isMilestone ? '—' : `${node.task.duration}d`}
+                  </div>
+                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
+                    {(() => {
+                      const pd =
+                        node.children.length > 0
+                          ? effortMap.get(node.task.id)?.personDays
+                          : computeTaskPersonDays(node.task, file.resources, cal);
+                      return pd && pd > 0 ? `${pd}` : '—';
+                    })()}
+                  </div>
+                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
+                    {node.task.progress}%
+                  </div>
+                  {hasBaseline && baselineCtx ? (
+                    <BaselineDeviationCell
+                      taskId={node.task.id}
+                      baselineCtx={baselineCtx}
+                      cal={cal}
                     />
-                  ) : (
-                    node.task.name || t('table.placeholderName')
-                  )}
+                  ) : null}
                 </div>
-                <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
-                  {node.task.isMilestone ? '—' : `${node.task.duration}d`}
-                </div>
-                <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
-                  {(() => {
-                    const pd =
-                      node.children.length > 0
-                        ? effortMap.get(node.task.id)?.personDays
-                        : computeTaskPersonDays(node.task, file.resources, cal);
-                    return pd && pd > 0 ? `${pd}` : '—';
-                  })()}
-                </div>
-                <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
-                  {node.task.progress}%
-                </div>
-                {hasBaseline && baselineCtx ? (
-                  <BaselineDeviationCell
-                    taskId={node.task.id}
-                    baselineCtx={baselineCtx}
-                    cal={cal}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
-    </div>
+      {confirmDeleteTaskId && (
+        <DeleteTaskConfirm
+          taskId={confirmDeleteTaskId}
+          onClose={() => setConfirmDeleteTaskId(null)}
+        />
+      )}
+    </>
   );
 }
 

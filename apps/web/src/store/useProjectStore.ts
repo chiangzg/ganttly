@@ -85,6 +85,8 @@ interface ProjectStoreState {
   undoStack: Command[];
   redoStack: Command[];
   undo(): void;
+  /** Undo `command` only while it is still the latest history entry. */
+  undoCommand(command: Command): boolean;
   redo(): void;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -266,6 +268,13 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     scheduleSave(get().activeProjectId);
   },
 
+  undoCommand(command) {
+    const latest = get().undoStack.at(-1);
+    if (latest !== command) return false;
+    get().undo();
+    return true;
+  },
+
   redo() {
     const { undoStack, redoStack, file } = get();
     if (redoStack.length === 0) return;
@@ -416,6 +425,11 @@ export function updateTaskCommand(taskId: string, patch: Partial<Task>): Command
 }
 
 export function deleteTaskCommand(taskId: string): Command {
+  // Captured at apply time: every deleted task and their dependencies (for
+  // dependency arrows that reference them). The undo toast (editor-interaction
+  // plan §2.4) must restore the full tree, so best-effort invert is insufficient.
+  let capturedDeletedTasks: Task[] | null = null;
+  let capturedSurvivorDependencies: Map<string, Dependency[]> | null = null;
   return {
     label: `删除任务`,
     apply: (file) => {
@@ -431,12 +445,37 @@ export function deleteTaskCommand(taskId: string): Command {
           }
         }
       }
+      capturedDeletedTasks = file.tasks.filter((t) => idsToDelete.has(t.id));
+      capturedSurvivorDependencies = new Map();
+      // Also remove dependency edges pointing to any deleted task.
+      const tasksAfterDelete = file.tasks
+        .filter((t) => !idsToDelete.has(t.id))
+        .map((t) => {
+          const affected = t.dependencies.some((dependency) =>
+            idsToDelete.has(dependency.targetId),
+          );
+          if (!affected) return t;
+          capturedSurvivorDependencies!.set(t.id, t.dependencies);
+          return {
+            ...t,
+            dependencies: t.dependencies.filter(
+              (dependency) => !idsToDelete.has(dependency.targetId),
+            ),
+          };
+        });
+      return { ...file, tasks: tasksAfterDelete };
+    },
+    invert: (file) => {
+      if (!capturedDeletedTasks || !capturedSurvivorDependencies) return file;
+      const survivingTasks = file.tasks.map((task) => {
+        const dependencies = capturedSurvivorDependencies!.get(task.id);
+        return dependencies ? { ...task, dependencies } : task;
+      });
       return {
         ...file,
-        tasks: file.tasks.filter((t) => !idsToDelete.has(t.id)),
+        tasks: [...survivingTasks, ...capturedDeletedTasks],
       };
     },
-    invert: (file) => file, // best-effort — full inverse captured at dispatch site
   };
 }
 
@@ -725,6 +764,152 @@ export function updateTaskWithRollupCommand(taskId: string, patch: Partial<Task>
       return { ...file, tasks: restoreCaptured(file.tasks, capturedOldValues) };
     },
   };
+}
+
+/**
+ * Commit a full task-draft edit as ONE undoable command (editor-interaction-
+ * optimization-plan §2.2 / §6.5).
+ *
+ * The TaskDrawer now keeps a complete draft (base fields + assignments +
+ * dependencies + constraints) and only commits on explicit "Save". This
+ * command replaces the target task wholesale with the `after` draft, then
+ * re-runs the same rollup + dependency cascade that a live date edit would,
+ * capturing every modified task so a single undo restores the full pre-save
+ * state — including cascaded successors and rolled-up ancestors.
+ *
+ * `before` is the task snapshot captured when the drawer opened; it is used
+ * directly as the invert (no re-derivation needed), which keeps undo correct
+ * even when the live file has diverged (e.g. an autosave race).
+ *
+ * When `after` is identical to `before`, `apply` is a no-op and returns the
+ * file unchanged (the drawer disables Save in that case, but this is the
+ * safety net).
+ *
+ * Why a dedicated command (instead of dispatching updateTask +
+ * assignResource + addDependency …): the plan §6.5 explicitly forbids
+ * "simulating one save via several consecutive commands" because that yields
+ * N undo records and breaks the "one save = one undo" contract.
+ */
+export function updateTaskFromDraftCommand(before: Task, after: Task): Command {
+  let capturedOldValues: Map<string, Partial<Task>> | null = null;
+  let capturedTarget: Task | null = null;
+  return {
+    label: `保存任务: ${after.name || before.name}`,
+    apply: (file) => {
+      capturedOldValues = new Map();
+      const existing = file.tasks.find((t) => t.id === before.id);
+      if (!existing) return file;
+      // No-op when nothing changed (defensive — UI disables Save when clean).
+      if (tasksEqualForCommit(existing, after)) return file;
+
+      // 1. Capture the target exactly, including whether optional keys existed,
+      // then replace it wholesale with the draft.
+      capturedTarget = existing;
+      capturedOldValues.set(before.id, { ...existing });
+      let tasks = file.tasks.map((t) => (t.id === before.id ? { ...after } : t));
+
+      const dependenciesChanged =
+        JSON.stringify(existing.dependencies) !== JSON.stringify(after.dependencies);
+      const constraintsChanged =
+        JSON.stringify(existing.constraints) !== JSON.stringify(after.constraints);
+      const datesChanged =
+        existing.start !== after.start ||
+        existing.end !== after.end ||
+        existing.duration !== after.duration;
+
+      // 2. Apply the same dependency -> constraint scheduling layers used by
+      // their dedicated commands. This keeps a structural-only draft edit from
+      // leaving the task in an immediately invalid schedule.
+      if (dependenciesChanged || constraintsChanged || datesChanged) {
+        const cal = resolveCalendar(getCalendar(file.calendar.id));
+        let target = tasks.find((t) => t.id === before.id)!;
+
+        for (const dependency of target.dependencies) {
+          const predecessor = tasks.find((t) => t.id === dependency.targetId);
+          if (!predecessor) continue;
+          const result = satisfyDependency(predecessor, target, dependency, cal);
+          if (result.start || result.end) {
+            tasks = applyPatchAndCapture(
+              tasks,
+              before.id,
+              { start: result.start, end: result.end },
+              capturedOldValues,
+            );
+            target = tasks.find((t) => t.id === before.id)!;
+          }
+        }
+
+        const constrained = satisfyConstraint(
+          target,
+          target.constraints,
+          cal,
+          target.dependencies.length > 0 ? target.start : undefined,
+        );
+        if (constrained.start !== target.start || constrained.end !== target.end) {
+          tasks = applyPatchAndCapture(
+            tasks,
+            before.id,
+            { start: constrained.start, end: constrained.end },
+            capturedOldValues,
+          );
+        }
+      }
+
+      // 3. Cascade rollup to ancestor summary tasks (start/end/progress).
+      const rollupPatches = computeCascadeRollup(tasks, before.id);
+      for (const { id, patch: rp } of rollupPatches) {
+        tasks = applyPatchAndCapture(tasks, id, rp, capturedOldValues);
+      }
+
+      // 4. Cascade from the target after its own dependencies and constraint
+      // are final, so every downstream successor sees the committed dates.
+      if (dependenciesChanged || constraintsChanged || datesChanged) {
+        const cal = resolveCalendar(getCalendar(file.calendar.id));
+        const cascadePatches = cascadeSchedule(tasks, before.id, cal);
+        for (const cp of cascadePatches) {
+          tasks = applyPatchAndCapture(tasks, cp.id, cp.patch, capturedOldValues);
+        }
+      }
+
+      return { ...file, tasks };
+    },
+    invert: (file) => {
+      if (!capturedOldValues || !capturedTarget) return file;
+      const restored = restoreCaptured(file.tasks, capturedOldValues).map((task) =>
+        task.id === capturedTarget!.id ? capturedTarget! : task,
+      );
+      return { ...file, tasks: restored };
+    },
+  };
+}
+
+/**
+ * Structural equality over the fields a draft save can change. We compare by
+ * JSON of a normalised pick rather than reference equality so re-creating a
+ * draft object with identical values still counts as "no change".
+ *
+ * `constraints` and `overtimeDates` are normalised on both sides because the
+ * TaskDrawer normalises its draft (legacy `constraints: {}` → `{type:'none'}`,
+ * missing `overtimeDates` → `[]`) — without normalising here, opening a task
+ * whose stored shape differs only by these defaults would look "changed" and
+ * defeat the no-op fast path.
+ */
+function tasksEqualForCommit(a: Task, b: Task): boolean {
+  const norm = (t: Task) => ({
+    name: t.name,
+    start: t.start,
+    end: t.end,
+    duration: t.duration,
+    progress: t.progress,
+    isMilestone: t.isMilestone,
+    color: t.color,
+    note: t.note,
+    overtimeDates: t.overtimeDates ?? [],
+    dependencies: t.dependencies,
+    constraints: { ...t.constraints, type: t.constraints.type ?? ('none' as const) },
+    assignments: t.assignments,
+  });
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
 
 /**

@@ -8,6 +8,9 @@ export const en = {
     title: 'ganttly',
     tagline: 'Open-source Gantt software',
   },
+  common: {
+    processing: 'Processing...',
+  },
   toolbar: {
     today: 'Today',
     zoomIn: 'Zoom in',
@@ -92,7 +95,11 @@ export const en = {
     taskColumnsHeader: 'Task columns header',
     placeholderName: 'Task name',
     addTask: 'New task',
-    confirmDelete: 'Delete this task and all its subtasks?',
+    confirmDeleteTitle: 'Delete task',
+    confirmDeleteDesc: 'Delete this task?',
+    confirmDeleteImpactChildren: 'This task has {{count}} subtask(s) that will also be deleted.',
+    confirmDeleteImpactDeps: 'An additional {{count}} dependency link(s) will be removed.',
+    confirmDeleteImpactSummary: '{{total}} task(s) will be deleted in total.',
     copySuffix: 'copy',
   },
   resource: {
@@ -103,8 +110,18 @@ export const en = {
     placeholderName: 'Resource name',
     add: 'Add resource',
     delete: 'Delete resource',
+    confirmDeleteTitle: 'Delete resource',
+    confirmDeleteDesc: 'Delete this resource?',
+    confirmDeleteImpact:
+      'This resource is assigned to {{count}} task(s); those assignments will also be removed.',
     expand: 'Expand tasks',
     collapse: 'Collapse tasks',
+  },
+  toast: {
+    deletedTask: 'Deleted: {{name}}',
+    deletedTasks: 'Deleted {{count}} tasks',
+    deletedResource: 'Deleted resource: {{name}}',
+    undo: 'Undo',
   },
   drawer: {
     title: 'Edit task',
@@ -134,6 +151,7 @@ export const en = {
     save: 'Save',
     cancel: 'Cancel',
     delete: 'Delete',
+    close: 'Close',
     depTypeFS: 'Finish\u2192Start',
     depTypeSS: 'Start\u2192Start',
     depTypeFF: 'Finish\u2192Finish',
@@ -150,6 +168,22 @@ export const en = {
     constraintMFO: 'Must finish on',
     constraintFNLT: 'Finish no later than',
     constraintSnapped: 'Constraint date {{from}} is a non-working day; moved to {{to}}',
+    // Transactional semantics (editor-interaction-optimization-plan §2.2):
+    // the draft is not committed until Save; cancel/close/Escape discards it;
+    // Save is disabled when unmodified or when validation fails.
+    unsavedChanges: 'This task has unsaved changes. Discard them?',
+    switchTaskUnsaved: 'Discard these changes and open the selected task?',
+    discard: 'Discard changes',
+    discardAndSwitch: 'Discard and switch',
+    keepEditing: 'Keep editing',
+    saveDisabledNoChange: 'No changes',
+    saveDisabledInvalid: 'Some fields are invalid',
+    errorNameRequired: 'Name is required',
+    errorDurationNegative: 'Duration cannot be negative',
+    errorEndBeforeStart: 'End cannot be before start',
+    errorCycleDetected: 'That dependency would form a cycle',
+    errorConstraintDateRequired: 'This constraint needs a date',
+    errorResourceMissing: 'Resource no longer exists',
   },
   contextMenu: {
     edit: 'Edit',

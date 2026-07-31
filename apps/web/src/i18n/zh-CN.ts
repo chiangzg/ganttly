@@ -7,6 +7,9 @@ export const zhCN = {
     title: 'ganttly',
     tagline: '开源甘特图软件',
   },
+  common: {
+    processing: '处理中…',
+  },
   toolbar: {
     today: '今天',
     zoomIn: '放大',
@@ -88,7 +91,11 @@ export const zhCN = {
     taskColumnsHeader: '任务字段表头',
     placeholderName: '任务名称',
     addTask: '新建任务',
-    confirmDelete: '删除此任务及其所有子任务?',
+    confirmDeleteTitle: '删除任务',
+    confirmDeleteDesc: '确认删除此任务？',
+    confirmDeleteImpactChildren: '此任务有 {{count}} 个子任务，将一同被删除。',
+    confirmDeleteImpactDeps: '另外 {{count}} 个依赖关系将同时移除。',
+    confirmDeleteImpactSummary: '共将删除 {{total}} 个任务。',
     copySuffix: '副本',
   },
   resource: {
@@ -99,8 +106,17 @@ export const zhCN = {
     placeholderName: '资源名称',
     add: '新增资源',
     delete: '删除资源',
+    confirmDeleteTitle: '删除资源',
+    confirmDeleteDesc: '确认删除此资源？',
+    confirmDeleteImpact: '该资源已分配给 {{count}} 个任务，其分配将同时移除。',
     expand: '展开任务',
     collapse: '收起任务',
+  },
+  toast: {
+    deletedTask: '已删除任务: {{name}}',
+    deletedTasks: '已删除 {{count}} 个任务',
+    deletedResource: '已删除资源: {{name}}',
+    undo: '撤销',
   },
   drawer: {
     title: '编辑任务',
@@ -146,6 +162,22 @@ export const zhCN = {
     save: '保存',
     cancel: '取消',
     delete: '删除',
+    close: '关闭',
+    // 事务语义（editor-interaction-optimization-plan §2.2）：草稿在保存前不写入
+    // store；取消/关闭/Escape 丢弃草稿；未修改时禁用保存；校验失败阻止保存。
+    unsavedChanges: '当前任务有未保存的修改，是否放弃？',
+    switchTaskUnsaved: '放弃当前修改并打开刚才选择的任务？',
+    discard: '放弃修改',
+    discardAndSwitch: '放弃并切换',
+    keepEditing: '继续编辑',
+    saveDisabledNoChange: '无修改',
+    saveDisabledInvalid: '存在无效字段',
+    errorNameRequired: '名称不能为空',
+    errorDurationNegative: '工期不能为负',
+    errorEndBeforeStart: '结束日期不能早于开始日期',
+    errorCycleDetected: '该依赖会形成循环',
+    errorConstraintDateRequired: '该约束需要日期',
+    errorResourceMissing: '资源已不存在',
   },
   contextMenu: {
     edit: '编辑',

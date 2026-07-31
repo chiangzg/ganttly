@@ -80,7 +80,7 @@ for (const type of ['FS', 'SS', 'FF', 'SF'] as DepType[]) {
   });
 }
 
-test('deleting a dependency via the task drawer removes it', async ({ page }) => {
+test('deleting a dependency via the task drawer removes it after Save', async ({ page }) => {
   await loadChain(page, 'FS');
 
   // Open Task B's drawer (B holds the dependency on A).
@@ -88,9 +88,28 @@ test('deleting a dependency via the task drawer removes it', async ({ page }) =>
   await rowB.dblclick();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
 
-  // The drawer lists each dependency with a ✕ delete button.
+  // The drawer lists each dependency with a ✕ delete button. Removing it only
+  // mutates the draft (transactional semantics — editor-interaction plan §2.2);
+  // the store is updated on explicit Save.
   const depRow = page.locator('text=Task A').locator('..');
   await depRow.locator('button').click();
+  await page.waitForTimeout(150);
+
+  // Before Save, the store still holds the dependency (draft only changed).
+  const stillPresentBeforeSave = await page.evaluate(() => {
+    const store = (window as unknown as { __ganttlyStore: unknown }).__ganttlyStore as {
+      getState: () => {
+        file: { tasks: Array<{ id: string; dependencies: Array<{ targetId: string }> }> };
+      };
+    };
+    const b = store.getState().file.tasks.find((t) => t.id === 'B');
+    return b ? b.dependencies.some((d) => d.targetId === 'A') : false;
+  });
+  expect(stillPresentBeforeSave, 'draft edit must not touch the store before Save').toBe(true);
+
+  // Commit via Save. Scope to the drawer aside so it doesn't collide with the
+  // toolbar's save button (both are labelled "保存").
+  await page.locator('aside').getByRole('button', { name: '保存' }).click();
   await page.waitForTimeout(150);
 
   // Verify the dependency is gone from the store.
@@ -103,5 +122,5 @@ test('deleting a dependency via the task drawer removes it', async ({ page }) =>
     const b = store.getState().file.tasks.find((t) => t.id === 'B');
     return b ? !b.dependencies.some((d) => d.targetId === 'A') : true;
   });
-  expect(gone, 'FS dependency should be removed').toBe(true);
+  expect(gone, 'FS dependency should be removed after Save').toBe(true);
 });

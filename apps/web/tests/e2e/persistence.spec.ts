@@ -36,13 +36,14 @@ test('task survives a page reload (IndexedDB persistence)', async ({ page }) => 
   await page.goto('/');
   await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible();
 
-  // Add a uniquely-named task.
+  // Add a uniquely-named task. The toolbar "新建任务" creates + selects it and
+  // opens the drawer. Rename it and Save (transactional draft semantics —
+  // editor-interaction plan §2.2: only Save commits; Cancel would discard).
   const marker = `PERSIST-MARKER-${Date.now()}`;
   await page.getByRole('button', { name: '新建任务' }).click();
   await page.locator('input[type="text"], input:not([type])').first().waitFor({ state: 'visible' });
   await page.locator('input[type="text"], input:not([type])').first().fill(marker);
-  await page.locator('input[type="text"], input:not([type])').first().press('Tab');
-  await page.getByRole('button', { name: '取消' }).click();
+  await page.locator('aside').getByRole('button', { name: '保存' }).click();
 
   // Wait for autosave (500ms debounce + IO).
   await page.waitForTimeout(1500);

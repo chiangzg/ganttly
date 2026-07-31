@@ -85,7 +85,9 @@ test('creates the first baseline and enters comparison mode', async ({ page }) =
   // Add a task so the create-baseline entry is enabled.
   await page.getByRole('button', { name: '新建任务' }).click();
   await page.waitForTimeout(300);
-  await page.getByRole('button', { name: '✕' }).click();
+  // Close the auto-opened drawer. The new task is unedited (placeholder name),
+  // so the draft is clean and Cancel closes without a dirty-guard prompt.
+  await page.locator('aside').getByText('取消', { exact: true }).click();
   await page.waitForTimeout(200);
 
   // Open the baseline menu and create.

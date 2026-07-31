@@ -58,7 +58,10 @@ test('ganttly can open and edit its own roadmap.json', async ({ page }) => {
   const nameField = page.locator('input[type="text"], input:not([type])').first();
   await nameField.waitFor({ state: 'visible' });
   await nameField.fill('M1 — 数据 + 引擎核心(已完成)');
-  await nameField.press('Tab'); // commit via blur
+
+  // Transactional draft semantics (editor-interaction plan §2.2): the name
+  // lives in the draft until explicit Save. Blur no longer commits.
+  await page.locator('aside').getByRole('button', { name: '保存' }).click();
 
   // Verify the rename landed in the table.
   await expect(page.getByText(/已完成/)).toBeVisible();

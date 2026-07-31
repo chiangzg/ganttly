@@ -16,15 +16,16 @@ import { useViewStore } from '@/store/useViewStore';
 import { todayISO } from '@/engine/layout';
 import { dateToPixel } from '@/engine/layout';
 import { originDateFor } from '@/engine/scene';
+import { createDefaultTask } from '@ganttly/schema';
 import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
 import { ExportMenu } from './ExportMenu';
 import { BaselineControl } from './BaselineControl';
 import { findActiveBaseline } from '@/lib/baseline';
+import { revealTask } from '@/lib/revealTask';
 import { nanoid } from 'nanoid';
 import { addTaskCommand } from '@/store/useProjectStore';
-import type { Task } from '@ganttly/schema';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   CalendarDays,
@@ -108,25 +109,21 @@ export function Toolbar() {
   const addRootTask = () => {
     const start = todayISO();
     const id = nanoid(10);
-    const task: Task = {
+    const order = file.tasks.filter((x) => x.parentId === null).length;
+    const task = createDefaultTask({
       id,
       name: t('table.placeholderName'),
-      parentId: null,
-      order: file.tasks.filter((x) => x.parentId === null).length,
       start,
-      end: start,
-      duration: 1,
-      overtimeDates: [],
-      progress: 0,
-      isMilestone: false,
-      dependencies: [],
-      constraints: { type: 'none' },
-      assignments: [],
-      customFields: {},
-    };
+      parentId: null,
+      order,
+    });
     // Select the new task atomically with creating it, then open the drawer.
-    dispatch(addTaskCommand(task, null, task.order));
+    dispatch(addTaskCommand(task, null, order));
     dispatch(setViewStateCommand({ selectedTaskId: id }));
+    // Reveal the new task's bar so the user doesn't have to hunt for it when
+    // the project origin is months away from today (plan §2.1). Runs after the
+    // dispatch commits so computeRevealTarget sees the new task.
+    revealTask(id);
     openDrawer();
   };
 

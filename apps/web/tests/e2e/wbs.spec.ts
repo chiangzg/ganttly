@@ -32,9 +32,12 @@ test('Delete removes a task after confirmation', async ({ page }) => {
   await page.getByRole('button', { name: '取消' }).click();
   await expect(page.locator('[role="row"]')).toHaveCount(1);
 
-  page.on('dialog', (d) => d.accept());
+  // Press Delete on the row — opens the in-app confirmation dialog.
   await page.locator('[role="row"]').first().click();
   await page.locator('[role="row"]').first().press('Delete');
+
+  // Click the confirm delete button in the dialog.
+  await page.getByRole('button', { name: '删除' }).click();
 
   await expect(page.locator('[role="row"]')).toHaveCount(0);
 });

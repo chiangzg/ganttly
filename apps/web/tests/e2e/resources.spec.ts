@@ -113,11 +113,13 @@ test.describe('resource view', () => {
   test('removes a resource via the row × button', async ({ page }) => {
     await page.getByRole('button', { name: '资源视图' }).click();
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
-    // Click the × button inside Alice's row (the row containing the input).
+    // Click the × button inside Alice's row.
     const aliceRow = page
       .locator('[role="row"]')
       .filter({ has: page.locator('input[value="Alice"]') });
     await aliceRow.locator('button', { hasText: '×' }).click();
+    // Confirm deletion in the in-app dialog.
+    await page.getByRole('button', { name: '删除资源' }).click();
     await expect(page.locator('input[value="Alice"]')).toHaveCount(0);
   });
 

@@ -26,6 +26,7 @@ import { TaskDrawer } from './TaskDrawer';
 import { ContextMenu } from './ContextMenu';
 import { useViewStore } from '@/store/useViewStore';
 import { ProjectHeader } from './projects/ProjectHeader';
+import { UndoToastStack } from '@/lib/toast';
 
 export function GanttView() {
   const viewMode = useViewStore((s) => s.viewMode);
@@ -52,6 +53,7 @@ export function GanttView() {
       <StatusBar />
       <TaskDrawer />
       <ContextMenu />
+      <UndoToastStack />
     </div>
   );
 }

@@ -8,6 +8,6 @@
 export * from './types.js';
 export { default as schemaJson } from '../schema.json' with { type: 'json' };
 export { validateGanttlyFile, validateTask, formatAjvErrors } from './validate.js';
-export { createEmptyFile } from './factory.js';
+export { createEmptyFile, createDefaultTask, type CreateDefaultTaskOptions } from './factory.js';
 export { normalizeFile, type NormalizeFileOptions } from './normalize.js';
 export { stripUnknownFields, type StripResult, type StrippedField } from './stripUnknown.js';

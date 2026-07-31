@@ -149,7 +149,11 @@ test('editing child progress rolls up to the parent summary', async ({ page }) =
   await progressSlider.waitFor({ state: 'visible' });
   await progressSlider.fill('80');
 
-  // The drawer commits onChange via dispatch(updateTaskWithRollupCommand).
+  // Transactional draft semantics (editor-interaction plan §2.2): the slider
+  // only mutates the local draft. Commit via Save — the composite command
+  // cascades rollup to the parent in one undo record.
+  await page.locator('aside').getByRole('button', { name: '保存' }).click();
+
   // Verify the parent's stored progress has rolled up to 80 (single child).
   await expect
     .poll(async () => {

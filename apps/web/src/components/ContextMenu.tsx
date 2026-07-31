@@ -8,6 +8,7 @@
  * - Delete (cascade)
  */
 import { useTranslation } from 'react-i18next';
+import { useState } from 'react';
 import { useViewStore } from '@/store/useViewStore';
 import {
   useProjectStore,
@@ -19,6 +20,7 @@ import {
 } from '@/store/useProjectStore';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
 import { nanoid } from 'nanoid';
+import { DeleteTaskConfirm } from './DeleteTaskConfirm';
 
 export function ContextMenu() {
   const { t } = useTranslation();
@@ -27,15 +29,14 @@ export function ContextMenu() {
   const openDrawer = useViewStore((s) => s.openDrawer);
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
 
   if (!menu) return null;
   const task = file.tasks.find((x) => x.id === menu.taskId);
   if (!task) return null;
 
   const onDelete = () => {
-    if (!window.confirm(t('table.confirmDelete'))) return;
-    dispatch(deleteTaskCommand(task.id));
-    close();
+    setConfirmDeleteTaskId(task.id);
   };
 
   const onToggleMilestone = () => {
@@ -146,6 +147,12 @@ export function ContextMenu() {
           {t('contextMenu.delete')}
         </MenuItem>
       </div>
+      {confirmDeleteTaskId && (
+        <DeleteTaskConfirm
+          taskId={confirmDeleteTaskId}
+          onClose={() => setConfirmDeleteTaskId(null)}
+        />
+      )}
     </>
   );
 }
