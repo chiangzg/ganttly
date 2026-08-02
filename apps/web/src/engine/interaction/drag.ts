@@ -84,6 +84,29 @@ export type DragState =
 /** Pointer must move at least this many CSS px before a press becomes a pan. */
 export const PAN_THRESHOLD = 3;
 
+/**
+ * Map a hit kind to the CSS cursor that conveys the available action
+ * (editor-interaction-optimization-plan §3.4).
+ *   - body         → move (drag the whole bar)
+ *   - left/right   → ew-resize (drag an edge to resize)
+ *   - right-edge   → crosshair (drag to wire a dependency)
+ *   - empty        → default
+ */
+export function cursorForHit(hit: HitZone): string {
+  switch (hit.kind) {
+    case 'body':
+      return 'move';
+    case 'left-handle':
+    case 'right-handle':
+      return 'ew-resize';
+    case 'right-edge':
+      return 'crosshair';
+    case 'empty':
+    default:
+      return 'default';
+  }
+}
+
 /** Compute the new start/end ISO dates for a task given a drag delta. */
 export function applyDrag(
   scene: Scene,

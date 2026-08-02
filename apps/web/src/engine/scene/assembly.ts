@@ -10,7 +10,7 @@
  * - Compute arrow geometry from dependency specs
  * - Resolve holidays within the visible date range
  */
-import type { GanttlyFile, Holiday, Task, Baseline, BaselineTask } from '@ganttly/schema';
+import type { GanttlyFile, Holiday, Task, Baseline, BaselineTask, Resource } from '@ganttly/schema';
 import type { Scene, TaskRow, ArrowSpec } from '../render/types';
 import type { TaskBaselineVariance } from '@/lib/baseline';
 import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff, pixelsPerDay } from '../layout';
@@ -18,8 +18,9 @@ import { buildTree, flattenVisible } from './tree';
 import { computeCriticalPath } from '@/lib/cpm';
 import { computeAllRollups } from '@/lib/summary';
 import { checkConstraintConflicts } from '@/lib/schedule';
-import { resolveCalendar } from '@/lib/calendar';
+import { resolveCalendar, effectiveTaskDays } from '@/lib/calendar';
 import { compareTaskToBaseline, buildEffectiveValues } from '@/lib/baseline';
+import { resolveAssignees, computeAssigneeSummary } from '@/lib/assigneeSummary';
 
 export interface AssembleOptions {
   viewportWidth: number;
@@ -48,6 +49,20 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   // canvas row rendering (especially important during drag mid-states where
   // the underlying Task data may be momentarily stale).
   const allRollups = computeAllRollups(file.tasks, file.resources, cal);
+
+  // Pre-build a resource lookup ONCE (plan §3.3) so per-row assignee
+  // resolution is O(1) — never a `file.resources.find()` inside the row loop.
+  const resourceById = new Map<string, Resource>(file.resources.map((r) => [r.id, r]));
+
+  // Successor counts: how many other tasks depend on each task (plan §3.2
+  // Tooltip). A task's own `dependencies` are its predecessors; a successor is
+  // any task whose dependency `targetId` points at it. Built once, O(D).
+  const successorCount = new Map<string, number>();
+  for (const t of file.tasks) {
+    for (const dep of t.dependencies) {
+      successorCount.set(dep.targetId, (successorCount.get(dep.targetId) ?? 0) + 1);
+    }
+  }
 
   // Set of summary task ids, derived from the FULL task list (not just
   // visible rows) so that a summary whose children are all collapsed still
@@ -106,6 +121,8 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
       baselineById,
       effectiveValues,
       cal,
+      resourceById,
+      successorCount,
     ),
   );
 
@@ -135,21 +152,30 @@ function toTaskRow(
   wbs: string,
   criticalIds: ReadonlySet<string>,
   summaryIds: ReadonlySet<string>,
-  allRollups: Map<string, { start: string; end: string; progress: number }>,
+  allRollups: Map<string, { start: string; end: string; duration: number; progress: number }>,
   conflictIds: ReadonlySet<string>,
   yIndex: number,
   baselineById: Map<string, BaselineTask> | null,
   effectiveValues: Map<string, { id: string; start: string; end: string; duration: number }> | null,
   cal: ReturnType<typeof resolveCalendar>,
+  resourceById: ReadonlyMap<string, Resource>,
+  successorCount: ReadonlyMap<string, number>,
 ): TaskRow {
   const isSummary = summaryIds.has(task.id);
   const rollup = allRollups.get(task.id);
   const hasConstraint = task.constraints.type !== 'none' && !!task.constraints.date;
+  // Assignee resolution (plan §3.3) — O(assignments) with the pre-built map.
+  // Summary tasks keep a name-only label, so we only compute assignees for
+  // leaf tasks (the spec's `name · owner` applies to leaves).
+  const assignees = isSummary ? [] : resolveAssignees(task.assignments, resourceById);
   const row: TaskRow = {
     id: task.id,
     name: task.name,
     start: isSummary && rollup ? rollup.start : task.start,
     end: isSummary && rollup ? rollup.end : task.end,
+    // Summary duration comes from the rollup (working-day span); leaves keep
+    // their own task.duration. Milestones are always 0.
+    duration: task.isMilestone ? 0 : isSummary && rollup ? rollup.duration : task.duration,
     progress: isSummary && rollup ? rollup.progress : task.progress,
     isMilestone: task.isMilestone,
     color: task.color,
@@ -162,6 +188,10 @@ function toTaskRow(
       ? { type: task.constraints.type, date: task.constraints.date! }
       : undefined,
     hasConstraintConflict: conflictIds.has(task.id),
+    assignees,
+    assigneeSummary: isSummary ? undefined : computeAssigneeSummary(assignees),
+    predecessorCount: task.dependencies.length,
+    successorCount: successorCount.get(task.id) ?? 0,
   };
 
   // Baseline fields: only attach when a baseline is active. Summary tasks
@@ -390,15 +420,64 @@ export function assembleResourceScene(
   };
   const tasksByRes = tasksByResource(file.tasks, hasChildren);
 
+  // Plan §3.5 / §6.2: build a per-resource, per-date contributing-task index
+  // ONCE here (O(tasks × assignments × effortDays), same as computeResourceLoad)
+  // so the hover tooltip can render the contribution list without an O(tasks)
+  // scan on every pointer move. Map<resourceId, Map<dateISO, contributions[]>>.
+  // Only leaf tasks (assignments exist, not summaries) contribute — mirrors the
+  // load calculator's accounting so the tooltip's numbers match the bars.
+  const contributionsByResource = new Map<
+    string,
+    Map<string, Array<{ taskId: string; name: string; load: number }>>
+  >();
+  for (const task of file.tasks) {
+    if (task.assignments.length === 0) continue;
+    const days = effectiveTaskDays(task, cal);
+    for (const assignment of task.assignments) {
+      let byDate = contributionsByResource.get(assignment.resourceId);
+      if (!byDate) {
+        byDate = new Map();
+        contributionsByResource.set(assignment.resourceId, byDate);
+      }
+      for (const date of days) {
+        let list = byDate.get(date);
+        if (!list) {
+          list = [];
+          byDate.set(date, list);
+        }
+        list.push({ taskId: task.id, name: task.name, load: assignment.load });
+      }
+    }
+  }
+
+  // O(1) resource lookup for the hover/click tooltip (plan §3.5).
+  const resourceById = new Map<
+    string,
+    { id: string; name: string; role?: string; capacity: number }
+  >();
+  for (const r of file.resources) {
+    resourceById.set(r.id, { id: r.id, name: r.name, role: r.role, capacity: r.capacity ?? 1 });
+  }
+
   const expanded = opts.expandedResourceIds ?? new Set<string>();
   const rows: ResourceRow[] = [];
   let yIndex = 0;
 
   for (const r of file.resources) {
     const perDay = loadMap.get(r.id) ?? new Map<string, number>();
+    const contribByDate = contributionsByResource.get(r.id);
     const bars: ResourceLoadBar[] = [];
     for (const [date, load] of perDay) {
-      if (load > 0) bars.push({ resourceId: r.id, date, load });
+      if (load > 0) {
+        bars.push({
+          resourceId: r.id,
+          date,
+          load,
+          // Attach the precomputed contributing tasks (plan §3.5). Empty list is
+          // fine — the tooltip treats it as "no contributing tasks".
+          contributions: contribByDate?.get(date) ?? [],
+        });
+      }
     }
     const resourceTasks = tasksByRes.get(r.id) ?? [];
     rows.push({
@@ -459,5 +538,6 @@ export function assembleResourceScene(
     rows,
     selectedResourceId: opts.selectedResourceId,
     selectedTaskIdInResource: opts.selectedTaskIdInResource ?? null,
+    resourceById,
   };
 }

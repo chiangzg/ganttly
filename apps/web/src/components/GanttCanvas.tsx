@@ -31,7 +31,13 @@ import {
   clamp,
   ROW_HEIGHT,
 } from '@/engine/layout';
-import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
+import {
+  hitTest,
+  applyDrag,
+  cursorForHit,
+  type DragState,
+  PAN_THRESHOLD,
+} from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
@@ -40,6 +46,9 @@ import { findActiveBaseline } from '@/lib/baseline';
 import { cn } from '@/lib/cn';
 import { useHolidayHover } from '@/components/useHolidayHover';
 import { useBaselineHover } from '@/components/useBaselineHover';
+import { useTaskHover } from '@/components/useTaskHover';
+import { useTranslation } from 'react-i18next';
+import { DeleteTaskConfirm } from '@/components/DeleteTaskConfirm';
 import type { ZoomLevel, DependencyType, Task, Baseline } from '@ganttly/schema';
 
 export function GanttCanvas() {
@@ -108,6 +117,31 @@ export function GanttCanvas() {
     viewportWidth: size.width,
     activeBaselineName: activeBaseline?.name ?? null,
   });
+
+  // Task hover tooltip (plan §3.2). Highest priority: when over a task bar,
+  // this tooltip wins (it includes the merged baseline deviation), and the
+  // baseline + holiday tooltips are suppressed.
+  const {
+    onHoverMove: onTaskHoverMove,
+    clearHover: clearTaskHover,
+    tooltip: taskTooltip,
+    hitTask,
+    hitTaskId,
+  } = useTaskHover({
+    getScene: () => sceneRef.current,
+    viewportWidth: size.width,
+  });
+
+  const { t } = useTranslation();
+  const openContextMenu = useViewStore((s) => s.openContextMenu);
+
+  // Canvas keyboard Delete opens the same confirm dialog the left table uses
+  // (plan §3.4) — never a hard delete.
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+
+  // Idle cursor reflects the current hit kind (plan §3.4). Updated during the
+  // idle pointer-move branch; overridden to grabbing while panning.
+  const [idleCursor, setIdleCursor] = useState('default');
 
   // Latest file kept in a ref so the non-passive wheel listener (added once)
   // can read the current view state without going stale or being re-bound.
@@ -271,16 +305,32 @@ export function GanttCanvas() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // When not dragging, detect baseline bar hover first (spec §5.10) — if the
-    // pointer is over a live bar or baseline track, show the deviation tooltip
-    // and suppress the holiday tooltip. Only fall back to holiday hover when no
-    // task/baseline is hit (empty time column).
+    // When not dragging, arbitrate the three hover tooltips (plan §3.2):
+    //   task bar > baseline > holiday.
+    // The task tooltip wins because it includes the merged baseline deviation.
+    // Also drive the idle cursor from the interactive hit kind (plan §3.4).
     if (dragRef.current.kind === 'idle') {
-      onBaselineHoverMove(x, y);
-      if (!hitBaseline(x, y)) {
-        onHolidayHoverMove(x, y);
-      } else {
+      onTaskHoverMove(x, y);
+      if (hitTask(x, y)) {
+        clearBaselineHover();
         clearHolidayHover();
+        setIdleCursor('pointer');
+      } else {
+        onBaselineHoverMove(x, y);
+        if (!hitBaseline(x, y)) {
+          onHolidayHoverMove(x, y);
+        } else {
+          clearHolidayHover();
+        }
+      }
+      // Cursor by hit kind (move / ew-resize / crosshair / grab) — read-only
+      // for summary bars, which hitTest returns as 'empty' (not draggable).
+      const hit = hitTest(scene, x, y);
+      if (hit.kind !== 'empty') {
+        setIdleCursor(cursorForHit(hit));
+      } else if (!hitTask(x, y)) {
+        // Empty space → grab hints at panning.
+        setIdleCursor(y < 56 ? 'default' : 'grab');
       }
       return;
     }
@@ -406,30 +456,79 @@ export function GanttCanvas() {
     }
   };
 
+  // ----- Right-click → open the shared task context menu (plan §3.4) -----
+  // Covers leaf bars (hitTest) and summary bars (read-only hitTaskId, which
+  // the interactive hitTest returns as 'empty' since summaries aren't
+  // draggable). Both go to the same ContextMenu the left table uses.
+  const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = hitTest(scene, x, y);
+    const taskId = hit.kind === 'empty' ? hitTaskId(x, y) : hit.taskId;
+    if (taskId) {
+      e.preventDefault();
+      dispatch(setViewStateCommand({ selectedTaskId: taskId }));
+      openContextMenu(taskId, e.clientX, e.clientY);
+    }
+  };
+
+  // ----- Keyboard on the focused canvas (plan §3.4) -----
+  // Enter opens the drawer, Delete/Backspace opens the confirm dialog,
+  // Escape clears the selection. Inputs elsewhere keep their own keys.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const selectedId = file.viewState.selectedTaskId;
+    if (!selectedId) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      openDrawer();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      setConfirmDeleteTaskId(selectedId);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      dispatch(setViewStateCommand({ selectedTaskId: null }));
+    }
+  };
+
   // ----- Wheel: Ctrl/Cmd+wheel = zoom, otherwise pan -----
   return (
     <div ref={containerRef} data-gantt-chart className="relative flex-1 overflow-hidden bg-bg">
       <canvas
         ref={canvasRef}
+        tabIndex={0}
+        aria-label={t('canvas.ariaLabel')}
         className={cn(
-          'absolute inset-0',
+          'absolute inset-0 outline-none',
           dragRef.current.kind === 'pan' && dragRef.current.engaged
             ? 'cursor-grabbing'
-            : 'cursor-default',
+            : `cursor-${idleCursor}`,
         )}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
+        onKeyDown={onKeyDown}
         onPointerLeave={() => {
           clearHolidayHover();
           clearBaselineHover();
+          clearTaskHover();
         }}
       />
       {holidayTooltip}
       {baselineTooltip}
+      {taskTooltip}
       <ScrollShim viewportWidth={size.width} activeBaseline={activeBaseline} />
+      {confirmDeleteTaskId && (
+        <DeleteTaskConfirm
+          taskId={confirmDeleteTaskId}
+          onClose={() => setConfirmDeleteTaskId(null)}
+        />
+      )}
     </div>
   );
 }
