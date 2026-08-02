@@ -163,6 +163,9 @@ export const en = {
   },
   drawer: {
     title: 'Edit task',
+    advancedSection: 'Advanced',
+    resizeHandle: 'Drag to resize the drawer',
+    resetWidth: 'Double-click to reset width',
     name: 'Name',
     start: 'Start date',
     end: 'End date',

@@ -21,7 +21,8 @@
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore, updateTaskFromDraftCommand } from '@/store/useProjectStore';
-import { useViewStore } from '@/store/useViewStore';
+import { useViewStore, DEFAULT_DRAWER_WIDTH } from '@/store/useViewStore';
+import { revealTask } from '@/lib/revealTask';
 import type {
   Task,
   Dependency,
@@ -55,6 +56,8 @@ export function TaskDrawer() {
   const { t } = useTranslation();
   const drawer = useViewStore((s) => s.drawer);
   const closeDrawer = useViewStore((s) => s.closeDrawer);
+  const drawerWidth = useViewStore((s) => s.drawerWidth);
+  const setDrawerWidth = useViewStore((s) => s.setDrawerWidth);
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
@@ -204,10 +207,48 @@ export function TaskDrawer() {
     return () => window.removeEventListener('keydown', onKey);
   }, [close, deleteConfirmOpen, discardOpen, drawer, pendingTaskId]);
 
+  // Plan §3.7: when the inspector opens it shrinks the canvas (docked flex
+  // child → ResizeObserver recomputes width on the next frame). Re-reveal the
+  // selected task one frame later so it isn't hidden behind the now-narrower
+  // viewport. revealTask reads the live `[data-gantt-chart]` clientWidth, so it
+  // uses the post-shrink width. Navigation only — not on the undo stack.
+  useEffect(() => {
+    if (drawer !== 'edit') return;
+    const id = selectedId;
+    if (!id) return;
+    const raf = requestAnimationFrame(() => revealTask(id, { skipIfVisible: true }));
+    return () => cancelAnimationFrame(raf);
+  }, [drawer, selectedId]);
+
   if (drawer === 'closed' || !draft || !task || !before) return null;
 
   const deleteTask = () => {
     setDeleteConfirmOpen(true);
+  };
+
+  // ----- Resize handle (plan §3.7: 320-480px, persisted) -----
+  // Drag the left edge to resize. The handle captures the pointer so movement
+  // outside the 4px strip still tracks; width = startWidth - dx (drag right →
+  // narrower). Double-click resets to the default width.
+  const onResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = drawerWidth;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      setDrawerWidth(startWidth - dx);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
   };
 
   // G13/Q13: summary tasks roll up their children; assigning resources to a
@@ -347,7 +388,21 @@ export function TaskDrawer() {
 
   return (
     <>
-      <aside className="absolute right-0 top-0 z-10 flex h-full w-80 flex-col border-l border-border bg-bg-elevated shadow-lg">
+      <aside
+        className="relative flex h-full shrink-0 flex-col border-l border-border bg-bg-elevated"
+        style={{ width: drawerWidth }}
+      >
+        {/* Resize handle on the left edge (plan §3.7). */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('drawer.resizeHandle')}
+          title={t('drawer.resetWidth')}
+          className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-primary/20"
+          onPointerDown={onResizePointerDown}
+          onDoubleClick={() => setDrawerWidth(DEFAULT_DRAWER_WIDTH)}
+        />
+
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <h2 className="text-sm font-semibold">{t('drawer.title')}</h2>
           <button
@@ -415,191 +470,207 @@ export function TaskDrawer() {
               onChange={(e) => onMilestoneChange(e.target.checked)}
             />
           </Field>
-          <Field label={t('drawer.overtimeDates')}>
-            {hasChildren || draft.isMilestone ? (
-              <p className="text-xs text-fg-muted">
-                {hasChildren ? t('drawer.summaryNoOvertime') : t('drawer.milestoneNoOvertime')}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <input
-                    type="date"
-                    className="input min-w-0 flex-1"
-                    min={draft.start}
-                    max={draft.end}
-                    value={overtimeDate}
-                    onChange={(e) => {
-                      setOvertimeDate(e.target.value);
-                      setOvertimeError('');
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="rounded border border-border px-2 text-xs hover:bg-bg"
-                    onClick={addOvertimeDate}
-                  >
-                    {t('drawer.addOvertimeDate')}
-                  </button>
-                </div>
-                {overtimeError && <p className="text-xs text-danger">{overtimeError}</p>}
-                {(draft.overtimeDates ?? []).length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {[...(draft.overtimeDates ?? [])].sort().map((date) => (
-                      <span
-                        key={date}
-                        className="inline-flex items-center gap-1 rounded bg-warning/15 px-2 py-1 text-xs text-warning"
+          {/* Advanced fields (plan §3.7): collapsible, open by default so existing
+              flows (and E2E) still see them, but users can collapse to focus on the
+              core fields above. */}
+          <details open className="space-y-3">
+            <summary className="cursor-pointer select-none text-xs font-semibold text-fg-muted">
+              {t('drawer.advancedSection')}
+            </summary>
+            <div className="space-y-3">
+              <Field label={t('drawer.overtimeDates')}>
+                {hasChildren || draft.isMilestone ? (
+                  <p className="text-xs text-fg-muted">
+                    {hasChildren ? t('drawer.summaryNoOvertime') : t('drawer.milestoneNoOvertime')}
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        className="input min-w-0 flex-1"
+                        min={draft.start}
+                        max={draft.end}
+                        value={overtimeDate}
+                        onChange={(e) => {
+                          setOvertimeDate(e.target.value);
+                          setOvertimeError('');
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="rounded border border-border px-2 text-xs hover:bg-bg"
+                        onClick={addOvertimeDate}
                       >
-                        {date}
+                        {t('drawer.addOvertimeDate')}
+                      </button>
+                    </div>
+                    {overtimeError && <p className="text-xs text-danger">{overtimeError}</p>}
+                    {(draft.overtimeDates ?? []).length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {[...(draft.overtimeDates ?? [])].sort().map((date) => (
+                          <span
+                            key={date}
+                            className="inline-flex items-center gap-1 rounded bg-warning/15 px-2 py-1 text-xs text-warning"
+                          >
+                            {date}
+                            <button
+                              type="button"
+                              aria-label={t('drawer.removeOvertimeDate', { date })}
+                              onClick={() => removeOvertimeDate(date)}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-fg-muted">{t('drawer.noOvertimeDates')}</p>
+                    )}
+                  </div>
+                )}
+              </Field>
+              <Field label={t('drawer.color')}>
+                <input
+                  type="color"
+                  value={draft.color ?? '#60a5fa'}
+                  onChange={(e) => patchDraft({ color: e.target.value })}
+                />
+              </Field>
+              <Field label={t('drawer.note')}>
+                <textarea
+                  className="input min-h-24"
+                  value={draft.note ?? ''}
+                  onChange={(e) => patchDraft({ note: e.target.value })}
+                />
+              </Field>
+              <Field label={t('drawer.dependencies')} error={errors.dependencies}>
+                <div className="space-y-2">
+                  {draft.dependencies.map((dep) => {
+                    const pred = file.tasks.find((x) => x.id === dep.targetId);
+                    return (
+                      <div key={dep.targetId} className="flex items-center gap-2">
+                        <span className="flex-1 truncate text-xs">
+                          {pred?.name ?? dep.targetId}
+                        </span>
+                        <span className="text-xs text-fg-muted">
+                          {t(`drawer.depType${dep.type}` as `drawer.depType${string}`)}
+                        </span>
+                        <span className="text-xs text-fg-muted">lag={dep.lag}</span>
                         <button
-                          type="button"
-                          aria-label={t('drawer.removeOvertimeDate', { date })}
-                          onClick={() => removeOvertimeDate(date)}
+                          onClick={() => removeDependency(dep.targetId)}
+                          className="text-danger hover:underline"
                         >
                           ✕
                         </button>
-                      </span>
-                    ))}
-                  </div>
+                      </div>
+                    );
+                  })}
+                  <DependencyAdder
+                    existingTargetIds={draft.dependencies.map((d) => d.targetId)}
+                    candidates={file.tasks.filter((x) => x.id !== task.id)}
+                    onAdd={(targetId, type, lag) => addDependency({ targetId, type, lag })}
+                  />
+                </div>
+              </Field>
+              <Field label={t('drawer.assignments')} error={errors.assignments}>
+                <div className="mb-1 text-xs text-fg-muted">
+                  {t('drawer.totalPersonDays')}:{' '}
+                  <span className="font-medium text-fg">{personDays}</span>
+                </div>
+                {hasChildren ? (
+                  <p className="text-xs text-fg-muted">{t('drawer.summaryNoAssignment')}</p>
                 ) : (
-                  <p className="text-xs text-fg-muted">{t('drawer.noOvertimeDates')}</p>
-                )}
-              </div>
-            )}
-          </Field>
-          <Field label={t('drawer.color')}>
-            <input
-              type="color"
-              value={draft.color ?? '#60a5fa'}
-              onChange={(e) => patchDraft({ color: e.target.value })}
-            />
-          </Field>
-          <Field label={t('drawer.note')}>
-            <textarea
-              className="input min-h-24"
-              value={draft.note ?? ''}
-              onChange={(e) => patchDraft({ note: e.target.value })}
-            />
-          </Field>
-          <Field label={t('drawer.dependencies')} error={errors.dependencies}>
-            <div className="space-y-2">
-              {draft.dependencies.map((dep) => {
-                const pred = file.tasks.find((x) => x.id === dep.targetId);
-                return (
-                  <div key={dep.targetId} className="flex items-center gap-2">
-                    <span className="flex-1 truncate text-xs">{pred?.name ?? dep.targetId}</span>
-                    <span className="text-xs text-fg-muted">
-                      {t(`drawer.depType${dep.type}` as `drawer.depType${string}`)}
-                    </span>
-                    <span className="text-xs text-fg-muted">lag={dep.lag}</span>
-                    <button
-                      onClick={() => removeDependency(dep.targetId)}
-                      className="text-danger hover:underline"
-                    >
-                      ✕
-                    </button>
+                  <div className="space-y-2">
+                    {draft.assignments.map((a) => {
+                      const resource = file.resources.find((r) => r.id === a.resourceId);
+                      return (
+                        <div key={a.resourceId} className="flex items-center gap-2">
+                          <span className="flex-1 truncate text-xs">
+                            {resource?.name ?? a.resourceId}
+                          </span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={a.load}
+                            className="flex-1"
+                            onChange={(e) =>
+                              assignResource({
+                                resourceId: a.resourceId,
+                                load: Number(e.target.value),
+                              })
+                            }
+                          />
+                          <span className="w-8 text-right text-xs text-fg-muted">{a.load}%</span>
+                          <button
+                            onClick={() => unassignResource(a.resourceId)}
+                            className="text-danger hover:underline"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {file.resources.length > 0 && (
+                      <AssignmentAdder
+                        existingResourceIds={draft.assignments.map((a) => a.resourceId)}
+                        resources={file.resources}
+                        onAssign={(resourceId, load) => assignResource({ resourceId, load })}
+                      />
+                    )}
                   </div>
-                );
-              })}
-              <DependencyAdder
-                existingTargetIds={draft.dependencies.map((d) => d.targetId)}
-                candidates={file.tasks.filter((x) => x.id !== task.id)}
-                onAdd={(targetId, type, lag) => addDependency({ targetId, type, lag })}
-              />
-            </div>
-          </Field>
-          <Field label={t('drawer.assignments')} error={errors.assignments}>
-            <div className="mb-1 text-xs text-fg-muted">
-              {t('drawer.totalPersonDays')}:{' '}
-              <span className="font-medium text-fg">{personDays}</span>
-            </div>
-            {hasChildren ? (
-              <p className="text-xs text-fg-muted">{t('drawer.summaryNoAssignment')}</p>
-            ) : (
-              <div className="space-y-2">
-                {draft.assignments.map((a) => {
-                  const resource = file.resources.find((r) => r.id === a.resourceId);
-                  return (
-                    <div key={a.resourceId} className="flex items-center gap-2">
-                      <span className="flex-1 truncate text-xs">
-                        {resource?.name ?? a.resourceId}
-                      </span>
+                )}
+              </Field>
+              <Field label={t('drawer.constraint')} error={errors.constraints}>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs">
+                    <select
+                      className="input flex-1"
+                      value={draft.constraints.type}
+                      onChange={(e) => {
+                        const type = e.target.value as ConstraintType;
+                        updateConstraint({
+                          type,
+                          date:
+                            type === 'none' ? undefined : (draft.constraints.date ?? draft.start),
+                        });
+                      }}
+                    >
+                      <option value="none">{t('drawer.constraintNone')}</option>
+                      <option value="startNoEarlierThan">{t('drawer.constraintSNET')}</option>
+                      <option value="mustStartOn">{t('drawer.constraintMSO')}</option>
+                      <option value="mustFinishOn">{t('drawer.constraintMFO')}</option>
+                      <option value="finishNoLaterThan">{t('drawer.constraintFNLT')}</option>
+                    </select>
+                    {draft.constraints.type !== 'none' && (
                       <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={a.load}
-                        className="flex-1"
+                        type="date"
+                        className="input w-36"
+                        value={draft.constraints.date ?? draft.start}
                         onChange={(e) =>
-                          assignResource({ resourceId: a.resourceId, load: Number(e.target.value) })
+                          updateConstraint({ type: draft.constraints.type, date: e.target.value })
                         }
                       />
-                      <span className="w-8 text-right text-xs text-fg-muted">{a.load}%</span>
-                      <button
-                        onClick={() => unassignResource(a.resourceId)}
-                        className="text-danger hover:underline"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  );
-                })}
-                {file.resources.length > 0 && (
-                  <AssignmentAdder
-                    existingResourceIds={draft.assignments.map((a) => a.resourceId)}
-                    resources={file.resources}
-                    onAssign={(resourceId, load) => assignResource({ resourceId, load })}
-                  />
-                )}
-              </div>
-            )}
-          </Field>
-          <Field label={t('drawer.constraint')} error={errors.constraints}>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs">
-                <select
-                  className="input flex-1"
-                  value={draft.constraints.type}
-                  onChange={(e) => {
-                    const type = e.target.value as ConstraintType;
-                    updateConstraint({
-                      type,
-                      date: type === 'none' ? undefined : (draft.constraints.date ?? draft.start),
-                    });
-                  }}
-                >
-                  <option value="none">{t('drawer.constraintNone')}</option>
-                  <option value="startNoEarlierThan">{t('drawer.constraintSNET')}</option>
-                  <option value="mustStartOn">{t('drawer.constraintMSO')}</option>
-                  <option value="mustFinishOn">{t('drawer.constraintMFO')}</option>
-                  <option value="finishNoLaterThan">{t('drawer.constraintFNLT')}</option>
-                </select>
-                {draft.constraints.type !== 'none' && (
-                  <input
-                    type="date"
-                    className="input w-36"
-                    value={draft.constraints.date ?? draft.start}
-                    onChange={(e) =>
-                      updateConstraint({ type: draft.constraints.type, date: e.target.value })
-                    }
-                  />
-                )}
-              </div>
-              {/* G12/Q11 snap feedback: computed from the DRAFT constraint date
+                    )}
+                  </div>
+                  {/* G12/Q11 snap feedback: computed from the DRAFT constraint date
                   so the user sees the effect before committing. */}
-              {draft.constraints.type !== 'none' &&
-                draft.constraints.date &&
-                (() => {
-                  const snap = snapConstraintDate(draft.constraints.date, cal);
-                  return snap.snapped ? (
-                    <p className="text-xs text-fg-muted">
-                      {t('drawer.constraintSnapped', { from: snap.original, to: snap.date })}
-                    </p>
-                  ) : null;
-                })()}
+                  {draft.constraints.type !== 'none' &&
+                    draft.constraints.date &&
+                    (() => {
+                      const snap = snapConstraintDate(draft.constraints.date, cal);
+                      return snap.snapped ? (
+                        <p className="text-xs text-fg-muted">
+                          {t('drawer.constraintSnapped', { from: snap.original, to: snap.date })}
+                        </p>
+                      ) : null;
+                    })()}
+                </div>
+              </Field>
             </div>
-          </Field>
+          </details>
         </div>
         <div className="flex gap-2 border-t border-border p-3">
           <button onClick={deleteTask} className="btn-danger flex-1">

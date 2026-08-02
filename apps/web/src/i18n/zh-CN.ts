@@ -157,6 +157,9 @@ export const zhCN = {
   },
   drawer: {
     title: '编辑任务',
+    advancedSection: '高级',
+    resizeHandle: '拖动调整抽屉宽度',
+    resetWidth: '双击恢复默认宽度',
     name: '名称',
     start: '开始日期',
     end: '结束日期',

@@ -19,6 +19,11 @@
  * `viewState` field instead.
  */
 import { create } from 'zustand';
+import { clampDrawerWidth, loadDrawerWidth, saveDrawerWidth } from '@/lib/drawerWidthPrefs';
+
+// Re-export the width bounds so callers can import them from the store path
+// (keeps a single import site for ephemeral UI state + its constants).
+export { DEFAULT_DRAWER_WIDTH, MIN_DRAWER_WIDTH, MAX_DRAWER_WIDTH } from '@/lib/drawerWidthPrefs';
 
 export type DrawerMode = 'closed' | 'edit';
 export type ViewMode = 'task' | 'resource';
@@ -27,6 +32,14 @@ interface ViewStoreState {
   drawer: DrawerMode;
   openDrawer(): void;
   closeDrawer(): void;
+
+  /**
+   * Docked inspector width in CSS px (plan §3.7). A user preference — NOT
+   * project data, NOT in the undo stack — persisted to localStorage across
+   * sessions. Clamped to [MIN_DRAWER_WIDTH, MAX_DRAWER_WIDTH].
+   */
+  drawerWidth: number;
+  setDrawerWidth(width: number): void;
 
   /** Context menu state (right-click on a task). */
   contextMenu: { taskId: string; x: number; y: number } | null;
@@ -80,6 +93,15 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   drawer: 'closed',
   openDrawer: () => set({ drawer: 'edit' }),
   closeDrawer: () => set({ drawer: 'closed' }),
+
+  // Initial width is loaded from localStorage (falls back to default). Updates
+  // clamp + persist so the preference survives across sessions.
+  drawerWidth: loadDrawerWidth(),
+  setDrawerWidth: (width) => {
+    const next = clampDrawerWidth(width);
+    set((s) => (s.drawerWidth === next ? s : { drawerWidth: next }));
+    saveDrawerWidth(next);
+  },
 
   contextMenu: null,
   openContextMenu: (taskId, x, y) => set({ contextMenu: { taskId, x, y } }),
