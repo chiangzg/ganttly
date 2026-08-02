@@ -38,6 +38,7 @@ import {
 } from '@/lib/baseline';
 import { deviationColumnCell, deviationToneClass } from './BaselineVariance';
 import * as Tooltip from '@radix-ui/react-tooltip';
+import { computeDropPosition, resolveDropTarget, type TaskDropTarget } from '@/lib/taskDropTarget';
 import { nanoid } from 'nanoid';
 import type { Task, BaselineTask } from '@ganttly/schema';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
@@ -63,6 +64,15 @@ export function TaskTable() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const renamingId = useRef<string | null>(null);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+
+  // ---- Drag & drop reorder / reparent (plan §2.3) ----
+  // Ephemeral UI state: never written to the store or the undo stack.
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<TaskDropTarget | null>(null);
+  // Escape cancels an in-flight drag (plan §2.3). Tracked via ref because the
+  // window keydown listener lives outside React's render cycle.
+  const dragCancelled = useRef(false);
+  const autoScrollRaf = useRef<number | null>(null);
 
   const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
   const hasBaseline = activeBaseline !== null;
@@ -285,26 +295,143 @@ export function TaskTable() {
     forceRerender();
   };
 
-  // ---- Drag & drop reorder / reparent (PRD §3.10) ----
+  // ---- Drag & drop reorder / reparent (plan §2.3) ----
+  // The drag preview is pure local React state; the only thing that hits the
+  // undo stack is the final `onDrop` dispatch (plan §9.1 — no per-move commands).
   const onDragStart = (e: React.DragEvent<HTMLDivElement>, node: TreeNode) => {
     e.dataTransfer.setData('text/plain', node.task.id);
     e.dataTransfer.effectAllowed = 'move';
+    // A transparent drag image lets us show our own insertion-line feedback
+    // instead of the browser's faded row ghost.
+    dragCancelled.current = false;
+    setDraggedId(node.task.id);
+    // Escape listener: attached for the lifetime of this drag. Uses the DOM
+    // KeyboardEvent (window-level), distinct from React's synthetic one.
+    const onEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        dragCancelled.current = true;
+        setDropTarget(null);
+        setDraggedId(null);
+      }
+    };
+    dragEscapeHandler.current = onEsc;
+    window.addEventListener('keydown', onEsc);
   };
-  const onDrop = (e: React.DragEvent<HTMLDivElement>, target: TreeNode) => {
+
+  // Holds the active window keydown handler so onDrop/onDragEnd can remove it.
+  const dragEscapeHandler = useRef<((e: globalThis.KeyboardEvent) => void) | null>(null);
+
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>, node: TreeNode) => {
     e.preventDefault();
-    const draggedId = e.dataTransfer.getData('text/plain');
-    if (!draggedId || draggedId === target.task.id) return;
-    // Can't drop onto own descendant.
-    if (target.ancestorIds.includes(draggedId)) return;
-    // Place as last child of target (drop "into" target).
-    dispatch(
-      moveTaskWithRollupCommand(
-        draggedId,
-        target.task.id,
-        countChildren(target.task.id, file.tasks),
-      ),
+    e.dataTransfer.dropEffect = dragCancelled.current ? 'none' : 'move';
+    if (!draggedId || dragCancelled.current) return;
+    const row = e.currentTarget;
+    const rect = row.getBoundingClientRect();
+    const offset = e.clientY - rect.top;
+    const position = computeDropPosition(offset, ROW_HEIGHT);
+    const next = resolveDropTarget(draggedId, node.task.id, position, file.tasks);
+    setDropTarget((prev) =>
+      prev &&
+      prev.taskId === next.taskId &&
+      prev.position === next.position &&
+      prev.parentId === next.parentId &&
+      prev.order === next.order &&
+      prev.invalid === next.invalid
+        ? prev
+        : next,
     );
   };
+
+  const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    // Clear the highlight when the pointer leaves the row entirely (not when
+    // moving between children inside the row). A fresh `dragover` on the next
+    // row will set its own target.
+    const related = e.relatedTarget as Node | null;
+    if (related && e.currentTarget.contains(related)) return;
+    setDropTarget((prev) => (prev && prev.taskId === e.currentTarget.dataset.taskId ? null : prev));
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>, _target: TreeNode) => {
+    e.preventDefault();
+    const draggedId = e.dataTransfer.getData('text/plain') || draggedIdRef.current;
+    cleanupDrag();
+    if (!draggedId || dragCancelled.current) return;
+    const target = dropTargetRef.current;
+    if (!target || target.invalid) return;
+    if (
+      target.parentId === null &&
+      target.order === 0 &&
+      file.tasks.filter((t) => t.parentId === null).length === 0
+    ) {
+      // Edge case: empty root drop — nothing to reorder.
+    }
+    dispatch(moveTaskWithRollupCommand(draggedId, target.parentId, target.order));
+  };
+
+  const onDragEnd = () => {
+    cleanupDrag();
+  };
+
+  const cleanupDrag = () => {
+    if (dragEscapeHandler.current) {
+      window.removeEventListener('keydown', dragEscapeHandler.current);
+      dragEscapeHandler.current = null;
+    }
+    if (autoScrollRaf.current !== null) {
+      cancelAnimationFrame(autoScrollRaf.current);
+      autoScrollRaf.current = null;
+    }
+    setDraggedId(null);
+    setDropTarget(null);
+  };
+
+  // Refs mirroring the latest drag state for use inside event handlers that
+  // close over stale renders (window listeners, rAF callbacks).
+  const draggedIdRef = useRef<string | null>(null);
+  const dropTargetRef = useRef<TaskDropTarget | null>(null);
+  draggedIdRef.current = draggedId;
+  dropTargetRef.current = dropTarget;
+
+  // Track the live pointer Y for auto-scroll, updated via a window listener
+  // during a drag. Kept in a ref so we don't re-render per mousemove.
+  const pointerY = useRef(0);
+
+  // Auto-scroll: while a drag is in flight and the pointer is near the top or
+  // bottom edge of the scroll container, scroll continuously so the user can
+  // reach off-screen rows (plan §2.3). One rAF loop per drag.
+  useEffect(() => {
+    if (!draggedId) return;
+    const onMove = (e: MouseEvent) => {
+      pointerY.current = e.clientY;
+    };
+    window.addEventListener('mousemove', onMove);
+
+    const tick = () => {
+      const el = scrollRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const edge = ROW_HEIGHT * 2; // start scrolling within 2 rows of the edge
+        const y = pointerY.current;
+        if (y < rect.top + edge) {
+          const speed = Math.min(20, (rect.top + edge - y) / 2);
+          el.scrollTop -= speed;
+        } else if (y > rect.bottom - edge) {
+          const speed = Math.min(20, (y - (rect.bottom - edge)) / 2);
+          el.scrollTop += speed;
+        }
+      }
+      autoScrollRaf.current = requestAnimationFrame(tick);
+    };
+    autoScrollRaf.current = requestAnimationFrame(tick);
+
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
+    };
+  }, [draggedId]);
 
   return (
     <>
@@ -330,6 +457,10 @@ export function TaskTable() {
               const y = i * ROW_HEIGHT;
               const selected = file.viewState.selectedTaskId === node.task.id;
               const isRenaming = renamingId.current === node.task.id;
+              const isDropHere = dropTarget?.taskId === node.task.id && !dropTarget.invalid;
+              const isDragged = draggedId === node.task.id;
+              const invalidHere = dropTarget?.taskId === node.task.id && dropTarget.invalid;
+              const dropIndent = 8 + node.depth * 16;
               return (
                 <div
                   key={node.task.id}
@@ -338,7 +469,10 @@ export function TaskTable() {
                   draggable
                   onDragStart={(e) => onDragStart(e, node)}
                   onDrop={(e) => onDrop(e, node)}
-                  onDragOver={(e) => e.preventDefault()}
+                  onDragOver={(e) => onDragOver(e, node)}
+                  onDragLeave={onDragLeave}
+                  onDragEnd={onDragEnd}
+                  data-task-id={node.task.id}
                   onClick={() => select(node.task.id)}
                   onDoubleClick={() => {
                     select(node.task.id);
@@ -362,19 +496,48 @@ export function TaskTable() {
                     gridTemplateColumns: gridTemplate,
                   }}
                   className={cn(
-                    'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
+                    'group/row absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
                     'hover:bg-bg',
                     selected && 'bg-bg ring-1 ring-inset ring-primary',
                     node.children.length > 0 && 'bg-bg-elevated',
+                    isDragged && 'opacity-40',
+                    invalidHere && 'cursor-not-allowed',
+                    isDropHere &&
+                      dropTarget!.position === 'inside' &&
+                      'bg-primary/10 ring-1 ring-inset ring-primary',
                   )}
                 >
-                  <div
-                    className={cn(
-                      'flex items-center overflow-hidden border-r border-border px-2 text-fg-muted',
-                      node.children.length > 0 && 'font-semibold',
+                  {/* Insertion line for before/after drops (plan §2.3). */}
+                  {isDropHere &&
+                    (dropTarget!.position === 'before' || dropTarget!.position === 'after') && (
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute left-0 right-0 bg-primary"
+                        style={{
+                          height: 2,
+                          top: dropTarget!.position === 'before' ? -1 : ROW_HEIGHT - 1,
+                          // Indent the line to the target's depth so it reads as
+                          // a sibling insertion, not a root move.
+                          left: dropIndent,
+                          zIndex: 5,
+                        }}
+                      />
                     )}
+                  <div
+                    className="group/cell flex items-center overflow-hidden border-r border-border px-2 text-fg-muted"
                     style={{ paddingLeft: 8 + node.depth * 16 }}
                   >
+                    {/* Drag handle — visible on row hover/focus, gives the row a
+                     * clear "grab here to reorder" affordance without colliding
+                     * with the row's click-to-select / double-click-to-edit
+                     * semantics (plan §2.3 step 6). */}
+                    <span
+                      aria-hidden
+                      title={t('table.dragHint')}
+                      className="mr-1 hidden shrink-0 cursor-grab text-[10px] leading-none text-fg-muted/50 hover:text-fg group-hover/row:inline-block active:cursor-grabbing"
+                    >
+                      ⠿
+                    </span>
                     {node.children.length > 0 && (
                       <button
                         type="button"

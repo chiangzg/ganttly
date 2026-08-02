@@ -189,7 +189,8 @@ describe('moveTaskWithRollupCommand', () => {
   });
 
   it('moving a task with no parent change only re-orders (no rollup writes)', () => {
-    // Reorder within the same parent shouldn't touch rollup values.
+    // Reorder within the same parent shouldn't touch rollup values. Orders are
+    // renormalized to 0..n-1 so there are no gaps/duplicates (plan §2.3 step 4).
     const parent = makeTask('parent');
     const childA = makeTask('childA', {
       parentId: 'parent',
@@ -208,13 +209,55 @@ describe('moveTaskWithRollupCommand', () => {
     const store = useProjectStore.getState;
     const parentProgressBefore = store().file.tasks.find((t) => t.id === 'parent')!.progress;
 
-    // Same parent, different order
+    // Same parent, move childA past childB (to the end).
     store().dispatch(moveTaskWithRollupCommand('childA', 'parent', 2));
 
     const parentAfter = store().file.tasks.find((t) => t.id === 'parent')!;
     expect(parentAfter.progress).toBe(parentProgressBefore);
-    // childA moved to order 2
+    // Orders are packed: childA is now last → order 1, childB → order 0.
     const childAAfter = store().file.tasks.find((t) => t.id === 'childA')!;
-    expect(childAAfter.order).toBe(2);
+    const childBAfter = store().file.tasks.find((t) => t.id === 'childB')!;
+    expect(childAAfter.order).toBe(1);
+    expect(childBAfter.order).toBe(0);
+  });
+
+  it('undo restores every renormalized sibling order, not just the moved task', () => {
+    // Three top-level siblings. Moving C to the front shifts A→1, B→2.
+    // Undo must restore A→0, B→1, C→2 exactly (the renormalize capture path).
+    const a = makeTask('a', { order: 0 });
+    const b = makeTask('b', { order: 1 });
+    const c = makeTask('c', { order: 2 });
+    seed([a, b, c]);
+
+    const store = useProjectStore.getState;
+    const before = store().file.tasks.map((t) => ({ id: t.id, order: t.order }));
+
+    // Move c before a → c should land at order 0, a→1, b→2.
+    store().dispatch(moveTaskWithRollupCommand('c', null, 0));
+    expect(store().file.tasks.find((t) => t.id === 'c')!.order).toBe(0);
+    expect(store().file.tasks.find((t) => t.id === 'a')!.order).toBe(1);
+    expect(store().file.tasks.find((t) => t.id === 'b')!.order).toBe(2);
+
+    store().undo();
+    const after = store().file.tasks.map((t) => ({ id: t.id, order: t.order }));
+    expect(after).toEqual(before);
+  });
+
+  it('orders stay compact (0..n-1) after repeated same-parent moves', () => {
+    const a = makeTask('a', { order: 0 });
+    const b = makeTask('b', { order: 1 });
+    const c = makeTask('c', { order: 2 });
+    seed([a, b, c]);
+
+    const store = useProjectStore.getState;
+    // Move a to the end, then b to the end. Orders must always be 0..2.
+    store().dispatch(moveTaskWithRollupCommand('a', null, 99));
+    store().dispatch(moveTaskWithRollupCommand('b', null, 99));
+
+    const orders = store()
+      .file.tasks.filter((t) => t.parentId === null)
+      .map((t) => t.order)
+      .sort((x, y) => x - y);
+    expect(orders).toEqual([0, 1, 2]);
   });
 });

@@ -97,6 +97,7 @@ export const zhCN = {
     confirmDeleteImpactDeps: '另外 {{count}} 个依赖关系将同时移除。',
     confirmDeleteImpactSummary: '共将删除 {{total}} 个任务。',
     copySuffix: '副本',
+    dragHint: '拖动以排序或调整层级',
   },
   resource: {
     columnName: '资源名称',

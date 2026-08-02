@@ -101,6 +101,7 @@ export const en = {
     confirmDeleteImpactDeps: 'An additional {{count}} dependency link(s) will be removed.',
     confirmDeleteImpactSummary: '{{total}} task(s) will be deleted in total.',
     copySuffix: 'copy',
+    dragHint: 'Drag to reorder or reparent',
   },
   resource: {
     columnName: 'Resource',

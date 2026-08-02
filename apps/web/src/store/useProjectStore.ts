@@ -925,8 +925,6 @@ export function moveTaskWithRollupCommand(
   newOrder: number,
 ): Command {
   let capturedOldValues: Map<string, Partial<Task>> | null = null;
-  let oldParentId: string | null = null;
-  let oldOrder = 0;
 
   return {
     label: `移动任务(含汇总)`,
@@ -935,18 +933,27 @@ export function moveTaskWithRollupCommand(
       const target = file.tasks.find((t) => t.id === taskId);
       if (!target) return file;
 
-      oldParentId = target.parentId;
-      oldOrder = target.order;
+      const oldParentId = target.parentId;
 
-      // Capture the move itself (parentId/order) for the target
-      capturedOldValues.set(taskId, { parentId: oldParentId, order: oldOrder });
+      // 1. Capture the target's own move (parentId/order) for undo.
+      capturedOldValues.set(taskId, { parentId: oldParentId, order: target.order });
 
-      // 1. Apply move
-      let tasks = file.tasks.map((t) =>
-        t.id === taskId ? { ...t, parentId: newParentId, order: newOrder } : t,
-      );
+      // 2. Build the new sibling list for the destination parent: remove the
+      //    moved task from wherever it currently sits, then insert it at the
+      //    requested index (`newOrder`, clamped to [0, siblingCount]). Repack
+      //    to 0..n-1 so there are no duplicate or skipped orders (plan §2.3
+      //    step 4). Capture every sibling whose order changes so undo restores
+      //    the whole group, not just the target.
+      let tasks = file.tasks.map((t) => (t.id === taskId ? { ...t, parentId: newParentId } : t));
+      tasks = repackWithInsertion(tasks, taskId, newParentId, newOrder, capturedOldValues);
 
-      // 2. Recompute old parent (it lost a child) and its ancestors.
+      // If the task changed parents, the OLD parent's remaining children must
+      // also be re-packed (the moved task left a gap).
+      if (oldParentId !== newParentId) {
+        tasks = repackSiblingOrders(tasks, oldParentId, capturedOldValues);
+      }
+
+      // 3. Recompute old parent (it lost a child) and its ancestors.
       if (oldParentId && oldParentId !== newParentId) {
         const oldPatches = recomputeSelfAndAncestors(tasks, oldParentId);
         for (const { id, patch } of oldPatches) {
@@ -954,7 +961,7 @@ export function moveTaskWithRollupCommand(
         }
       }
 
-      // 3. Recompute new parent (it gained a child) and its ancestors.
+      // 4. Recompute new parent (it gained a child) and its ancestors.
       if (newParentId && newParentId !== oldParentId) {
         const newPatches = recomputeSelfAndAncestors(tasks, newParentId);
         for (const { id, patch } of newPatches) {
@@ -969,6 +976,68 @@ export function moveTaskWithRollupCommand(
       return { ...file, tasks: restoreCaptured(file.tasks, capturedOldValues) };
     },
   };
+}
+
+/**
+ * Re-pack siblings under `parentId` to 0..n-1, preserving the existing order.
+ * Captures every changed order. Used for the group the moved task just left.
+ */
+function repackSiblingOrders(
+  tasks: Task[],
+  parentId: string | null,
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  const siblings = tasks
+    .filter((t) => t.parentId === parentId)
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  return assignOrders(tasks, siblings, captured);
+}
+
+/**
+ * Re-pack the destination parent's siblings, inserting `movedId` at
+ * `insertIndex` (clamped). The moved task lands at exactly that index; the
+ * others shift to make room. Captures every changed order for undo.
+ */
+function repackWithInsertion(
+  tasks: Task[],
+  movedId: string,
+  parentId: string | null,
+  insertIndex: number,
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  const others = tasks
+    .filter((t) => t.parentId === parentId && t.id !== movedId)
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  const clamped = Math.max(0, Math.min(insertIndex, others.length));
+  const moved = tasks.find((t) => t.id === movedId)!;
+  const ordered = [...others.slice(0, clamped), moved, ...others.slice(clamped)];
+  return assignOrders(tasks, ordered, captured);
+}
+
+/** Assign sequential 0..n-1 orders to `ordered` (already in final sequence). */
+function assignOrders(
+  tasks: Task[],
+  ordered: Task[],
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  const newOrderByIndex = new Map<string, number>();
+  ordered.forEach((t, i) => newOrderByIndex.set(t.id, i));
+  return tasks.map((t) => {
+    const newOrder = newOrderByIndex.get(t.id);
+    if (newOrder === undefined || newOrder === t.order) return t;
+    captureOrder(t, captured);
+    return { ...t, order: newOrder };
+  });
+}
+
+/** Record a task's pre-change order, merged into any existing capture entry. */
+function captureOrder(task: Task, captured: Map<string, Partial<Task>>): void {
+  const existing = captured.get(task.id);
+  if (existing) {
+    if (!('order' in existing)) captured.set(task.id, { ...existing, order: task.order });
+  } else {
+    captured.set(task.id, { order: task.order });
+  }
 }
 
 // ---------------------------------------------------------------------------
