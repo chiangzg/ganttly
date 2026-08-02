@@ -32,9 +32,13 @@ import { ContextMenu } from './ContextMenu';
 import { useViewStore } from '@/store/useViewStore';
 import { ProjectHeader } from './projects/ProjectHeader';
 import { UndoToastStack } from '@/lib/toast';
+import { useEditorShortcuts } from './useEditorShortcuts';
 
 export function GanttView() {
   const viewMode = useViewStore((s) => s.viewMode);
+  // Global undo/redo/save shortcuts (plan §4.2). Mounted here so the listener
+  // is alive whenever the editor is on screen, regardless of which pane has focus.
+  useEditorShortcuts();
 
   return (
     <div className="flex h-full flex-col">

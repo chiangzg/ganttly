@@ -83,9 +83,11 @@ for (const type of ['FS', 'SS', 'FF', 'SF'] as DepType[]) {
 test('deleting a dependency via the task drawer removes it after Save', async ({ page }) => {
   await loadChain(page, 'FS');
 
-  // Open Task B's drawer (B holds the dependency on A).
+  // Open Task B's drawer (B holds the dependency on A). Open via right-click →
+  // "编辑" — double-clicking a data cell now enters inline edit (PR 8 §4.3).
   const rowB = page.locator('[role="row"]', { hasText: 'Task B' }).first();
-  await rowB.dblclick();
+  await rowB.click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
 
   // The drawer lists each dependency with a ✕ delete button. Removing it only

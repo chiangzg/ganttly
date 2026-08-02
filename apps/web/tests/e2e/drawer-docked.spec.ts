@@ -79,9 +79,12 @@ async function injectTask(page: Page) {
   });
 }
 
-/** Open the drawer by double-clicking the task name in the left table. */
+/** Open the drawer. Double-clicking a data cell enters inline edit (PR 8 §4.3),
+ * so open via right-click → "编辑" instead. */
 async function openDrawer(page: Page) {
-  await page.getByText('设计').first().dblclick();
+  const row = page.locator('[role="row"]', { hasText: '设计' }).first();
+  await row.click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
 }
 

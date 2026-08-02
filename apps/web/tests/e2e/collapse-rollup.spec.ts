@@ -141,8 +141,11 @@ test('editing child progress rolls up to the parent summary', async ({ page }) =
   const parentBefore = await readTask(page, 'parent');
   expect(parentBefore.progress).toBe(0);
 
-  // Open the child's drawer by double-clicking its row.
-  await page.locator('[role="row"]').nth(1).dblclick();
+  // Open the child's drawer. Open via right-click → "编辑" (double-clicking a
+  // data cell now edits inline — PR 8 §4.3).
+  await page.locator('[role="row"]').nth(1).click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
+  await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
 
   // The drawer exposes progress as a range slider. Drive it to 80.
   const progressSlider = page.locator('input[type="range"]').first();

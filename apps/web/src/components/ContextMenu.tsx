@@ -19,6 +19,7 @@ import {
   setViewStateCommand,
 } from '@/store/useProjectStore';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
+import { modKeyLabel } from '@/lib/platform';
 import { nanoid } from 'nanoid';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
 
@@ -120,6 +121,8 @@ export function ContextMenu() {
   };
 
   const canPaste = clipboard.task !== null;
+  // Shortcut hints use the platform modifier (⌘ on macOS, Ctrl elsewhere).
+  const mod = modKeyLabel();
 
   return (
     <>
@@ -129,13 +132,17 @@ export function ContextMenu() {
         onContextMenu={(e) => e.preventDefault()}
       />
       <div
-        className="fixed z-30 min-w-48 rounded border border-border bg-bg-elevated py-1 text-sm shadow-xl"
+        className="fixed z-30 min-w-52 rounded border border-border bg-bg-elevated py-1 text-sm shadow-xl"
         style={{ left: menu.x, top: menu.y }}
       >
         <MenuItem onClick={onEdit}>{t('contextMenu.edit')}</MenuItem>
-        <MenuItem onClick={onCopy}>{t('contextMenu.copy')}</MenuItem>
-        <MenuItem onClick={onCut}>{t('contextMenu.cut')}</MenuItem>
-        <MenuItem onClick={onPaste} disabled={!canPaste}>
+        <MenuItem onClick={onCopy} shortcut={`${mod}+C`}>
+          {t('contextMenu.copy')}
+        </MenuItem>
+        <MenuItem onClick={onCut} shortcut={`${mod}+X`}>
+          {t('contextMenu.cut')}
+        </MenuItem>
+        <MenuItem onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
           {t('contextMenu.paste')}
         </MenuItem>
         <MenuItem onClick={onToggleMilestone}>
@@ -143,7 +150,7 @@ export function ContextMenu() {
         </MenuItem>
         <MenuItem onClick={onIndent}>{t('contextMenu.indent')}</MenuItem>
         <MenuItem onClick={onOutdent}>{t('contextMenu.outdent')}</MenuItem>
-        <MenuItem onClick={onDelete} danger>
+        <MenuItem onClick={onDelete} danger shortcut="Delete">
           {t('contextMenu.delete')}
         </MenuItem>
       </div>
@@ -162,17 +169,20 @@ function MenuItem({
   onClick,
   danger,
   disabled,
+  shortcut,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** Optional accelerator hint (e.g. "⌘+C", "Delete") shown right-aligned. */
+  shortcut?: string;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`block w-full px-3 py-1 text-left hover:bg-bg ${
+      className={`flex w-full items-center px-3 py-1 text-left hover:bg-bg ${
         disabled
           ? 'cursor-not-allowed text-fg-muted opacity-50 hover:bg-transparent'
           : danger
@@ -180,7 +190,10 @@ function MenuItem({
             : 'text-fg'
       }`}
     >
-      {children}
+      <span className="flex-1">{children}</span>
+      {shortcut && (
+        <span className="pointer-events-none ml-4 shrink-0 text-xs text-fg-muted">{shortcut}</span>
+      )}
     </button>
   );
 }

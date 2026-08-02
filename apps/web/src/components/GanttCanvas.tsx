@@ -44,6 +44,7 @@ import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
 import { findActiveBaseline } from '@/lib/baseline';
 import { cn } from '@/lib/cn';
+import { isEditableTarget } from '@/lib/shortcutTarget';
 import { useHolidayHover } from '@/components/useHolidayHover';
 import { useBaselineHover } from '@/components/useBaselineHover';
 import { useTaskHover } from '@/components/useTaskHover';
@@ -479,6 +480,9 @@ export function GanttCanvas() {
   // Enter opens the drawer, Delete/Backspace opens the confirm dialog,
   // Escape clears the selection. Inputs elsewhere keep their own keys.
   const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    // Defensive: the canvas shouldn't host editable elements, but a bubbled
+    // key from an overlay input (drawer/tooltip) must not trigger task ops.
+    if (isEditableTarget(e.target)) return;
     const selectedId = file.viewState.selectedTaskId;
     if (!selectedId) return;
     if (e.key === 'Enter') {

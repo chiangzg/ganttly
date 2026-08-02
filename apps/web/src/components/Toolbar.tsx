@@ -44,6 +44,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { modKeyLabel } from '@/lib/platform';
 
 const ZOOM_ORDER: ZoomLevel[] = ['day', 'week', 'month', 'year'];
 
@@ -55,6 +56,8 @@ export function Toolbar() {
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
   const canUndo = useProjectStore((s) => s.canUndo());
+  // Platform modifier for shortcut hints in tooltips (plan §4.2): ⌘ / Ctrl.
+  const mod = modKeyLabel();
   const canRedo = useProjectStore((s) => s.canRedo());
   const nextUndoLabel = useProjectStore((s) => s.nextUndoLabel());
   const nextRedoLabel = useProjectStore((s) => s.nextRedoLabel());
@@ -232,7 +235,7 @@ export function Toolbar() {
           onClick={undo}
           disabled={!canUndo}
           aria-label={t('toolbar.undo')}
-          title={nextUndoLabel ? t('status.undo', { label: nextUndoLabel }) : t('toolbar.undo')}
+          title={`${nextUndoLabel ? t('status.undo', { label: nextUndoLabel }) : t('toolbar.undo')} (${mod}Z)`}
         >
           <Undo2 size={16} />
         </ToolbarButton>
@@ -241,7 +244,7 @@ export function Toolbar() {
           onClick={redo}
           disabled={!canRedo}
           aria-label={t('toolbar.redo')}
-          title={nextRedoLabel ? t('status.redo', { label: nextRedoLabel }) : t('toolbar.redo')}
+          title={`${nextRedoLabel ? t('status.redo', { label: nextRedoLabel }) : t('toolbar.redo')} (${mod}⇧Z)`}
         >
           <Redo2 size={16} />
         </ToolbarButton>
@@ -249,7 +252,7 @@ export function Toolbar() {
           size="icon"
           onClick={() => void save()}
           aria-label={t('toolbar.save')}
-          title={saveTitle(saveState, t('toolbar.save'), t('status.saving'), t('status.saved'))}
+          title={`${saveTitle(saveState, t('toolbar.save'), t('status.saving'), t('status.saved'))} (${mod}S)`}
           className={saveState.status === 'error' ? 'text-danger hover:text-danger' : undefined}
         >
           {saveState.status === 'saving' ? (

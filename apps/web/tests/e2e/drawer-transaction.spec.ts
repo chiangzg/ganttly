@@ -69,7 +69,11 @@ async function injectSingleTask(page: Page) {
 }
 
 async function openDrawer(page: Page) {
-  await page.getByText('原始任务').dblclick();
+  // Open via right-click → "编辑". Double-clicking a data cell now enters
+  // inline edit (PR 8, plan §4.3), so the drawer is opened through the menu.
+  const row = page.locator('[role="row"]', { hasText: '原始任务' }).first();
+  await row.click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
   return page.locator('aside');
 }
@@ -228,7 +232,13 @@ test('有未保存修改时切换任务会先要求确认', async ({ page }) => 
 
   const drawer = await openDrawer(page);
   await drawer.locator('input').first().fill('尚未保存');
-  await page.locator('[role="row"]').filter({ hasText: '第二个任务' }).dblclick();
+  // Switch to the second task by opening its drawer via the WBS cell (double-
+  // clicking a data cell would enter inline edit instead — PR 8 §4.3).
+  await page
+    .locator('[role="row"]')
+    .filter({ hasText: '第二个任务' })
+    .locator('[data-field="wbs"]')
+    .dblclick();
 
   await expect(
     page.getByRole('heading', { name: '当前任务有未保存的修改，是否放弃？' }),

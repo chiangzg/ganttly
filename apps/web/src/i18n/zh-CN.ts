@@ -99,6 +99,20 @@ export const zhCN = {
     copySuffix: '副本',
     dragHint: '拖动以排序或调整层级',
     unassigned: '未分配',
+    cellReadOnlySummary: '摘要任务的工期/进度由子任务汇总，不可直接编辑',
+    cellReadOnlyMilestone: '里程碑没有工期',
+    editDurationAria: '编辑工期',
+    editProgressAria: '编辑进度',
+  },
+  shortcuts: {
+    /** Shortcut hint composed with modKeyLabel() — e.g. "⌘Z" / "Ctrl+Z". */
+    undo: '撤销',
+    redo: '重做',
+    save: '保存',
+    delete: '删除',
+    copy: '复制',
+    cut: '剪切',
+    paste: '粘贴',
   },
   canvas: {
     ariaLabel: '甘特图任务区域，使用方向键、Enter、Delete 和 Escape 操作',

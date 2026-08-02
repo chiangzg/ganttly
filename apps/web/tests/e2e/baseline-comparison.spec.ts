@@ -203,9 +203,12 @@ test('TaskTable, Drawer and StatusBar show consistent deviation after a delay', 
       .getByText(/\+\d+ 天/),
   ).toBeVisible();
 
-  // Drawer: open and check the three-column variance block.
-  await page.getByRole('row').filter({ hasText: 'Task A' }).dblclick();
+  // Drawer: open and check the three-column variance block. Open via right-
+  // click → "编辑" (double-clicking a data cell now edits inline — PR 8 §4.3).
+  await page.getByRole('row').filter({ hasText: 'Task A' }).click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await page.waitForTimeout(400);
+  await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
   await expect(page.getByText('相对「初始计划」')).toBeVisible();
   await expect(page.getByText('完成偏差')).toBeVisible();
 });

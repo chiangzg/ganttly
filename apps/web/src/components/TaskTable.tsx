@@ -17,6 +17,7 @@ import {
   moveTaskWithRollupCommand,
   deleteTaskCommand,
   updateTaskCommand,
+  updateTaskFromDraftCommand,
   swapSiblingOrderCommand,
   pasteTaskCommand,
   type Command,
@@ -25,6 +26,7 @@ import { useViewStore } from '@/store/useViewStore';
 import { buildTree, flattenVisible, type TreeNode } from '@/engine/scene';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 import { cn } from '@/lib/cn';
+import { endDateFromDuration } from '@/lib/calendar';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
@@ -39,6 +41,7 @@ import {
 import { deviationColumnCell, deviationToneClass } from './BaselineVariance';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { computeDropPosition, resolveDropTarget, type TaskDropTarget } from '@/lib/taskDropTarget';
+import { isEditableTarget } from '@/lib/shortcutTarget';
 import { nanoid } from 'nanoid';
 import type { Task, BaselineTask } from '@ganttly/schema';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
@@ -54,6 +57,13 @@ const TABLE_WIDTH_WITH_BASELINE = 552;
 const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 56px 56px';
 const GRID_TEMPLATE_WITH_BASELINE = '44px minmax(0, 1fr) 72px 56px 56px 70px';
 
+/**
+ * The three task-table cells that support inline editing (plan §4.3). Order
+ * matters: it defines the Tab-traversal sequence within a row.
+ */
+type EditableField = 'name' | 'duration' | 'progress';
+const EDITABLE_FIELDS: readonly EditableField[] = ['name', 'duration', 'progress'] as const;
+
 export function TaskTable() {
   const { t } = useTranslation();
   const file = useProjectStore((s) => s.file);
@@ -62,7 +72,10 @@ export function TaskTable() {
   const openContextMenu = useViewStore((s) => s.openContextMenu);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const renamingId = useRef<string | null>(null);
+  // Which cell is in inline-edit mode (plan §4.3). `name` is the existing F2
+  // rename; `duration`/`progress` are new. A ref + forceRerender keeps the
+  // editing input uncontrolled, matching the original F2 pattern.
+  const editingCell = useRef<{ taskId: string; field: EditableField } | null>(null);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
 
   // ---- Drag & drop reorder / reparent (plan §2.3) ----
@@ -150,6 +163,12 @@ export function TaskTable() {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, node: TreeNode) => {
     const task = node.task;
 
+    // An inline-edit input (F2 rename, duration/progress editor) has the focus:
+    // let it handle its own keys. Without this, Delete/Enter/F2 would bubble
+    // out of the input and mis-trigger task ops (plan §4.2 — "输入任务名称时
+    // Delete 不误删任务").
+    if (isEditableTarget(e.target)) return;
+
     // Clipboard (Ctrl/Cmd+C / X / V).
     if (e.ctrlKey || e.metaKey) {
       if (e.key === 'c' || e.key === 'C') {
@@ -208,7 +227,7 @@ export function TaskTable() {
       setConfirmDeleteTaskId(task.id);
     } else if (e.key === 'F2') {
       e.preventDefault();
-      renamingId.current = task.id;
+      editingCell.current = { taskId: task.id, field: 'name' };
       // Force re-render so the row shows an input.
       forceRerender();
     }
@@ -230,6 +249,86 @@ export function TaskTable() {
   // We need a tiny rerender trigger for inline rename.
   const [, setRerender] = useState(0);
   const forceRerender = () => setRerender((n) => n + 1);
+
+  // ---- Inline cell editing (plan §4.3) ----
+  /** Whether a given field is editable for this row (summary/milestone rules). */
+  const isFieldEditable = (node: TreeNode, field: EditableField): boolean => {
+    const isSummary = node.children.length > 0;
+    if (field === 'name') return true;
+    if (field === 'progress') return !isSummary; // summary progress is rolled up
+    // duration: summary rolls up; milestone has no duration.
+    return !isSummary && !node.task.isMilestone;
+  };
+
+  /** Begin editing a cell (called on double-click of an editable cell). */
+  const startEditing = (taskId: string, field: EditableField) => {
+    editingCell.current = { taskId, field };
+    forceRerender();
+  };
+
+  /** Exit editing without changing which task is selected. */
+  const stopEditing = () => {
+    editingCell.current = null;
+    forceRerender();
+  };
+
+  /**
+   * Commit a name edit. Uses `updateTaskCommand` (no scheduling side-effects),
+   * matching the original F2 behaviour.
+   */
+  const commitName = (taskId: string, value: string) => {
+    dispatch(updateTaskCommand(taskId, { name: value }));
+  };
+
+  /**
+   * Commit a duration edit. Uses `updateTaskFromDraftCommand` so `end` is
+   * recomputed, overtime dates are clipped to the new range, and rollup +
+   * successor cascade land in a single undo record — exactly like the drawer
+   * (plan §4.3 "日期/工期变化继续走 rollup 和级联路径").
+   */
+  const commitDuration = (taskId: string, raw: number) => {
+    const before = file.tasks.find((t) => t.id === taskId);
+    if (!before) return;
+    const duration = Math.max(0, Math.round(Number.isFinite(raw) ? raw : 0));
+    const end = endDateFromDuration(before.start, duration || 1, cal);
+    const overtimeDates = (before.overtimeDates ?? []).filter((d) => d >= before.start && d <= end);
+    dispatch(updateTaskFromDraftCommand(before, { ...before, duration, end, overtimeDates }));
+  };
+
+  /**
+   * Commit a progress edit. Clamps to [0,100] and goes through the draft
+   * command for a single undo record.
+   */
+  const commitProgress = (taskId: string, raw: number) => {
+    const before = file.tasks.find((t) => t.id === taskId);
+    if (!before) return;
+    const progress = Math.max(0, Math.min(100, Math.round(Number.isFinite(raw) ? raw : 0)));
+    if (progress === before.progress) return;
+    dispatch(updateTaskFromDraftCommand(before, { ...before, progress }));
+  };
+
+  /**
+   * Tab traversal: commit the current cell, then move to the next/previous
+   * editable field in the same row (name → duration → progress). Returns true
+   * if the focus moved (so the caller can avoid falling back to indent).
+   */
+  const tabCell = (taskId: string, field: EditableField, reverse: boolean, node: TreeNode) => {
+    const idx = EDITABLE_FIELDS.indexOf(field);
+    const step = reverse ? -1 : 1;
+    let next = idx + step;
+    while (next >= 0 && next < EDITABLE_FIELDS.length) {
+      const candidate = EDITABLE_FIELDS[next]!;
+      if (isFieldEditable(node, candidate)) {
+        editingCell.current = { taskId, field: candidate };
+        forceRerender();
+        return true;
+      }
+      next += step;
+    }
+    // Ran off the end: finish editing, let focus return to the row.
+    stopEditing();
+    return false;
+  };
 
   const indentOrOutdent = (taskId: string, outdent: boolean) => {
     const tasks = file.tasks;
@@ -291,7 +390,7 @@ export function TaskTable() {
     };
     dispatch(reorder);
     dispatch(setViewStateCommand({ selectedTaskId: id }));
-    renamingId.current = id;
+    editingCell.current = { taskId: id, field: 'name' };
     forceRerender();
   };
 
@@ -456,7 +555,8 @@ export function TaskTable() {
             {rows.map((node, i) => {
               const y = i * ROW_HEIGHT;
               const selected = file.viewState.selectedTaskId === node.task.id;
-              const isRenaming = renamingId.current === node.task.id;
+              const activeField =
+                editingCell.current?.taskId === node.task.id ? editingCell.current.field : null;
               const isDropHere = dropTarget?.taskId === node.task.id && !dropTarget.invalid;
               const isDragged = draggedId === node.task.id;
               const invalidHere = dropTarget?.taskId === node.task.id && dropTarget.invalid;
@@ -474,8 +574,18 @@ export function TaskTable() {
                   onDragEnd={onDragEnd}
                   data-task-id={node.task.id}
                   onClick={() => select(node.task.id)}
-                  onDoubleClick={() => {
+                  onDoubleClick={(e) => {
                     select(node.task.id);
+                    // Double-clicking an editable data cell enters inline edit
+                    // (plan §4.3); double-clicking anywhere else (WBS, effort,
+                    // padding) opens the drawer.
+                    const field = (e.target as HTMLElement)
+                      .closest('[data-field]')
+                      ?.getAttribute('data-field') as EditableField | null;
+                    if (field && EDITABLE_FIELDS.includes(field) && isFieldEditable(node, field)) {
+                      startEditing(node.task.id, field);
+                      return;
+                    }
                     openDrawer();
                   }}
                   onKeyDown={(e) => onKeyDown(e, node)}
@@ -484,10 +594,15 @@ export function TaskTable() {
                     select(node.task.id);
                     openContextMenu(node.task.id, e.clientX, e.clientY);
                   }}
-                  onBlur={() => {
-                    if (isRenaming) {
-                      renamingId.current = null;
-                      forceRerender();
+                  onBlur={(e) => {
+                    // Only stop editing when focus actually leaves this row.
+                    // Without the relatedTarget check, focusing the inline-edit
+                    // input (a child) would fire focusout on the row and
+                    // immediately cancel the edit we just opened.
+                    const next = e.relatedTarget as Node | null;
+                    if (next && e.currentTarget.contains(next)) return;
+                    if (activeField) {
+                      stopEditing();
                     }
                   }}
                   style={{
@@ -524,6 +639,7 @@ export function TaskTable() {
                       />
                     )}
                   <div
+                    data-field="wbs"
                     className="group/cell flex items-center overflow-hidden border-r border-border px-2 text-fg-muted"
                     style={{ paddingLeft: 8 + node.depth * 16 }}
                   >
@@ -554,31 +670,39 @@ export function TaskTable() {
                     {node.wbsNumber}
                   </div>
                   <div
+                    data-field="name"
                     className={cn(
                       'min-w-0 truncate border-r border-border px-2 font-medium',
                       node.children.length > 0 && 'font-semibold',
                     )}
                   >
                     {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
-                    {isRenaming ? (
+                    {activeField === 'name' ? (
                       <input
                         autoFocus
                         defaultValue={node.task.name}
+                        // Commit-on-blur matches the original F2 behaviour. The
+                        // guard avoids a double-dispatch when Enter/Tab already
+                        // committed: those handlers call stopEditing() first,
+                        // which nulls editingCell before blur fires.
                         onBlur={(e) => {
-                          dispatch(updateTaskCommand(node.task.id, { name: e.target.value }));
-                          renamingId.current = null;
+                          if (editingCell.current?.taskId !== node.task.id) {
+                            commitName(node.task.id, e.target.value);
+                            stopEditing();
+                          }
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === 'Escape') {
-                            if (e.key === 'Enter') {
-                              dispatch(
-                                updateTaskCommand(node.task.id, {
-                                  name: (e.target as HTMLInputElement).value,
-                                }),
-                              );
-                            }
-                            renamingId.current = null;
-                            forceRerender();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitName(node.task.id, (e.target as HTMLInputElement).value);
+                            stopEditing();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            stopEditing();
+                          } else if (e.key === 'Tab') {
+                            e.preventDefault();
+                            commitName(node.task.id, (e.target as HTMLInputElement).value);
+                            tabCell(node.task.id, 'name', e.shiftKey, node);
                           }
                         }}
                         className="w-full bg-transparent outline-none"
@@ -587,10 +711,62 @@ export function TaskTable() {
                       node.task.name || t('table.placeholderName')
                     )}
                   </div>
-                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
-                    {node.task.isMilestone ? '—' : `${node.task.duration}d`}
+                  <div
+                    data-field="duration"
+                    title={
+                      node.children.length > 0
+                        ? t('table.cellReadOnlySummary')
+                        : node.task.isMilestone
+                          ? t('table.cellReadOnlyMilestone')
+                          : undefined
+                    }
+                    className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                  >
+                    {activeField === 'duration' && isFieldEditable(node, 'duration') ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        defaultValue={node.task.duration}
+                        aria-label={t('table.editDurationAria')}
+                        onBlur={(e) => {
+                          if (editingCell.current?.taskId !== node.task.id) {
+                            commitDuration(node.task.id, Number(e.target.value));
+                            stopEditing();
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitDuration(
+                              node.task.id,
+                              Number((e.target as HTMLInputElement).value),
+                            );
+                            stopEditing();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            stopEditing();
+                          } else if (e.key === 'Tab') {
+                            e.preventDefault();
+                            commitDuration(
+                              node.task.id,
+                              Number((e.target as HTMLInputElement).value),
+                            );
+                            tabCell(node.task.id, 'duration', e.shiftKey, node);
+                          }
+                        }}
+                        className="w-full bg-transparent text-right outline-none"
+                      />
+                    ) : node.task.isMilestone ? (
+                      '—'
+                    ) : (
+                      `${node.task.duration}d`
+                    )}
                   </div>
-                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
+                  <div
+                    data-field="effort"
+                    className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                  >
                     {(() => {
                       const pd =
                         node.children.length > 0
@@ -599,8 +775,50 @@ export function TaskTable() {
                       return pd && pd > 0 ? `${pd}` : '—';
                     })()}
                   </div>
-                  <div className="border-r border-border px-2 text-right tabular-nums text-fg-muted">
-                    {node.task.progress}%
+                  <div
+                    data-field="progress"
+                    title={node.children.length > 0 ? t('table.cellReadOnlySummary') : undefined}
+                    className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                  >
+                    {activeField === 'progress' && isFieldEditable(node, 'progress') ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        max={100}
+                        defaultValue={node.task.progress}
+                        aria-label={t('table.editProgressAria')}
+                        onBlur={(e) => {
+                          if (editingCell.current?.taskId !== node.task.id) {
+                            commitProgress(node.task.id, Number(e.target.value));
+                            stopEditing();
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitProgress(
+                              node.task.id,
+                              Number((e.target as HTMLInputElement).value),
+                            );
+                            stopEditing();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            stopEditing();
+                          } else if (e.key === 'Tab') {
+                            e.preventDefault();
+                            commitProgress(
+                              node.task.id,
+                              Number((e.target as HTMLInputElement).value),
+                            );
+                            tabCell(node.task.id, 'progress', e.shiftKey, node);
+                          }
+                        }}
+                        className="w-full bg-transparent text-right outline-none"
+                      />
+                    ) : (
+                      `${node.task.progress}%`
+                    )}
                   </div>
                   {hasBaseline && baselineCtx ? (
                     <BaselineDeviationCell

@@ -49,9 +49,11 @@ test('ganttly can open and edit its own roadmap.json', async ({ page }) => {
   await expect(page.getByText('M0 — 工程地基')).toBeVisible({ timeout: 5000 });
   await expect(page.getByText('◆v0.1.0 发布')).toBeVisible();
 
-  // Verify a task can be edited: open the drawer and change the name.
+  // Verify a task can be edited: open the drawer and change the name. Open via
+  // right-click → "编辑" (double-clicking a data cell now edits inline — PR 8 §4.3).
   const m1Row = page.locator('[role="row"]', { hasText: 'M1 —' }).first();
-  await m1Row.dblclick();
+  await m1Row.click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 5000 });
 
   // The drawer's name field is the visible text input (not the hidden file inputs).

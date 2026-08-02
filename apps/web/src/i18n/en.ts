@@ -103,6 +103,21 @@ export const en = {
     copySuffix: 'copy',
     dragHint: 'Drag to reorder or reparent',
     unassigned: 'Unassigned',
+    cellReadOnlySummary:
+      'Summary task duration/progress is rolled up from children and cannot be edited directly',
+    cellReadOnlyMilestone: 'Milestones have no duration',
+    editDurationAria: 'Edit duration',
+    editProgressAria: 'Edit progress',
+  },
+  shortcuts: {
+    /** Shortcut hint composed with modKeyLabel() — e.g. "⌘Z" / "Ctrl+Z". */
+    undo: 'Undo',
+    redo: 'Redo',
+    save: 'Save',
+    delete: 'Delete',
+    copy: 'Copy',
+    cut: 'Cut',
+    paste: 'Paste',
   },
   canvas: {
     ariaLabel: 'Gantt chart task area; use arrow keys, Enter, Delete and Escape to operate',
