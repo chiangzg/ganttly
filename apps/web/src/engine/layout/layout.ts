@@ -41,6 +41,14 @@ export const DAYS_PER_COLUMN: Record<ZoomLevel, number> = {
   year: 30, // 12 columns per year, each ~30 days; we align by year/month below
 };
 
+/**
+ * The four discrete zoom levels in order from FINEST (`day`) to COARSEST
+ * (`year`). Index increases as you zoom OUT. Shared by the toolbar buttons,
+ * the canvas Ctrl+wheel handler, fit-project-range and zoom-around so all
+ * zoom entry points agree on ordering (plan §4.5).
+ */
+export const ZOOM_ORDER: ZoomLevel[] = ['day', 'week', 'month', 'year'];
+
 /** Returns the pixel width of one day at this zoom level. */
 export function pixelsPerDay(zoom: ZoomLevel): number {
   return COLUMN_WIDTH[zoom] / DAYS_PER_COLUMN[zoom];

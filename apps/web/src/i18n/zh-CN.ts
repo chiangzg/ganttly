@@ -18,6 +18,8 @@ export const zhCN = {
     zoomWeek: '周视图',
     zoomMonth: '月视图',
     zoomYear: '年视图',
+    fitProjectRange: '适应范围',
+    fitProjectRangeHint: '缩放并定位到全部任务的起止范围',
     criticalPath: '关键路径',
     showCriticalPath: '显示关键路径',
     hideCriticalPath: '隐藏关键路径',
@@ -39,6 +41,17 @@ export const zhCN = {
     baselineWithName: '基线：{{name}}',
     baselineCompare: '基线对比',
     baselineEmptyHint: '至少添加一个任务后才能创建基线',
+  },
+  search: {
+    placeholder: '搜索任务名或 WBS…',
+    clear: '清除搜索',
+  },
+  filter: {
+    unassigned: '未分配',
+    criticalPath: '关键路径',
+    overdue: '延期',
+    none: '全部',
+    toggleLabel: '筛选：{{label}}',
   },
   baseline: {
     saveTitle: '保存计划基线',

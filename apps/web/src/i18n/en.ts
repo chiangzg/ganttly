@@ -19,6 +19,8 @@ export const en = {
     zoomWeek: 'Week',
     zoomMonth: 'Month',
     zoomYear: 'Year',
+    fitProjectRange: 'Fit range',
+    fitProjectRangeHint: 'Zoom and scroll to frame every task',
     criticalPath: 'Critical path',
     showCriticalPath: 'Show critical path',
     hideCriticalPath: 'Hide critical path',
@@ -40,6 +42,17 @@ export const en = {
     baselineWithName: 'Baseline: {{name}}',
     baselineCompare: 'Baseline comparison',
     baselineEmptyHint: 'Add at least one task before creating a baseline',
+  },
+  search: {
+    placeholder: 'Search task name or WBS…',
+    clear: 'Clear search',
+  },
+  filter: {
+    unassigned: 'Unassigned',
+    criticalPath: 'Critical path',
+    overdue: 'Overdue',
+    none: 'All',
+    toggleLabel: 'Filter: {{label}}',
   },
   baseline: {
     saveTitle: 'Save plan baseline',

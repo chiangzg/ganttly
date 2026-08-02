@@ -20,6 +20,7 @@
  */
 import { create } from 'zustand';
 import { clampDrawerWidth, loadDrawerWidth, saveDrawerWidth } from '@/lib/drawerWidthPrefs';
+import type { TaskFilter } from '@/lib/taskFilter';
 
 // Re-export the width bounds so callers can import them from the store path
 // (keeps a single import site for ephemeral UI state + its constants).
@@ -86,6 +87,19 @@ interface ViewStoreState {
   activeBaselineId: string | null;
   setActiveBaselineId(id: string | null): void;
 
+  /**
+   * Task-view search & filter (plan §4.4).
+   *
+   * Both are EPHEMERAL UI state (plan §9.1): not persisted to the project
+   * file, not in the undo stack — they only affect WHICH tasks are displayed,
+   * never the task data itself. A page refresh or project switch clears them.
+   * Selecting a result calls `revealTask()` to scroll/expand.
+   */
+  searchQuery: string;
+  setSearchQuery(q: string): void;
+  taskFilter: TaskFilter;
+  setTaskFilter(filter: TaskFilter): void;
+
   resetForProjectSwitch(): void;
 }
 
@@ -131,6 +145,13 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   activeBaselineId: null,
   setActiveBaselineId: (id) => set({ activeBaselineId: id }),
 
+  // Search/filter: empty query + 'none' filter = show everything (the default
+  // pre-§4.4 behaviour). Direct setState — navigation/UI, not undoable.
+  searchQuery: '',
+  setSearchQuery: (q) => set({ searchQuery: q }),
+  taskFilter: 'none',
+  setTaskFilter: (filter) => set({ taskFilter: filter }),
+
   resetForProjectSwitch: () =>
     set({
       drawer: 'closed',
@@ -140,5 +161,8 @@ export const useViewStore = create<ViewStoreState>((set) => ({
       expandedResourceIds: new Set<string>(),
       selectedTaskIdInResource: null,
       activeBaselineId: null,
+      // §4.4: clear search/filter so a switched-to project starts unfiltered.
+      searchQuery: '',
+      taskFilter: 'none',
     }),
 }));

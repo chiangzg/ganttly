@@ -41,9 +41,15 @@ test('task survives a page reload (IndexedDB persistence)', async ({ page }) => 
   // editor-interaction plan §2.2: only Save commits; Cancel would discard).
   const marker = `PERSIST-MARKER-${Date.now()}`;
   await page.getByRole('button', { name: '新建任务' }).click();
-  await page.locator('input[type="text"], input:not([type])').first().waitFor({ state: 'visible' });
-  await page.locator('input[type="text"], input:not([type])').first().fill(marker);
-  await page.locator('aside').getByRole('button', { name: '保存' }).click();
+  // The §4.4 task-table search bar also renders an input[type="text"]; scope
+  // to the drawer (aside) so we target the task-name field, not the search box.
+  const drawer = page.locator('aside');
+  await drawer
+    .locator('input[type="text"], input:not([type])')
+    .first()
+    .waitFor({ state: 'visible' });
+  await drawer.locator('input[type="text"], input:not([type])').first().fill(marker);
+  await drawer.getByRole('button', { name: '保存' }).click();
 
   // Wait for autosave (500ms debounce + IO).
   await page.waitForTimeout(1500);

@@ -17,13 +17,14 @@ import { todayISO } from '@/engine/layout';
 import { dateToPixel } from '@/engine/layout';
 import { originDateFor } from '@/engine/scene';
 import { createDefaultTask } from '@ganttly/schema';
-import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
 import { ExportMenu } from './ExportMenu';
 import { BaselineControl } from './BaselineControl';
 import { findActiveBaseline } from '@/lib/baseline';
 import { revealTask } from '@/lib/revealTask';
+import { fitProjectRange } from '@/lib/fitProjectRange';
+import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
 import { nanoid } from 'nanoid';
 import { addTaskCommand } from '@/store/useProjectStore';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -31,6 +32,7 @@ import {
   CalendarDays,
   Check,
   CircleAlert,
+  Expand,
   GitBranch,
   ListTree,
   LoaderCircle,
@@ -45,8 +47,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { modKeyLabel } from '@/lib/platform';
-
-const ZOOM_ORDER: ZoomLevel[] = ['day', 'week', 'month', 'year'];
 
 export function Toolbar() {
   const { t } = useTranslation();
@@ -93,17 +93,33 @@ export function Toolbar() {
     });
   };
 
-  const zoomIn = () => {
-    const idx = ZOOM_ORDER.indexOf(file.viewState.zoom);
-    const next = ZOOM_ORDER[Math.max(0, idx - 1)]!;
-    dispatch(setViewStateCommand({ zoom: next }));
+  // Zoom in/out anchored on the VIEWPORT CENTER (plan §4.5). The date under the
+  // centre stays at the centre after the zoom change — no drift. These are
+  // NAVIGATION (direct setState), not undoable: a zoom step shouldn't pollute
+  // the undo stack, consistent with Today/revealTask/fit (plan §6.4).
+  const zoomAroundCenter = (direction: -1 | 1) => {
+    const activeBaseline = findActiveBaseline(
+      file.baselines,
+      useViewStore.getState().activeBaselineId,
+    );
+    const origin = originDateFor(file, { activeBaseline });
+    const current = file.viewState.zoom;
+    const next = nextZoomLevel(current, direction);
+    if (next === current) return;
+    const chartEl = document.querySelector('[data-gantt-chart]') as HTMLElement | null;
+    const viewportWidth = chartEl ? chartEl.clientWidth : 800;
+    const centerX = file.viewState.scrollLeft + viewportWidth / 2;
+    const result = computeZoomAround(origin, current, next, centerX, viewportWidth / 2);
+    useProjectStore.setState({
+      file: {
+        ...file,
+        viewState: { ...file.viewState, zoom: result.zoom, scrollLeft: result.scrollLeft },
+      },
+    });
   };
 
-  const zoomOut = () => {
-    const idx = ZOOM_ORDER.indexOf(file.viewState.zoom);
-    const next = ZOOM_ORDER[Math.min(ZOOM_ORDER.length - 1, idx + 1)]!;
-    dispatch(setViewStateCommand({ zoom: next }));
-  };
+  const zoomIn = () => zoomAroundCenter(-1);
+  const zoomOut = () => zoomAroundCenter(1);
 
   const toggleCriticalPath = () => {
     dispatch(setViewStateCommand({ showCriticalPath: !file.viewState.showCriticalPath }));
@@ -144,6 +160,14 @@ export function Toolbar() {
         <ToolbarButton onClick={jumpToToday} title={t('toolbar.today')}>
           <CalendarDays size={15} />
           <span>{t('toolbar.today')}</span>
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={fitProjectRange}
+          title={t('toolbar.fitProjectRangeHint')}
+          aria-label={t('toolbar.fitProjectRange')}
+        >
+          <Expand size={15} />
+          <span className="hidden xl:inline">{t('toolbar.fitProjectRange')}</span>
         </ToolbarButton>
         <div className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex" aria-label="时间缩放">
           <ToolbarButton

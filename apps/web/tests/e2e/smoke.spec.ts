@@ -13,10 +13,13 @@ test('app boots and shows the toolbar', async ({ page }) => {
   });
 
   await page.goto('/');
-  // Toolbar buttons render.
-  await expect(page.getByRole('button', { name: '今天' })).toBeVisible();
+  // Toolbar buttons render. Scoped to [data-editor-toolbar] so the assertion
+  // targets the toolbar's critical-path toggle, not the §4.4 task-table filter
+  // toggle of the same name.
+  const toolbar = page.locator('[data-editor-toolbar]');
+  await expect(toolbar.getByRole('button', { name: '今天' })).toBeVisible();
   await expect(
-    page.getByRole('button', { name: '关键路径' }).or(page.getByText('显示关键路径')),
+    toolbar.getByRole('button', { name: '关键路径' }).or(toolbar.getByText('显示关键路径')),
   ).toBeVisible();
 
   // No console errors.

@@ -11,6 +11,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Search, X } from 'lucide-react';
 import {
   useProjectStore,
   setViewStateCommand,
@@ -26,6 +27,7 @@ import { useViewStore } from '@/store/useViewStore';
 import { buildTree, flattenVisible, type TreeNode } from '@/engine/scene';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
 import { cn } from '@/lib/cn';
+import { computeFilteredRows, isAnyFilterActive } from '@/lib/taskFilter';
 import { endDateFromDuration } from '@/lib/calendar';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
 import { computeTaskPersonDays } from '@/lib/cost';
@@ -64,6 +66,46 @@ const GRID_TEMPLATE_WITH_BASELINE = '44px minmax(0, 1fr) 72px 56px 56px 70px';
 type EditableField = 'name' | 'duration' | 'progress';
 const EDITABLE_FIELDS: readonly EditableField[] = ['name', 'duration', 'progress'] as const;
 
+/**
+ * Compact single-line filter toggle for the §4.4 search bar. Renders as a small
+ * pill that shows a pressed state when active. Mutually exclusive with the
+ * other filters (selecting one clears the rest — handled by the parent).
+ *
+ * The accessible name is prefixed with "筛选" so it is distinct from same-named
+ * toolbar controls (e.g. the toolbar "关键路径" critical-path toggle) — without
+ * this, `getByRole('button', { name: '关键路径' })` would match both.
+ */
+function FilterToggle({
+  active,
+  onClick,
+  label,
+  ariaLabel,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={ariaLabel}
+      title={label}
+      className={cn(
+        'h-7 shrink-0 whitespace-nowrap rounded-md px-1.5 text-[11px] font-medium outline-none transition',
+        'focus-visible:ring-2 focus-visible:ring-primary/35',
+        active
+          ? 'bg-primary/10 text-primary hover:bg-primary/15'
+          : 'text-fg-muted hover:bg-bg hover:text-fg',
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function TaskTable() {
   const { t } = useTranslation();
   const file = useProjectStore((s) => s.file);
@@ -71,6 +113,11 @@ export function TaskTable() {
   const openDrawer = useViewStore((s) => s.openDrawer);
   const openContextMenu = useViewStore((s) => s.openContextMenu);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
+  // §4.4 search/filter — ephemeral view state, never in the undo stack.
+  const searchQuery = useViewStore((s) => s.searchQuery);
+  const taskFilter = useViewStore((s) => s.taskFilter);
+  const setSearchQuery = useViewStore((s) => s.setSearchQuery);
+  const setTaskFilter = useViewStore((s) => s.setTaskFilter);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Which cell is in inline-edit mode (plan §4.3). `name` is the existing F2
   // rename; `duration`/`progress` are new. A ref + forceRerender keeps the
@@ -95,9 +142,16 @@ export function TaskTable() {
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   const rows = useMemo(() => {
+    // §4.4: when a search/filter is active, project the rows through the filter
+    // (matched leaves + ancestor context, collapsed ancestors force-expanded).
+    // When nothing is active, fall back to the plain flattenVisible path so
+    // behaviour is identical to pre-§4.4 (zero regression).
+    if (isAnyFilterActive(searchQuery, taskFilter)) {
+      return computeFilteredRows(file, searchQuery, taskFilter).rows;
+    }
     const tree = buildTree(file.tasks);
     return flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
-  }, [file.tasks, file.viewState.collapsedTaskIds]);
+  }, [file, searchQuery, taskFilter]);
 
   // Person-days rollup map (summary tasks use rolled-up children sum, G13).
   const effortMap = useMemo(
@@ -539,6 +593,55 @@ export function TaskTable() {
         className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
         style={{ width: tableWidth }}
       >
+        {/* §4.4 search & filter bar — compact, above the table header. Search
+            matches name/WBS; the three toggles are mutually-exclusive quick
+            filters (unassigned / critical path / overdue). All ephemeral
+            (useViewStore), never in the undo stack. */}
+        <div data-task-search className="flex items-center gap-1 border-b border-border px-2 py-1">
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <Search
+              size={13}
+              className="pointer-events-none absolute left-1.5 text-fg-muted"
+              aria-hidden
+            />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('search.placeholder')}
+              aria-label={t('search.placeholder')}
+              className="h-7 w-full rounded-md border border-border bg-bg pl-6 pr-5 text-xs text-fg outline-none placeholder:text-fg-muted focus-visible:border-primary"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label={t('search.clear')}
+                className="absolute right-1 flex h-5 w-5 items-center justify-center rounded text-fg-muted hover:bg-bg hover:text-fg"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          <FilterToggle
+            active={taskFilter === 'unassigned'}
+            onClick={() => setTaskFilter(taskFilter === 'unassigned' ? 'none' : 'unassigned')}
+            label={t('filter.unassigned')}
+            ariaLabel={t('filter.toggleLabel', { label: t('filter.unassigned') })}
+          />
+          <FilterToggle
+            active={taskFilter === 'criticalPath'}
+            onClick={() => setTaskFilter(taskFilter === 'criticalPath' ? 'none' : 'criticalPath')}
+            label={t('filter.criticalPath')}
+            ariaLabel={t('filter.toggleLabel', { label: t('filter.criticalPath') })}
+          />
+          <FilterToggle
+            active={taskFilter === 'overdue'}
+            onClick={() => setTaskFilter(taskFilter === 'overdue' ? 'none' : 'overdue')}
+            label={t('filter.overdue')}
+            ariaLabel={t('filter.toggleLabel', { label: t('filter.overdue') })}
+          />
+        </div>
         <div
           className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
           style={{ height: HEADER_HEIGHT, gridTemplateColumns: gridTemplate }}

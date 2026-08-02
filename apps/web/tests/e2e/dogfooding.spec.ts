@@ -56,8 +56,11 @@ test('ganttly can open and edit its own roadmap.json', async ({ page }) => {
   await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 5000 });
 
-  // The drawer's name field is the visible text input (not the hidden file inputs).
-  const nameField = page.locator('input[type="text"], input:not([type])').first();
+  // The drawer's name field is the visible text input (not the hidden file
+  // inputs). Scope to the drawer (aside): the §4.4 task-table search bar also
+  // renders an input[type="text"] and would otherwise be matched by .first().
+  const drawer = page.locator('aside');
+  const nameField = drawer.locator('input[type="text"], input:not([type])').first();
   await nameField.waitFor({ state: 'visible' });
   await nameField.fill('M1 — 数据 + 引擎核心(已完成)');
 

@@ -43,6 +43,7 @@ import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
 import { findActiveBaseline } from '@/lib/baseline';
+import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
 import { cn } from '@/lib/cn';
 import { isEditableTarget } from '@/lib/shortcutTarget';
 import { useHolidayHover } from '@/components/useHolidayHover';
@@ -50,7 +51,7 @@ import { useBaselineHover } from '@/components/useBaselineHover';
 import { useTaskHover } from '@/components/useTaskHover';
 import { useTranslation } from 'react-i18next';
 import { DeleteTaskConfirm } from '@/components/DeleteTaskConfirm';
-import type { ZoomLevel, DependencyType, Task, Baseline } from '@ganttly/schema';
+import type { DependencyType, Task, Baseline } from '@ganttly/schema';
 
 export function GanttCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +66,10 @@ export function GanttCanvas() {
   // ScrollShim see the same active snapshot.
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
+  // §4.4: the canvas mirrors the task table's search/filter so the two panes
+  // stay in sync (matched rows + force-expanded ancestors appear on both sides).
+  const searchQuery = useViewStore((s) => s.searchQuery);
+  const taskFilter = useViewStore((s) => s.taskFilter);
   const [, forceRerender] = useState(0);
   const dragRef = useRef<DragState>({ kind: 'idle' });
   const hoverConnectRef = useRef<string | null>(null);
@@ -180,13 +185,27 @@ export function GanttCanvas() {
     const handler = (e: WheelEvent) => {
       const f = fileRef.current;
       if (e.ctrlKey || e.metaKey) {
-        // Pinch-zoom on trackpad fires ctrlKey+wheel; let the React onWheel
-        // path handle discrete zoom steps.
+        // Ctrl/Cmd+wheel (and trackpad pinch) zooms. Anchor on the DATE UNDER
+        // THE CURSOR so that date stays at the same screen X after the zoom
+        // (plan §4.5) — previously zoom changed the level but left scrollLeft
+        // alone, so the cursor date drifted. This is NAVIGATION (direct
+        // setState, not dispatch) so each wheel tick doesn't push a "视图变更"
+        // onto the undo stack (plan §6.4).
         e.preventDefault();
-        const order: ZoomLevel[] = ['day', 'week', 'month', 'year'];
-        const idx = order.indexOf(f.viewState.zoom);
-        const next = order[Math.max(0, Math.min(order.length - 1, idx + (e.deltaY > 0 ? 1 : -1)))];
-        if (next) dispatch(setViewStateCommand({ zoom: next }));
+        const current = f.viewState.zoom;
+        const next = nextZoomLevel(current, e.deltaY > 0 ? 1 : -1);
+        if (next === current) return;
+        const ab = findActiveBaseline(f.baselines, useViewStore.getState().activeBaselineId);
+        const origin = originDateFor(f, { activeBaseline: ab });
+        const offsetX = e.offsetX; // cursor X relative to the canvas element
+        const anchorChartX = f.viewState.scrollLeft + offsetX;
+        const result = computeZoomAround(origin, current, next, anchorChartX, offsetX);
+        useProjectStore.setState({
+          file: {
+            ...f,
+            viewState: { ...f.viewState, zoom: result.zoom, scrollLeft: result.scrollLeft },
+          },
+        });
         return;
       }
       e.preventDefault();
@@ -235,12 +254,14 @@ export function GanttCanvas() {
       viewportHeight: size.height,
       today: todayISO(),
       activeBaseline,
+      searchQuery,
+      taskFilter,
     });
     sceneRef.current = scene;
     maxScrollTopRef.current = Math.max(0, scene.totalRows * ROW_HEIGHT - size.height);
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
-  }, [file, size, activeBaseline]);
+  }, [file, size, activeBaseline, searchQuery, taskFilter]);
 
   // ----- Pointer interaction -----
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {

@@ -21,6 +21,7 @@ import { checkConstraintConflicts } from '@/lib/schedule';
 import { resolveCalendar, effectiveTaskDays } from '@/lib/calendar';
 import { compareTaskToBaseline, buildEffectiveValues } from '@/lib/baseline';
 import { resolveAssignees, computeAssigneeSummary } from '@/lib/assigneeSummary';
+import { computeFilteredRows, isAnyFilterActive, type TaskFilter } from '@/lib/taskFilter';
 
 export interface AssembleOptions {
   viewportWidth: number;
@@ -34,12 +35,28 @@ export interface AssembleOptions {
    * `null`/`undefined` to disable comparison entirely.
    */
   activeBaseline?: Baseline | null;
+  /**
+   * Task-view search/filter (plan §4.4). When a query or non-'none' filter is
+   * active, the scene rows mirror the task table: matched rows (plus their
+   * ancestor context) are shown, collapsed ancestors force-expanded. Both
+   * default to "inactive" so callers that don't pass them get the original
+   * flattenVisible path.
+   */
+  searchQuery?: string;
+  taskFilter?: TaskFilter;
 }
 
 export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   const tree = buildTree(file.tasks);
-  const collapsed = new Set(file.viewState.collapsedTaskIds);
-  const visible = flattenVisible(tree, collapsed);
+  // When a search/filter is active (plan §4.4), the scene must mirror the task
+  // table: matched rows + ancestor context, with collapsed ancestors
+  // force-expanded. Otherwise use the plain flattenVisible path so behaviour is
+  // identical to pre-§4.4 (zero regression).
+  const query = opts.searchQuery ?? '';
+  const filter = opts.taskFilter ?? 'none';
+  const visible = isAnyFilterActive(query, filter)
+    ? computeFilteredRows(file, query, filter).rows
+    : flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
 
   // Resolve the project's persisted calendar once for constraints and effort.
   const cal = resolveCalendar(file.calendar);
