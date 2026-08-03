@@ -37,6 +37,7 @@ function makeScene(rows: TaskRow[], scrollTop = 0, scrollLeft = 0): Scene {
     showCriticalPath: false,
     hasActiveBaseline: false,
     selectedTaskId: null,
+    selectedTaskIds: new Set<string>(),
   };
 }
 

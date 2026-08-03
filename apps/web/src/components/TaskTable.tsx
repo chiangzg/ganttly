@@ -11,7 +11,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { Search, X } from 'lucide-react';
+import { Plus, Search, X } from 'lucide-react';
 import {
   useProjectStore,
   setViewStateCommand,
@@ -23,6 +23,9 @@ import {
   pasteTaskCommand,
   type Command,
 } from '@/store/useProjectStore';
+import { computeSelectionOnPointerDown } from '@/lib/selection';
+import { createRootTask } from '@/lib/createTask';
+import { EmptyState } from './ui/EmptyState';
 import { useViewStore } from '@/store/useViewStore';
 import { buildTree, flattenVisible, type TreeNode } from '@/engine/scene';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
@@ -47,6 +50,7 @@ import { isEditableTarget } from '@/lib/shortcutTarget';
 import { nanoid } from 'nanoid';
 import type { Task, BaselineTask } from '@ganttly/schema';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
+import { BatchDeleteConfirm } from './BatchDeleteConfirm';
 
 const TABLE_WIDTH = 480;
 const TABLE_WIDTH_WITH_BASELINE = 552;
@@ -118,12 +122,32 @@ export function TaskTable() {
   const taskFilter = useViewStore((s) => s.taskFilter);
   const setSearchQuery = useViewStore((s) => s.setSearchQuery);
   const setTaskFilter = useViewStore((s) => s.setTaskFilter);
+  // §4.6 multi-select — ephemeral (plan §9.1: selection is NOT in the undo
+  // stack). Subscribed at row-render granularity so Cmd/Ctrl+Click and
+  // Shift+Click update highlights immediately.
+  const selectedTaskIds = useViewStore((s) => s.selectedTaskIds);
+  const anchorTaskId = useViewStore((s) => s.anchorTaskId);
+  const selectSingle = useViewStore((s) => s.selectSingle);
+  const clearSelection = useViewStore((s) => s.clearSelection);
+  // §4.6: the GanttCanvas has no confirm dialog of its own, so on canvas
+  // Delete-with-multi-select it bumps this counter; we open BatchDeleteConfirm.
+  const batchDeleteSignal = useViewStore((s) => s.batchDeleteSignal);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Which cell is in inline-edit mode (plan §4.3). `name` is the existing F2
   // rename; `duration`/`progress` are new. A ref + forceRerender keeps the
   // editing input uncontrolled, matching the original F2 pattern.
   const editingCell = useRef<{ taskId: string; field: EditableField } | null>(null);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+  // §4.6 batch-delete confirm — opened with the multi-select id list when the
+  // user presses Delete/Backspace while more than one task is selected.
+  const [batchDeleteIds, setBatchDeleteIds] = useState<string[] | null>(null);
+  // §4.6: react to the canvas's batch-delete signal by opening the confirm
+  // dialog for the current multi-selection. Skips the initial 0 (no request).
+  useEffect(() => {
+    if (batchDeleteSignal === 0) return;
+    const ids = [...useViewStore.getState().selectedTaskIds];
+    if (ids.length > 1) setBatchDeleteIds(ids);
+  }, [batchDeleteSignal]);
 
   // ---- Drag & drop reorder / reparent (plan §2.3) ----
   // Ephemeral UI state: never written to the store or the undo stack.
@@ -152,6 +176,12 @@ export function TaskTable() {
     const tree = buildTree(file.tasks);
     return flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
   }, [file, searchQuery, taskFilter]);
+
+  // §4.6: the visible row id sequence drives Shift+Click range selection. It
+  // must reflect the CURRENT rendered list (post-collapse, post-filter) so the
+  // range stays correct when rows are hidden (plan §4.6 验收 "多选在折叠、
+  // 筛选和滚动后保持一致").
+  const visibleRowIds = useMemo(() => rows.map((n) => n.task.id), [rows]);
 
   // Person-days rollup map (summary tasks use rolled-up children sum, G13).
   const effortMap = useMemo(
@@ -203,8 +233,30 @@ export function TaskTable() {
     });
   };
 
-  const select = (taskId: string) => {
-    dispatch(setViewStateCommand({ selectedTaskId: taskId }));
+  /**
+   * Handle a row pointer-down selection, honouring modifier keys (plan §4.6):
+   *   - plain click  → selectSingle
+   *   - Ctrl/Cmd     → toggleSelected
+   *   - Shift        → selectRange (anchor → clicked row, over visible rows)
+   * Writes go through useViewStore (ephemeral, never the undo stack — §9.1).
+   * The anchor is mirrored into file.viewState.selectedTaskId inside the store.
+   */
+  const select = (
+    taskId: string,
+    e?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  ) => {
+    if (!e) {
+      selectSingle(taskId);
+      return;
+    }
+    const cur = useViewStore.getState();
+    const next = computeSelectionOnPointerDown(
+      taskId,
+      { ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey },
+      { ids: cur.selectedTaskIds, anchor: cur.anchorTaskId },
+      visibleRowIds,
+    );
+    useViewStore.getState().setSelection(next);
   };
 
   const toggleCollapse = (taskId: string) => {
@@ -222,6 +274,23 @@ export function TaskTable() {
     // out of the input and mis-trigger task ops (plan §4.2 — "输入任务名称时
     // Delete 不误删任务").
     if (isEditableTarget(e.target)) return;
+
+    // §4.6: when multiple tasks are selected, Escape clears the whole set and
+    // Delete/Backspace opens the batch-delete confirm. Single-selection (the
+    // historical behaviour) falls through to the per-row handlers below.
+    const sel = useViewStore.getState();
+    if (sel.selectedTaskIds.size > 1) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        clearSelection();
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        setBatchDeleteIds([...sel.selectedTaskIds]);
+        return;
+      }
+    }
 
     // Clipboard (Ctrl/Cmd+C / X / V).
     if (e.ctrlKey || e.metaKey) {
@@ -266,7 +335,8 @@ export function TaskTable() {
 
     if (e.key === 'Escape') {
       e.preventDefault();
-      dispatch(setViewStateCommand({ selectedTaskId: null }));
+      // §4.6: selection lives in useViewStore now (ephemeral, not undoable).
+      clearSelection();
       return;
     }
 
@@ -443,7 +513,8 @@ export function TaskTable() {
       invert: (file) => ({ ...file, tasks: file.tasks.filter((x) => x.id !== id) }),
     };
     dispatch(reorder);
-    dispatch(setViewStateCommand({ selectedTaskId: id }));
+    // §4.6: select the freshly created sibling (ephemeral, not undoable).
+    selectSingle(id);
     editingCell.current = { taskId: id, field: 'name' };
     forceRerender();
   };
@@ -645,6 +716,19 @@ export function TaskTable() {
             label={t('filter.overdue')}
             ariaLabel={t('filter.toggleLabel', { label: t('filter.overdue') })}
           />
+          {/* §3.1: task creation primary entry lives NEAR the task list (not the
+              far toolbar). Uses the same shared helper as the zero-task empty
+              state, so every entry point behaves identically (§5.1). */}
+          <button
+            type="button"
+            onClick={() => createRootTask(t('table.placeholderName'))}
+            aria-label={t('table.addTask')}
+            title={t('table.addTask')}
+            className="flex h-7 shrink-0 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-white outline-none shadow-sm transition hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary/35"
+          >
+            <Plus size={13} strokeWidth={2.5} />
+            {t('table.addTask')}
+          </button>
         </div>
         <div
           className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
@@ -658,286 +742,330 @@ export function TaskTable() {
           {hasBaseline && <div className="px-2 py-1">{t('baseline.columnDeviation')}</div>}
         </div>
         <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
-          <div className="relative" style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}>
-            {rows.map((node, i) => {
-              const y = i * ROW_HEIGHT;
-              const selected = file.viewState.selectedTaskId === node.task.id;
-              const activeField =
-                editingCell.current?.taskId === node.task.id ? editingCell.current.field : null;
-              const isDropHere = dropTarget?.taskId === node.task.id && !dropTarget.invalid;
-              const isDragged = draggedId === node.task.id;
-              const invalidHere = dropTarget?.taskId === node.task.id && dropTarget.invalid;
-              const dropIndent = 8 + node.depth * 16;
-              return (
-                <div
-                  key={node.task.id}
-                  role="row"
-                  tabIndex={0}
-                  draggable
-                  onDragStart={(e) => onDragStart(e, node)}
-                  onDrop={(e) => onDrop(e, node)}
-                  onDragOver={(e) => onDragOver(e, node)}
-                  onDragLeave={onDragLeave}
-                  onDragEnd={onDragEnd}
-                  data-task-id={node.task.id}
-                  onClick={() => select(node.task.id)}
-                  onDoubleClick={(e) => {
-                    select(node.task.id);
-                    // Double-clicking an editable data cell enters inline edit
-                    // (plan §4.3); double-clicking anywhere else (WBS, effort,
-                    // padding) opens the drawer.
-                    const field = (e.target as HTMLElement)
-                      .closest('[data-field]')
-                      ?.getAttribute('data-field') as EditableField | null;
-                    if (field && EDITABLE_FIELDS.includes(field) && isFieldEditable(node, field)) {
-                      startEditing(node.task.id, field);
-                      return;
-                    }
-                    openDrawer();
-                  }}
-                  onKeyDown={(e) => onKeyDown(e, node)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    select(node.task.id);
-                    openContextMenu(node.task.id, e.clientX, e.clientY);
-                  }}
-                  onBlur={(e) => {
-                    // Only stop editing when focus actually leaves this row.
-                    // Without the relatedTarget check, focusing the inline-edit
-                    // input (a child) would fire focusout on the row and
-                    // immediately cancel the edit we just opened.
-                    const next = e.relatedTarget as Node | null;
-                    if (next && e.currentTarget.contains(next)) return;
-                    if (activeField) {
-                      stopEditing();
-                    }
-                  }}
-                  style={{
-                    height: ROW_HEIGHT,
-                    transform: `translateY(${y}px)`,
-                    gridTemplateColumns: gridTemplate,
-                  }}
-                  className={cn(
-                    'group/row absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
-                    'hover:bg-bg',
-                    selected && 'bg-bg ring-1 ring-inset ring-primary',
-                    node.children.length > 0 && 'bg-bg-elevated',
-                    isDragged && 'opacity-40',
-                    invalidHere && 'cursor-not-allowed',
-                    isDropHere &&
-                      dropTarget!.position === 'inside' &&
-                      'bg-primary/10 ring-1 ring-inset ring-primary',
-                  )}
-                >
-                  {/* Insertion line for before/after drops (plan §2.3). */}
-                  {isDropHere &&
-                    (dropTarget!.position === 'before' || dropTarget!.position === 'after') && (
-                      <div
-                        aria-hidden
-                        className="pointer-events-none absolute left-0 right-0 bg-primary"
-                        style={{
-                          height: 2,
-                          top: dropTarget!.position === 'before' ? -1 : ROW_HEIGHT - 1,
-                          // Indent the line to the target's depth so it reads as
-                          // a sibling insertion, not a root move.
-                          left: dropIndent,
-                          zIndex: 5,
-                        }}
-                      />
-                    )}
+          {/* §5.2 empty states. Distinguish TRUE zero tasks (source of truth:
+              file.tasks.length) from filter-induced emptiness (project has
+              tasks but the projection is empty) — only the former offers the
+              create-first-task CTA. */}
+          {file.tasks.length === 0 ? (
+            <EmptyState
+              icon={<Plus size={22} />}
+              title={t('empty.noTaskTitle')}
+              description={t('empty.noTaskHint')}
+              action={{
+                label: t('empty.noTaskCta'),
+                onClick: () => createRootTask(t('table.placeholderName')),
+              }}
+            />
+          ) : rows.length === 0 ? (
+            <EmptyState title={t('empty.filteredTitle')} description={t('empty.filteredHint')} />
+          ) : (
+            <div className="relative" style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}>
+              {rows.map((node, i) => {
+                const y = i * ROW_HEIGHT;
+                // §4.6: highlight every selected row; the anchor gets a stronger
+                // ring so the user can tell which task the drawer would edit.
+                const selected = selectedTaskIds.has(node.task.id);
+                const isAnchor = anchorTaskId === node.task.id;
+                const activeField =
+                  editingCell.current?.taskId === node.task.id ? editingCell.current.field : null;
+                const isDropHere = dropTarget?.taskId === node.task.id && !dropTarget.invalid;
+                const isDragged = draggedId === node.task.id;
+                const invalidHere = dropTarget?.taskId === node.task.id && dropTarget.invalid;
+                const dropIndent = 8 + node.depth * 16;
+                return (
                   <div
-                    data-field="wbs"
-                    className="group/cell flex items-center overflow-hidden border-r border-border px-2 text-fg-muted"
-                    style={{ paddingLeft: 8 + node.depth * 16 }}
-                  >
-                    {/* Drag handle — visible on row hover/focus, gives the row a
-                     * clear "grab here to reorder" affordance without colliding
-                     * with the row's click-to-select / double-click-to-edit
-                     * semantics (plan §2.3 step 6). */}
-                    <span
-                      aria-hidden
-                      title={t('table.dragHint')}
-                      className="mr-1 hidden shrink-0 cursor-grab text-[10px] leading-none text-fg-muted/50 hover:text-fg group-hover/row:inline-block active:cursor-grabbing"
-                    >
-                      ⠿
-                    </span>
-                    {node.children.length > 0 && (
-                      <button
-                        type="button"
-                        className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
-                        style={{ width: 14, height: 14 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleCollapse(node.task.id);
-                        }}
-                      >
-                        {file.viewState.collapsedTaskIds.includes(node.task.id) ? '▶' : '▼'}
-                      </button>
-                    )}
-                    {node.wbsNumber}
-                  </div>
-                  <div
-                    data-field="name"
+                    key={node.task.id}
+                    role="row"
+                    tabIndex={0}
+                    aria-selected={selected}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, node)}
+                    onDrop={(e) => onDrop(e, node)}
+                    onDragOver={(e) => onDragOver(e, node)}
+                    onDragLeave={onDragLeave}
+                    onDragEnd={onDragEnd}
+                    data-task-id={node.task.id}
+                    onClick={(e) => {
+                      // Modifier-clicks (Cmd/Ctrl/Shift) are pure selection
+                      // changes — never open the drawer or start inline edit, so
+                      // bail before the double-click handler can also fire.
+                      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                        select(node.task.id, e);
+                        return;
+                      }
+                      select(node.task.id, e);
+                    }}
+                    onDoubleClick={(e) => {
+                      // Modifier-double-click is ambiguous with multi-select; only
+                      // plain double-click edits/opens (matches historical UX).
+                      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+                      select(node.task.id);
+                      // Double-clicking an editable data cell enters inline edit
+                      // (plan §4.3); double-clicking anywhere else (WBS, effort,
+                      // padding) opens the drawer.
+                      const field = (e.target as HTMLElement)
+                        .closest('[data-field]')
+                        ?.getAttribute('data-field') as EditableField | null;
+                      if (
+                        field &&
+                        EDITABLE_FIELDS.includes(field) &&
+                        isFieldEditable(node, field)
+                      ) {
+                        startEditing(node.task.id, field);
+                        return;
+                      }
+                      openDrawer();
+                    }}
+                    onKeyDown={(e) => onKeyDown(e, node)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      // Right-click always focuses a single task (the menu is
+                      // single-task today) — plain-select the clicked row first.
+                      selectSingle(node.task.id);
+                      openContextMenu(node.task.id, e.clientX, e.clientY);
+                    }}
+                    onBlur={(e) => {
+                      // Only stop editing when focus actually leaves this row.
+                      // Without the relatedTarget check, focusing the inline-edit
+                      // input (a child) would fire focusout on the row and
+                      // immediately cancel the edit we just opened.
+                      const next = e.relatedTarget as Node | null;
+                      if (next && e.currentTarget.contains(next)) return;
+                      if (activeField) {
+                        stopEditing();
+                      }
+                    }}
+                    style={{
+                      height: ROW_HEIGHT,
+                      transform: `translateY(${y}px)`,
+                      gridTemplateColumns: gridTemplate,
+                    }}
                     className={cn(
-                      'min-w-0 truncate border-r border-border px-2 font-medium',
-                      node.children.length > 0 && 'font-semibold',
+                      'group/row absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
+                      'hover:bg-bg',
+                      // §4.6: every selected row gets a bg + inset ring; the
+                      // anchor (primary selection) gets a stronger 2px ring so it
+                      // stands out within a multi-selection.
+                      selected && !isAnchor && 'bg-bg ring-1 ring-inset ring-primary/60',
+                      isAnchor && 'bg-bg ring-2 ring-inset ring-primary',
+                      node.children.length > 0 && !selected && 'bg-bg-elevated',
+                      isDragged && 'opacity-40',
+                      invalidHere && 'cursor-not-allowed',
+                      isDropHere &&
+                        dropTarget!.position === 'inside' &&
+                        'bg-primary/10 ring-1 ring-inset ring-primary',
                     )}
                   >
-                    {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
-                    {activeField === 'name' ? (
-                      <input
-                        autoFocus
-                        defaultValue={node.task.name}
-                        // Commit-on-blur matches the original F2 behaviour. The
-                        // guard avoids a double-dispatch when Enter/Tab already
-                        // committed: those handlers call stopEditing() first,
-                        // which nulls editingCell before blur fires.
-                        onBlur={(e) => {
-                          if (editingCell.current?.taskId !== node.task.id) {
-                            commitName(node.task.id, e.target.value);
-                            stopEditing();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            commitName(node.task.id, (e.target as HTMLInputElement).value);
-                            stopEditing();
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault();
-                            stopEditing();
-                          } else if (e.key === 'Tab') {
-                            e.preventDefault();
-                            commitName(node.task.id, (e.target as HTMLInputElement).value);
-                            tabCell(node.task.id, 'name', e.shiftKey, node);
-                          }
-                        }}
-                        className="w-full bg-transparent outline-none"
-                      />
-                    ) : (
-                      node.task.name || t('table.placeholderName')
-                    )}
-                  </div>
-                  <div
-                    data-field="duration"
-                    title={
-                      node.children.length > 0
-                        ? t('table.cellReadOnlySummary')
-                        : node.task.isMilestone
-                          ? t('table.cellReadOnlyMilestone')
-                          : undefined
-                    }
-                    className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
-                  >
-                    {activeField === 'duration' && isFieldEditable(node, 'duration') ? (
-                      <input
-                        autoFocus
-                        type="number"
-                        min={0}
-                        defaultValue={node.task.duration}
-                        aria-label={t('table.editDurationAria')}
-                        onBlur={(e) => {
-                          if (editingCell.current?.taskId !== node.task.id) {
-                            commitDuration(node.task.id, Number(e.target.value));
-                            stopEditing();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            commitDuration(
-                              node.task.id,
-                              Number((e.target as HTMLInputElement).value),
-                            );
-                            stopEditing();
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault();
-                            stopEditing();
-                          } else if (e.key === 'Tab') {
-                            e.preventDefault();
-                            commitDuration(
-                              node.task.id,
-                              Number((e.target as HTMLInputElement).value),
-                            );
-                            tabCell(node.task.id, 'duration', e.shiftKey, node);
-                          }
-                        }}
-                        className="w-full bg-transparent text-right outline-none"
-                      />
-                    ) : node.task.isMilestone ? (
-                      '—'
-                    ) : (
-                      `${node.task.duration}d`
-                    )}
-                  </div>
-                  <div
-                    data-field="effort"
-                    className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
-                  >
-                    {(() => {
-                      const pd =
+                    {/* Insertion line for before/after drops (plan §2.3). */}
+                    {isDropHere &&
+                      (dropTarget!.position === 'before' || dropTarget!.position === 'after') && (
+                        <div
+                          aria-hidden
+                          className="pointer-events-none absolute left-0 right-0 bg-primary"
+                          style={{
+                            height: 2,
+                            top: dropTarget!.position === 'before' ? -1 : ROW_HEIGHT - 1,
+                            // Indent the line to the target's depth so it reads as
+                            // a sibling insertion, not a root move.
+                            left: dropIndent,
+                            zIndex: 5,
+                          }}
+                        />
+                      )}
+                    <div
+                      data-field="wbs"
+                      className="group/cell flex items-center overflow-hidden border-r border-border px-2 text-fg-muted"
+                      style={{ paddingLeft: 8 + node.depth * 16 }}
+                    >
+                      {/* Drag handle — visible on row hover/focus, gives the row a
+                       * clear "grab here to reorder" affordance without colliding
+                       * with the row's click-to-select / double-click-to-edit
+                       * semantics (plan §2.3 step 6). */}
+                      <span
+                        aria-hidden
+                        title={t('table.dragHint')}
+                        className="mr-1 hidden shrink-0 cursor-grab text-[10px] leading-none text-fg-muted/50 hover:text-fg group-hover/row:inline-block active:cursor-grabbing"
+                      >
+                        ⠿
+                      </span>
+                      {node.children.length > 0 && (
+                        <button
+                          type="button"
+                          className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
+                          style={{ width: 14, height: 14 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCollapse(node.task.id);
+                          }}
+                        >
+                          {file.viewState.collapsedTaskIds.includes(node.task.id) ? '▶' : '▼'}
+                        </button>
+                      )}
+                      {node.wbsNumber}
+                    </div>
+                    <div
+                      data-field="name"
+                      className={cn(
+                        'min-w-0 truncate border-r border-border px-2 font-medium',
+                        node.children.length > 0 && 'font-semibold',
+                      )}
+                    >
+                      {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
+                      {activeField === 'name' ? (
+                        <input
+                          autoFocus
+                          defaultValue={node.task.name}
+                          // Commit-on-blur matches the original F2 behaviour. The
+                          // guard avoids a double-dispatch when Enter/Tab already
+                          // committed: those handlers call stopEditing() first,
+                          // which nulls editingCell before blur fires.
+                          onBlur={(e) => {
+                            if (editingCell.current?.taskId !== node.task.id) {
+                              commitName(node.task.id, e.target.value);
+                              stopEditing();
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              commitName(node.task.id, (e.target as HTMLInputElement).value);
+                              stopEditing();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              stopEditing();
+                            } else if (e.key === 'Tab') {
+                              e.preventDefault();
+                              commitName(node.task.id, (e.target as HTMLInputElement).value);
+                              tabCell(node.task.id, 'name', e.shiftKey, node);
+                            }
+                          }}
+                          className="w-full bg-transparent outline-none"
+                        />
+                      ) : (
+                        node.task.name || t('table.placeholderName')
+                      )}
+                    </div>
+                    <div
+                      data-field="duration"
+                      title={
                         node.children.length > 0
-                          ? effortMap.get(node.task.id)?.personDays
-                          : computeTaskPersonDays(node.task, file.resources, cal);
-                      return pd && pd > 0 ? `${pd}` : '—';
-                    })()}
-                  </div>
-                  <div
-                    data-field="progress"
-                    title={node.children.length > 0 ? t('table.cellReadOnlySummary') : undefined}
-                    className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
-                  >
-                    {activeField === 'progress' && isFieldEditable(node, 'progress') ? (
-                      <input
-                        autoFocus
-                        type="number"
-                        min={0}
-                        max={100}
-                        defaultValue={node.task.progress}
-                        aria-label={t('table.editProgressAria')}
-                        onBlur={(e) => {
-                          if (editingCell.current?.taskId !== node.task.id) {
-                            commitProgress(node.task.id, Number(e.target.value));
-                            stopEditing();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            commitProgress(
-                              node.task.id,
-                              Number((e.target as HTMLInputElement).value),
-                            );
-                            stopEditing();
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault();
-                            stopEditing();
-                          } else if (e.key === 'Tab') {
-                            e.preventDefault();
-                            commitProgress(
-                              node.task.id,
-                              Number((e.target as HTMLInputElement).value),
-                            );
-                            tabCell(node.task.id, 'progress', e.shiftKey, node);
-                          }
-                        }}
-                        className="w-full bg-transparent text-right outline-none"
+                          ? t('table.cellReadOnlySummary')
+                          : node.task.isMilestone
+                            ? t('table.cellReadOnlyMilestone')
+                            : undefined
+                      }
+                      className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                    >
+                      {activeField === 'duration' && isFieldEditable(node, 'duration') ? (
+                        <input
+                          autoFocus
+                          type="number"
+                          min={0}
+                          defaultValue={node.task.duration}
+                          aria-label={t('table.editDurationAria')}
+                          onBlur={(e) => {
+                            if (editingCell.current?.taskId !== node.task.id) {
+                              commitDuration(node.task.id, Number(e.target.value));
+                              stopEditing();
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              commitDuration(
+                                node.task.id,
+                                Number((e.target as HTMLInputElement).value),
+                              );
+                              stopEditing();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              stopEditing();
+                            } else if (e.key === 'Tab') {
+                              e.preventDefault();
+                              commitDuration(
+                                node.task.id,
+                                Number((e.target as HTMLInputElement).value),
+                              );
+                              tabCell(node.task.id, 'duration', e.shiftKey, node);
+                            }
+                          }}
+                          className="w-full bg-transparent text-right outline-none"
+                        />
+                      ) : node.task.isMilestone ? (
+                        '—'
+                      ) : (
+                        `${node.task.duration}d`
+                      )}
+                    </div>
+                    <div
+                      data-field="effort"
+                      className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                    >
+                      {(() => {
+                        const pd =
+                          node.children.length > 0
+                            ? effortMap.get(node.task.id)?.personDays
+                            : computeTaskPersonDays(node.task, file.resources, cal);
+                        return pd && pd > 0 ? `${pd}` : '—';
+                      })()}
+                    </div>
+                    <div
+                      data-field="progress"
+                      title={node.children.length > 0 ? t('table.cellReadOnlySummary') : undefined}
+                      className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                    >
+                      {activeField === 'progress' && isFieldEditable(node, 'progress') ? (
+                        <input
+                          autoFocus
+                          type="number"
+                          min={0}
+                          max={100}
+                          defaultValue={node.task.progress}
+                          aria-label={t('table.editProgressAria')}
+                          onBlur={(e) => {
+                            if (editingCell.current?.taskId !== node.task.id) {
+                              commitProgress(node.task.id, Number(e.target.value));
+                              stopEditing();
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              commitProgress(
+                                node.task.id,
+                                Number((e.target as HTMLInputElement).value),
+                              );
+                              stopEditing();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              stopEditing();
+                            } else if (e.key === 'Tab') {
+                              e.preventDefault();
+                              commitProgress(
+                                node.task.id,
+                                Number((e.target as HTMLInputElement).value),
+                              );
+                              tabCell(node.task.id, 'progress', e.shiftKey, node);
+                            }
+                          }}
+                          className="w-full bg-transparent text-right outline-none"
+                        />
+                      ) : (
+                        `${node.task.progress}%`
+                      )}
+                    </div>
+                    {hasBaseline && baselineCtx ? (
+                      <BaselineDeviationCell
+                        taskId={node.task.id}
+                        baselineCtx={baselineCtx}
+                        cal={cal}
                       />
-                    ) : (
-                      `${node.task.progress}%`
-                    )}
+                    ) : null}
                   </div>
-                  {hasBaseline && baselineCtx ? (
-                    <BaselineDeviationCell
-                      taskId={node.task.id}
-                      baselineCtx={baselineCtx}
-                      cal={cal}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
       {confirmDeleteTaskId && (
@@ -945,6 +1073,9 @@ export function TaskTable() {
           taskId={confirmDeleteTaskId}
           onClose={() => setConfirmDeleteTaskId(null)}
         />
+      )}
+      {batchDeleteIds && (
+        <BatchDeleteConfirm ids={batchDeleteIds} onClose={() => setBatchDeleteIds(null)} />
       )}
     </>
   );

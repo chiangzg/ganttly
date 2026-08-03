@@ -259,8 +259,14 @@ export interface Scene {
    * draws dual-layer bars; when false, no baseline geometry is drawn at all.
    */
   hasActiveBaseline: boolean;
-  /** Currently selected task id (draws a focus ring). */
+  /** Currently selected task id — the anchor / primary selection (focus ring). */
   selectedTaskId: string | null;
+  /**
+   * Multi-select set (plan §4.6). Every id in this set gets a selected outline;
+   * `selectedTaskId` (the anchor) additionally gets the focus ring so the
+   * primary selection stays distinguishable within a multi-selection.
+   */
+  selectedTaskIds: ReadonlySet<string>;
 }
 
 /** The full render options. */

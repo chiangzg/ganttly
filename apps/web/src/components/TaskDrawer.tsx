@@ -119,13 +119,10 @@ export function TaskDrawer() {
     ) {
       setPendingTaskId(selectedId);
       restoredSelectionRef.current = currentBefore.id;
-      const currentFile = useProjectStore.getState().file;
-      useProjectStore.setState({
-        file: {
-          ...currentFile,
-          viewState: { ...currentFile.viewState, selectedTaskId: currentBefore.id },
-        },
-      });
+      // §4.6: route the anchor restore through the selection store so the
+      // useViewStore set + the mirrored file.viewState.selectedTaskId stay in
+      // sync (selectSingle updates both atomically).
+      useViewStore.getState().selectSingle(currentBefore.id);
       return;
     }
 
@@ -766,13 +763,9 @@ export function TaskDrawer() {
           }
           resetDraft(nextTask);
           setPendingTaskId(null);
-          const currentFile = useProjectStore.getState().file;
-          useProjectStore.setState({
-            file: {
-              ...currentFile,
-              viewState: { ...currentFile.viewState, selectedTaskId: nextTask.id },
-            },
-          });
+          // §4.6: route the selection switch through the selection store so
+          // both the useViewStore set and its mirror stay in sync.
+          useViewStore.getState().selectSingle(nextTask.id);
         }}
       />
       {deleteConfirmOpen && task && (

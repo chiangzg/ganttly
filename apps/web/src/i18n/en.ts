@@ -42,6 +42,10 @@ export const en = {
     baselineWithName: 'Baseline: {{name}}',
     baselineCompare: 'Baseline comparison',
     baselineEmptyHint: 'Add at least one task before creating a baseline',
+    // §5.1 editor overflow-menu group headers (were hardcoded).
+    groupZoom: 'Time zoom',
+    groupDisplay: 'Display options',
+    groupExport: 'Export project',
   },
   search: {
     placeholder: 'Search task name or WBS…',
@@ -53,6 +57,13 @@ export const en = {
     overdue: 'Overdue',
     none: 'All',
     toggleLabel: 'Filter: {{label}}',
+  },
+  // §4.6 batch operations (multi-select + batch delete).
+  batch: {
+    deleteTitle: 'Delete tasks',
+    deleteDesc: 'Delete the {{count}} selected tasks?',
+    confirmDeleteSummary: '{{total}} tasks will be deleted (including subtasks).',
+    deletedN: 'Deleted {{count}} tasks',
   },
   baseline: {
     saveTitle: 'Save plan baseline',
@@ -261,6 +272,8 @@ export const en = {
     toTask: 'Convert to task',
     indent: 'Indent',
     outdent: 'Outdent',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
     cut: 'Cut',
     copy: 'Copy',
     paste: 'Paste',
@@ -291,5 +304,19 @@ export const en = {
     invalidFile: 'Invalid file format',
     dependencyViolations:
       'Detected {{count}} dependency violation(s) — successors start before their predecessors allow. Auto-reschedule?',
+  },
+  // §5.2 empty states (zero-task CTA, filter-no-match, zero-resource).
+  empty: {
+    noTaskTitle: 'No tasks yet',
+    noTaskHint: 'Create your first task to start planning.',
+    noTaskCta: 'Create first task',
+    filteredTitle: 'No matching tasks',
+    filteredHint: 'Try adjusting your search or filter.',
+    noResourceTitle: 'No resources yet',
+    noResourceHint: 'Add a member to assign task owners.',
+  },
+  // §5.1 project-header overflow-menu group header (remaining copy pending i18n PR).
+  project: {
+    groupActions: 'Project actions',
   },
 } as const;

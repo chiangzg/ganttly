@@ -479,6 +479,67 @@ export function deleteTaskCommand(taskId: string): Command {
   };
 }
 
+/**
+ * Batch-delete multiple tasks as ONE command (plan §4.6: "批量修改必须封装为
+ * 单个复合 command"). Generalises {@link deleteTaskCommand}: the initial set
+ * is closed transitively under `parentId` (deleting a parent removes its
+ * children), so selecting both a parent and its child deletes the subtree once
+ * rather than twice (plan §4.6 验收 "删除父子任务同时被选中时避免重复计数和
+ * 重复删除"). A single undo restores every deleted task and every trimmed
+ * dependency edge.
+ */
+export function batchDeleteTasksCommand(ids: ReadonlyArray<string>): Command {
+  let capturedDeletedTasks: Task[] | null = null;
+  let capturedSurvivorDependencies: Map<string, Dependency[]> | null = null;
+  return {
+    label: `批量删除任务`,
+    apply: (file) => {
+      const idsToDelete = new Set<string>(ids);
+      // Cascade-delete descendants of every selected task (same closure as
+      // deleteTaskCommand, just seeded with multiple roots).
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const t of file.tasks) {
+          if (t.parentId && idsToDelete.has(t.parentId) && !idsToDelete.has(t.id)) {
+            idsToDelete.add(t.id);
+            changed = true;
+          }
+        }
+      }
+      capturedDeletedTasks = file.tasks.filter((t) => idsToDelete.has(t.id));
+      capturedSurvivorDependencies = new Map();
+      const tasksAfterDelete = file.tasks
+        .filter((t) => !idsToDelete.has(t.id))
+        .map((t) => {
+          const affected = t.dependencies.some((dependency) =>
+            idsToDelete.has(dependency.targetId),
+          );
+          if (!affected) return t;
+          capturedSurvivorDependencies!.set(t.id, t.dependencies);
+          return {
+            ...t,
+            dependencies: t.dependencies.filter(
+              (dependency) => !idsToDelete.has(dependency.targetId),
+            ),
+          };
+        });
+      return { ...file, tasks: tasksAfterDelete };
+    },
+    invert: (file) => {
+      if (!capturedDeletedTasks || !capturedSurvivorDependencies) return file;
+      const survivingTasks = file.tasks.map((task) => {
+        const dependencies = capturedSurvivorDependencies!.get(task.id);
+        return dependencies ? { ...task, dependencies } : task;
+      });
+      return {
+        ...file,
+        tasks: [...survivingTasks, ...capturedDeletedTasks],
+      };
+    },
+  };
+}
+
 export function addDependencyCommand(successorId: string, dep: Dependency): Command {
   // Captured at apply time: the successor's dependency list (for the structural
   // change) PLUS every task whose start/end moved due to the cascade.

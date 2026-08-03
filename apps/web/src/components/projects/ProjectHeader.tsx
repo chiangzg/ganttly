@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
@@ -26,6 +27,7 @@ import type { ProjectSummary } from '@/data/repository';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 
 export function ProjectHeader() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
   const activeName = useProjectStore((state) => state.file.project.name);
@@ -223,6 +225,11 @@ export function ProjectHeader() {
               sideOffset={6}
               className="z-40 min-w-52 rounded-xl border border-border bg-bg-elevated p-1.5 shadow-xl"
             >
+              {/* §5.1: clear group header so the project menu's scope is
+                  identifiable without a tooltip. */}
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                {t('project.groupActions')}
+              </div>
               <MenuItem icon={<Pencil size={15} />} onSelect={() => setRenameOpen(true)}>
                 重命名
               </MenuItem>

@@ -110,6 +110,7 @@ function makeScene(rows: ReturnType<typeof row>[], scrollTop: number): Scene {
     showCriticalPath: false,
     hasActiveBaseline: false,
     selectedTaskId: null,
+    selectedTaskIds: new Set<string>(),
   };
 }
 

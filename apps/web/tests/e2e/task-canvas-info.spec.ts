@@ -200,7 +200,8 @@ test('§3.4 right-click on a task bar opens the shared context menu', async ({ p
   await page.mouse.click(pt.x, pt.y, { button: 'right' });
 
   // The context menu's "编辑" item appears (shared component with the table).
-  await expect(page.getByRole('button', { name: '编辑' })).toBeVisible({ timeout: 2000 });
+  // Menu items expose role="menuitem" (§5.4 ARIA), not button.
+  await expect(page.getByRole('menuitem', { name: '编辑' })).toBeVisible({ timeout: 2000 });
 });
 
 test('§3.4 summary bar is right-clickable (read-only hover path covers summaries)', async ({
@@ -252,7 +253,7 @@ test('§3.4 summary bar is right-clickable (read-only hover path covers summarie
 
   // Right-click the summary → context menu opens (summary is not 'empty' here).
   await page.mouse.click(pt.x, pt.y, { button: 'right' });
-  await expect(page.getByRole('button', { name: '编辑' })).toBeVisible({ timeout: 2000 });
+  await expect(page.getByRole('menuitem', { name: '编辑' })).toBeVisible({ timeout: 2000 });
 });
 
 test('§3.4 Enter on a focused, selected canvas task opens the drawer', async ({ page }) => {

@@ -41,6 +41,10 @@ export const zhCN = {
     baselineWithName: '基线：{{name}}',
     baselineCompare: '基线对比',
     baselineEmptyHint: '至少添加一个任务后才能创建基线',
+    // §5.1 editor overflow-menu group headers (were hardcoded).
+    groupZoom: '时间缩放',
+    groupDisplay: '显示选项',
+    groupExport: '导出当前项目',
   },
   search: {
     placeholder: '搜索任务名或 WBS…',
@@ -52,6 +56,13 @@ export const zhCN = {
     overdue: '延期',
     none: '全部',
     toggleLabel: '筛选：{{label}}',
+  },
+  // §4.6 batch operations (multi-select + batch delete).
+  batch: {
+    deleteTitle: '批量删除任务',
+    deleteDesc: '确定删除选中的 {{count}} 个任务吗？',
+    confirmDeleteSummary: '共将删除 {{total}} 个任务（含子任务）。',
+    deletedN: '已删除 {{count}} 个任务',
   },
   baseline: {
     saveTitle: '保存计划基线',
@@ -253,6 +264,8 @@ export const zhCN = {
     toTask: '转为任务',
     indent: '降级',
     outdent: '升级',
+    moveUp: '上移',
+    moveDown: '下移',
     cut: '剪切',
     copy: '复制',
     paste: '粘贴',
@@ -283,5 +296,19 @@ export const zhCN = {
     invalidFile: '文件格式无效',
     dependencyViolations:
       '检测到 {{count}} 处依赖违反（后继任务日期早于前置任务暗示值），是否自动顺移？',
+  },
+  // §5.2 empty states (zero-task CTA, filter-no-match, zero-resource).
+  empty: {
+    noTaskTitle: '还没有任务',
+    noTaskHint: '创建第一个任务开始排期。',
+    noTaskCta: '新建首个任务',
+    filteredTitle: '没有匹配的任务',
+    filteredHint: '尝试调整搜索或筛选条件。',
+    noResourceTitle: '还没有资源',
+    noResourceHint: '新增成员后即可为任务分配负责人。',
+  },
+  // §5.1 project-header overflow-menu group header (其余文案待 i18n 专项 PR)。
+  project: {
+    groupActions: '项目操作',
   },
 } as const;

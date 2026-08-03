@@ -26,6 +26,7 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
     scrollLeft,
     rows,
     selectedTaskId,
+    selectedTaskIds,
     showCriticalPath,
     hasActiveBaseline,
   } = scene;
@@ -51,6 +52,7 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
       scrollLeft,
       theme,
       selectedTaskId,
+      selectedTaskIds,
       showCriticalPath,
       hasActiveBaseline,
       viewportWidth: scene.viewportWidth,
@@ -63,7 +65,10 @@ interface DrawCtx {
   originDate: string;
   scrollLeft: number;
   theme: ThemeColors;
+  /** Anchor / primary selected task id (draws the focus ring). */
   selectedTaskId: string | null;
+  /** Multi-select set (plan §4.6); every member gets a selected outline. */
+  selectedTaskIds: ReadonlySet<string>;
   showCriticalPath: boolean;
   /** When true, rows draw a baseline reference track below the live bar. */
   hasActiveBaseline: boolean;
@@ -131,10 +136,13 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
     }
   }
 
-  // Bar outline (always visible, sharper when selected)
+  // Bar outline (always visible, sharper when selected). §4.6: every task in
+  // the multi-select set gets a 2px primary outline; the anchor additionally
+  // gets the selection ring further below. Non-selected bars use a 1px darken.
+  const isSelected = env.selectedTaskIds.has(row.id);
   drawRoundedRect(ctx, xStart, barY, width, barH, BAR_RADIUS);
-  ctx.strokeStyle = row.id === env.selectedTaskId ? env.theme.primary : darken(barColor);
-  ctx.lineWidth = row.id === env.selectedTaskId ? 2 : 1;
+  ctx.strokeStyle = isSelected ? env.theme.primary : darken(barColor);
+  ctx.lineWidth = isSelected ? 2 : 1;
   ctx.stroke();
 
   // Constraint marker (G5): a small icon at the constrained edge.

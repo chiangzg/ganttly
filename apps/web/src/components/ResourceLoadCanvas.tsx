@@ -321,7 +321,9 @@ export function ResourceLoadCanvas() {
     const y = e.clientY - rect.top;
     const hit = hitResourceAt(x, y);
     if (hit.kind === 'task-lane') {
-      dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
+      // §4.6: selection is ephemeral now; selectSingle mirrors the anchor into
+      // file.viewState.selectedTaskId for the drawer.
+      useViewStore.getState().selectSingle(hit.taskId);
       setSelectedTaskIdInResource(hit.taskId);
       openDrawer();
     }

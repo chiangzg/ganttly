@@ -44,6 +44,13 @@ export interface AssembleOptions {
    */
   searchQuery?: string;
   taskFilter?: TaskFilter;
+  /**
+   * Multi-select set (plan §4.6). Each id gets a selected outline on the
+   * canvas; the anchor (`file.viewState.selectedTaskId`) additionally gets the
+   * focus ring. Defaults to empty (no multi-selection) for callers that don't
+   * pass it. Kept in opts (not read from a store) so the engine stays store-free.
+   */
+  selectedTaskIds?: ReadonlySet<string>;
 }
 
 export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
@@ -160,6 +167,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
     showCriticalPath: file.viewState.showCriticalPath,
     hasActiveBaseline,
     selectedTaskId: file.viewState.selectedTaskId,
+    selectedTaskIds: opts.selectedTaskIds ?? new Set<string>(),
   };
 }
 

@@ -22,7 +22,6 @@ import {
   useProjectStore,
   addResourceCommand,
   updateResourceCommand,
-  setViewStateCommand,
 } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { HEADER_HEIGHT, ROW_HEIGHT } from '@/engine/layout';
@@ -34,6 +33,7 @@ import { cn } from '@/lib/cn';
 import { nanoid } from 'nanoid';
 import { useTranslation } from 'react-i18next';
 import { DeleteResourceConfirm } from './DeleteResourceConfirm';
+import { EmptyState } from './ui/EmptyState';
 
 // The fixed pane header describes resource summary rows. Expanded groups add
 // a second, local task header in the scrolling body. Keep the pane wide enough
@@ -172,25 +172,158 @@ export function ResourceList() {
           </div>
         </div>
         <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
-          <div className="relative" style={{ height: Math.max(flatRows.length * ROW_HEIGHT, 0) }}>
-            {flatRows.map((row) => {
-              const y = row.yIndex * ROW_HEIGHT;
-              if (row.kind === 'resource') {
-                const r = file.resources.find((res) => res.id === row.resourceId);
-                if (!r) return null;
-                const selected = selectedResourceId === r.id;
-                const taskCount = tasksByRes.map.get(r.id)?.length ?? 0;
-                const expanded = expandedResourceIds.has(r.id);
+          {/* §5.2: zero-resource hint inside the list body. The bottom "+ 新增资源"
+              button is always visible and is the real CTA; this panel just
+              explains the state so the blank list isn't confusing. The right
+              load canvas stays empty (no fake data) per plan §5.2. */}
+          {flatRows.length === 0 ? (
+            <EmptyState
+              title={t('empty.noResourceTitle')}
+              description={t('empty.noResourceHint')}
+            />
+          ) : (
+            <div className="relative" style={{ height: Math.max(flatRows.length * ROW_HEIGHT, 0) }}>
+              {flatRows.map((row) => {
+                const y = row.yIndex * ROW_HEIGHT;
+                if (row.kind === 'resource') {
+                  const r = file.resources.find((res) => res.id === row.resourceId);
+                  if (!r) return null;
+                  const selected = selectedResourceId === r.id;
+                  const taskCount = tasksByRes.map.get(r.id)?.length ?? 0;
+                  const expanded = expandedResourceIds.has(r.id);
+                  return (
+                    <div
+                      key={`r-${r.id}`}
+                      role="row"
+                      tabIndex={0}
+                      onClick={() => setSelectedResourceId(r.id)}
+                      style={{
+                        height: ROW_HEIGHT,
+                        transform: `translateY(${y}px)`,
+                        gridTemplateColumns: GRID_TEMPLATE,
+                      }}
+                      className={cn(
+                        'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
+                        'hover:bg-bg',
+                        selected && 'bg-bg ring-1 ring-inset ring-primary',
+                      )}
+                    >
+                      <div className="flex items-center overflow-hidden border-r border-border px-1">
+                        {taskCount > 0 && (
+                          <button
+                            type="button"
+                            title={expanded ? t('resource.collapse') : t('resource.expand')}
+                            className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
+                            style={{ width: 14, height: 14 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleResourceExpanded(r.id);
+                            }}
+                          >
+                            {expanded ? '▼' : '▶'}
+                          </button>
+                        )}
+                        <input
+                          className="min-w-0 flex-1 truncate bg-transparent px-1 outline-none focus:bg-bg"
+                          value={r.name}
+                          title={r.name}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) =>
+                            dispatch(updateResourceCommand(r.id, { name: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <input
+                        className="truncate border-r border-border bg-transparent px-2 text-fg-muted outline-none focus:bg-bg"
+                        value={r.role ?? ''}
+                        placeholder="—"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) =>
+                          dispatch(updateResourceCommand(r.id, { role: e.target.value }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={10}
+                        className="border-r border-border bg-transparent px-2 text-fg-muted outline-none focus:bg-bg"
+                        value={Math.round((r.capacity ?? 1) * 100)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) =>
+                          dispatch(
+                            updateResourceCommand(r.id, {
+                              capacity: Math.max(
+                                0,
+                                Math.min(1, (Number(e.target.value) || 0) / 100),
+                              ),
+                            }),
+                          )
+                        }
+                      />
+                      <button
+                        className="px-1 text-fg-muted hover:text-destructive"
+                        title={t('resource.delete')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeResource(r.id);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                }
+                if (row.kind === 'task-header') {
+                  return (
+                    <div
+                      key={`th-${row.resourceId}`}
+                      role="row"
+                      aria-label={t('table.taskColumnsHeader')}
+                      style={{
+                        height: ROW_HEIGHT,
+                        transform: `translateY(${y}px)`,
+                        gridTemplateColumns: taskGridTemplate,
+                      }}
+                      className="absolute left-0 right-0 grid items-center border-b border-border bg-bg text-[11px] font-semibold text-fg-muted"
+                    >
+                      <div className="border-r border-border/70" />
+                      <div className="border-r border-border/70 px-1">{t('table.columnWbs')}</div>
+                      <div className="border-r border-border/70 px-2">{t('table.columnName')}</div>
+                      <div className="border-r border-border/70 px-1 text-right">
+                        {t('table.columnDuration')}
+                      </div>
+                      <div className="border-r border-border/70 px-1 text-right">
+                        {t('table.columnEffort')}
+                      </div>
+                      <div className="px-1 text-right">{t('table.columnProgress')}</div>
+                    </div>
+                  );
+                }
+
+                // Task lane row — mirrors TaskTable's 4-column row.
+                const task = row.task;
+                const selected = selectedTaskIdInResource === task.id;
+                const wbs = tasksByRes.wbsByTaskId.get(task.id) ?? '';
                 return (
                   <div
-                    key={`r-${r.id}`}
+                    key={`t-${row.resourceId}-${task.id}`}
                     role="row"
                     tabIndex={0}
-                    onClick={() => setSelectedResourceId(r.id)}
+                    onClick={() => setSelectedTaskIdInResource(task.id)}
+                    onDoubleClick={() => {
+                      // TaskDrawer reads file.viewState.selectedTaskId, so set it
+                      // at open time. The lane highlight stays on the resource-view
+                      // selection (selectedTaskIdInResource), independent per G19.
+                      // §4.6: selection is ephemeral now; selectSingle mirrors the
+                      // anchor into file.viewState.selectedTaskId for the drawer.
+                      useViewStore.getState().selectSingle(task.id);
+                      openDrawer();
+                    }}
                     style={{
                       height: ROW_HEIGHT,
                       transform: `translateY(${y}px)`,
-                      gridTemplateColumns: GRID_TEMPLATE,
+                      gridTemplateColumns: taskGridTemplate,
                     }}
                     className={cn(
                       'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
@@ -198,153 +331,38 @@ export function ResourceList() {
                       selected && 'bg-bg ring-1 ring-inset ring-primary',
                     )}
                   >
-                    <div className="flex items-center overflow-hidden border-r border-border px-1">
-                      {taskCount > 0 && (
-                        <button
-                          type="button"
-                          title={expanded ? t('resource.collapse') : t('resource.expand')}
-                          className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
-                          style={{ width: 14, height: 14 }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleResourceExpanded(r.id);
-                          }}
-                        >
-                          {expanded ? '▼' : '▶'}
-                        </button>
-                      )}
-                      <input
-                        className="min-w-0 flex-1 truncate bg-transparent px-1 outline-none focus:bg-bg"
-                        value={r.name}
-                        title={r.name}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) =>
-                          dispatch(updateResourceCommand(r.id, { name: e.target.value }))
-                        }
-                      />
+                    <div className="flex items-center justify-center text-fg-muted">
+                      <span className="text-[10px]">•</span>
                     </div>
-                    <input
-                      className="truncate border-r border-border bg-transparent px-2 text-fg-muted outline-none focus:bg-bg"
-                      value={r.role ?? ''}
-                      placeholder="—"
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) =>
-                        dispatch(updateResourceCommand(r.id, { role: e.target.value }))
-                      }
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={10}
-                      className="border-r border-border bg-transparent px-2 text-fg-muted outline-none focus:bg-bg"
-                      value={Math.round((r.capacity ?? 1) * 100)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) =>
-                        dispatch(
-                          updateResourceCommand(r.id, {
-                            capacity: Math.max(0, Math.min(1, (Number(e.target.value) || 0) / 100)),
-                          }),
-                        )
-                      }
-                    />
-                    <button
-                      className="px-1 text-fg-muted hover:text-destructive"
-                      title={t('resource.delete')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeResource(r.id);
-                      }}
-                    >
-                      ×
-                    </button>
+                    <div className="overflow-hidden border-r border-border px-1 text-right tabular-nums text-fg-muted">
+                      {wbs}
+                    </div>
+                    <div className="min-w-0 truncate border-r border-border px-2 font-medium">
+                      {task.isMilestone && <span className="mr-1 text-warning">◆</span>}
+                      {task.name || t('table.placeholderName')}
+                    </div>
+                    <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
+                      {task.isMilestone ? '—' : `${task.duration}d`}
+                    </div>
+                    <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
+                      {(() => {
+                        const pd = computeAssignmentPersonDays(
+                          task,
+                          row.resourceId,
+                          file.resources,
+                          cal,
+                        );
+                        return pd > 0 ? `${pd}` : '—';
+                      })()}
+                    </div>
+                    <div className="px-1 text-right tabular-nums text-fg-muted">
+                      {task.progress}%
+                    </div>
                   </div>
                 );
-              }
-              if (row.kind === 'task-header') {
-                return (
-                  <div
-                    key={`th-${row.resourceId}`}
-                    role="row"
-                    aria-label={t('table.taskColumnsHeader')}
-                    style={{
-                      height: ROW_HEIGHT,
-                      transform: `translateY(${y}px)`,
-                      gridTemplateColumns: taskGridTemplate,
-                    }}
-                    className="absolute left-0 right-0 grid items-center border-b border-border bg-bg text-[11px] font-semibold text-fg-muted"
-                  >
-                    <div className="border-r border-border/70" />
-                    <div className="border-r border-border/70 px-1">{t('table.columnWbs')}</div>
-                    <div className="border-r border-border/70 px-2">{t('table.columnName')}</div>
-                    <div className="border-r border-border/70 px-1 text-right">
-                      {t('table.columnDuration')}
-                    </div>
-                    <div className="border-r border-border/70 px-1 text-right">
-                      {t('table.columnEffort')}
-                    </div>
-                    <div className="px-1 text-right">{t('table.columnProgress')}</div>
-                  </div>
-                );
-              }
-
-              // Task lane row — mirrors TaskTable's 4-column row.
-              const task = row.task;
-              const selected = selectedTaskIdInResource === task.id;
-              const wbs = tasksByRes.wbsByTaskId.get(task.id) ?? '';
-              return (
-                <div
-                  key={`t-${row.resourceId}-${task.id}`}
-                  role="row"
-                  tabIndex={0}
-                  onClick={() => setSelectedTaskIdInResource(task.id)}
-                  onDoubleClick={() => {
-                    // TaskDrawer reads file.viewState.selectedTaskId, so set it
-                    // at open time. The lane highlight stays on the resource-view
-                    // selection (selectedTaskIdInResource), independent per G19.
-                    dispatch(setViewStateCommand({ selectedTaskId: task.id }));
-                    openDrawer();
-                  }}
-                  style={{
-                    height: ROW_HEIGHT,
-                    transform: `translateY(${y}px)`,
-                    gridTemplateColumns: taskGridTemplate,
-                  }}
-                  className={cn(
-                    'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
-                    'hover:bg-bg',
-                    selected && 'bg-bg ring-1 ring-inset ring-primary',
-                  )}
-                >
-                  <div className="flex items-center justify-center text-fg-muted">
-                    <span className="text-[10px]">•</span>
-                  </div>
-                  <div className="overflow-hidden border-r border-border px-1 text-right tabular-nums text-fg-muted">
-                    {wbs}
-                  </div>
-                  <div className="min-w-0 truncate border-r border-border px-2 font-medium">
-                    {task.isMilestone && <span className="mr-1 text-warning">◆</span>}
-                    {task.name || t('table.placeholderName')}
-                  </div>
-                  <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
-                    {task.isMilestone ? '—' : `${task.duration}d`}
-                  </div>
-                  <div className="border-r border-border px-1 text-right tabular-nums text-fg-muted">
-                    {(() => {
-                      const pd = computeAssignmentPersonDays(
-                        task,
-                        row.resourceId,
-                        file.resources,
-                        cal,
-                      );
-                      return pd > 0 ? `${pd}` : '—';
-                    })()}
-                  </div>
-                  <div className="px-1 text-right tabular-nums text-fg-muted">{task.progress}%</div>
-                </div>
-              );
-            })}
-          </div>
+              })}
+            </div>
+          )}
         </div>
         <button
           className="border-t border-border px-2 py-1 text-left text-xs text-primary hover:bg-bg"

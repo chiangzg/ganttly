@@ -16,7 +16,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   useProjectStore,
-  setViewStateCommand,
   addDependencyCommand,
   updateTaskWithRollupCommand,
 } from '@/store/useProjectStore';
@@ -44,6 +43,7 @@ import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
 import { findActiveBaseline } from '@/lib/baseline';
 import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
+import { computeSelectionOnPointerDown } from '@/lib/selection';
 import { cn } from '@/lib/cn';
 import { isEditableTarget } from '@/lib/shortcutTarget';
 import { useHolidayHover } from '@/components/useHolidayHover';
@@ -70,6 +70,13 @@ export function GanttCanvas() {
   // stay in sync (matched rows + force-expanded ancestors appear on both sides).
   const searchQuery = useViewStore((s) => s.searchQuery);
   const taskFilter = useViewStore((s) => s.taskFilter);
+  // §4.6 multi-select — shared with the task table (plan §4.6: "Canvas 与任务表
+  // 共享 selection set"). Selection is ephemeral (plan §9.1).
+  const selectSingle = useViewStore((s) => s.selectSingle);
+  const clearSelection = useViewStore((s) => s.clearSelection);
+  // §4.6: subscribe to the multi-select set so the canvas re-renders bars with
+  // the selected outline whenever the selection changes.
+  const selectedTaskIds = useViewStore((s) => s.selectedTaskIds);
   const [, forceRerender] = useState(0);
   const dragRef = useRef<DragState>({ kind: 'idle' });
   const hoverConnectRef = useRef<string | null>(null);
@@ -256,12 +263,13 @@ export function GanttCanvas() {
       activeBaseline,
       searchQuery,
       taskFilter,
+      selectedTaskIds,
     });
     sceneRef.current = scene;
     maxScrollTopRef.current = Math.max(0, scene.totalRows * ROW_HEIGHT - size.height);
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
-  }, [file, size, activeBaseline, searchQuery, taskFilter]);
+  }, [file, size, activeBaseline, searchQuery, taskFilter, selectedTaskIds]);
 
   // ----- Pointer interaction -----
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -286,7 +294,22 @@ export function GanttCanvas() {
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
-    dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
+    // §4.6: modifier-clicks (Cmd/Ctrl toggle, Shift range) only change the
+    // selection — they never start a drag. Plain click selects the single task
+    // (the historical behaviour) and then proceeds to the drag setup below.
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      const cur = useViewStore.getState();
+      const visibleIds = scene.rows.map((r) => r.id);
+      const next = computeSelectionOnPointerDown(
+        hit.taskId,
+        { ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey },
+        { ids: cur.selectedTaskIds, anchor: cur.anchorTaskId },
+        visibleIds,
+      );
+      useViewStore.getState().setSelection(next);
+      return;
+    }
+    selectSingle(hit.taskId);
     const row = scene.rows.find((r) => r.id === hit.taskId);
     if (!row) return;
 
@@ -431,7 +454,7 @@ export function GanttCanvas() {
       // If we never crossed the threshold, treat it as a click on empty space:
       // clear the selection. Otherwise the pan already updated scroll.
       if (!drag.engaged) {
-        dispatch(setViewStateCommand({ selectedTaskId: null }));
+        clearSelection();
       }
       return;
     }
@@ -473,7 +496,7 @@ export function GanttCanvas() {
     const y = e.clientY - rect.top;
     const hit = hitTest(scene, x, y);
     if (hit.kind !== 'empty') {
-      dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
+      selectSingle(hit.taskId);
       openDrawer();
     }
   };
@@ -492,7 +515,8 @@ export function GanttCanvas() {
     const taskId = hit.kind === 'empty' ? hitTaskId(x, y) : hit.taskId;
     if (taskId) {
       e.preventDefault();
-      dispatch(setViewStateCommand({ selectedTaskId: taskId }));
+      // Right-click focuses a single task (the menu is single-task today).
+      selectSingle(taskId);
       openContextMenu(taskId, e.clientX, e.clientY);
     }
   };
@@ -504,6 +528,22 @@ export function GanttCanvas() {
     // Defensive: the canvas shouldn't host editable elements, but a bubbled
     // key from an overlay input (drawer/tooltip) must not trigger task ops.
     if (isEditableTarget(e.target)) return;
+    const view = useViewStore.getState();
+    // §4.6: with a multi-selection, Escape clears the whole set and Delete
+    // opens the batch-delete confirm (signalled to TaskTable, which owns the
+    // dialog). Falls through to single-task handling when ≤1 is selected.
+    if (view.selectedTaskIds.size > 1) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        clearSelection();
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        view.requestBatchDelete();
+        return;
+      }
+    }
     const selectedId = file.viewState.selectedTaskId;
     if (!selectedId) return;
     if (e.key === 'Enter') {
@@ -514,7 +554,7 @@ export function GanttCanvas() {
       setConfirmDeleteTaskId(selectedId);
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      dispatch(setViewStateCommand({ selectedTaskId: null }));
+      clearSelection();
     }
   };
 

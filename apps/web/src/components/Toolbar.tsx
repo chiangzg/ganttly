@@ -16,17 +16,13 @@ import { useViewStore } from '@/store/useViewStore';
 import { todayISO } from '@/engine/layout';
 import { dateToPixel } from '@/engine/layout';
 import { originDateFor } from '@/engine/scene';
-import { createDefaultTask } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
 import { ExportMenu } from './ExportMenu';
 import { BaselineControl } from './BaselineControl';
 import { findActiveBaseline } from '@/lib/baseline';
-import { revealTask } from '@/lib/revealTask';
 import { fitProjectRange } from '@/lib/fitProjectRange';
 import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
-import { nanoid } from 'nanoid';
-import { addTaskCommand } from '@/store/useProjectStore';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   CalendarDays,
@@ -62,7 +58,6 @@ export function Toolbar() {
   const nextUndoLabel = useProjectStore((s) => s.nextUndoLabel());
   const nextRedoLabel = useProjectStore((s) => s.nextRedoLabel());
   const saveState = useProjectStore((s) => s.saveState);
-  const openDrawer = useViewStore((s) => s.openDrawer);
 
   const jumpToToday = () => {
     // Use the SAME origin the renderer uses (assembleScene → originDateFor).
@@ -125,27 +120,6 @@ export function Toolbar() {
     dispatch(setViewStateCommand({ showCriticalPath: !file.viewState.showCriticalPath }));
   };
 
-  const addRootTask = () => {
-    const start = todayISO();
-    const id = nanoid(10);
-    const order = file.tasks.filter((x) => x.parentId === null).length;
-    const task = createDefaultTask({
-      id,
-      name: t('table.placeholderName'),
-      start,
-      parentId: null,
-      order,
-    });
-    // Select the new task atomically with creating it, then open the drawer.
-    dispatch(addTaskCommand(task, null, order));
-    dispatch(setViewStateCommand({ selectedTaskId: id }));
-    // Reveal the new task's bar so the user doesn't have to hunt for it when
-    // the project origin is months away from today (plan §2.1). Runs after the
-    // dispatch commits so computeRevealTarget sees the new task.
-    revealTask(id);
-    openDrawer();
-  };
-
   const viewMode = useViewStore((s) => s.viewMode);
   const setViewMode = useViewStore((s) => s.setViewMode);
   const taskViewControlsDisabled = viewMode !== 'task';
@@ -169,7 +143,10 @@ export function Toolbar() {
           <Expand size={15} />
           <span className="hidden xl:inline">{t('toolbar.fitProjectRange')}</span>
         </ToolbarButton>
-        <div className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex" aria-label="时间缩放">
+        <div
+          className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex"
+          aria-label={t('toolbar.groupZoom')}
+        >
           <ToolbarButton
             size="icon"
             onClick={zoomOut}
@@ -250,10 +227,6 @@ export function Toolbar() {
 
       <div className="min-w-1 flex-1" />
       <ToolbarGroup aria-label="编辑操作">
-        <ToolbarButton onClick={addRootTask} title={t('toolbar.newTask')} variant="primary">
-          <Plus size={15} strokeWidth={2.25} />
-          {t('toolbar.newTask')}
-        </ToolbarButton>
         <ToolbarButton
           size="icon"
           onClick={undo}
@@ -307,7 +280,7 @@ export function Toolbar() {
             >
               <div className="lg:hidden">
                 <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  时间缩放
+                  {t('toolbar.groupZoom')}
                 </div>
                 <DropdownMenu.Item onSelect={zoomIn} className={menuItemClass}>
                   <ZoomIn size={15} className="text-fg-muted" />
@@ -328,7 +301,7 @@ export function Toolbar() {
               </div>
               <div className="xl:hidden">
                 <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  显示选项
+                  {t('toolbar.groupDisplay')}
                 </div>
                 <DropdownMenu.CheckboxItem
                   checked={file.viewState.showCriticalPath}
@@ -346,7 +319,7 @@ export function Toolbar() {
                 <DropdownMenu.Separator className="my-1 h-px bg-border" />
               </div>
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                导出当前项目
+                {t('toolbar.groupExport')}
               </div>
               <ExportMenu />
             </DropdownMenu.Content>

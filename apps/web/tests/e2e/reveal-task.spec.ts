@@ -122,14 +122,15 @@ test('新建任务后任务条自动进入视口 (origin 6+ months from today)',
   expect(barViewX).toBeLessThanOrEqual(viewportWidth);
 
   // The reveal itself is navigation and must NOT push a view-change command.
-  // `addRootTask` already dispatches two undoable commands (addTask + select),
-  // so depth grows by exactly 2 — NOT 3. If reveal leaked a "视图变更" entry
-  // for the scrollLeft jump, depth would grow by 3.
+  // `addRootTask` dispatches exactly ONE undoable command (addTask); the
+  // selection is now ephemeral (plan §9.1: selection never enters the undo
+  // stack), so depth grows by exactly 1. If reveal leaked a "视图变更" entry
+  // for the scrollLeft jump, depth would grow by 2.
   const undoDepthAfter = await page.evaluate(() => {
     const store = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
     return store.getState().undoStack.length;
   });
-  expect(undoDepthAfter - undoDepthBefore).toBe(2);
+  expect(undoDepthAfter - undoDepthBefore).toBe(1);
 
   // The new task should be selected (drawer wiring).
   const selectedId = await page.evaluate(() => {
@@ -139,17 +140,17 @@ test('新建任务后任务条自动进入视口 (origin 6+ months from today)',
   expect(selectedId).toBe(taskId);
 
   // Direct navigation-isolation check via the store (no UI dependency): confirm
-  // the undo stack's top TWO labels are the add + select commands, and that
-  // NONE of the new entries is a bare "视图变更" caused by the scrollLeft jump.
-  // `addRootTask` dispatches addTaskCommand (新增任务) + setViewStateCommand
-  // (视图变更, for selectedTaskId). The reveal writes scrollLeft via setState
-  // and must NOT add a third "视图变更" entry.
+  // the undo stack's top entry is the add command, and that NONE of the new
+  // entries is a bare "视图变更" caused by the scrollLeft jump.
+  // `addRootTask` dispatches addTaskCommand (新增任务); the selection now writes
+  // through useViewStore (ephemeral, §9.1) and the reveal writes scrollLeft via
+  // direct setState — neither adds an undo entry.
   const newUndoLabels = await page.evaluate((depthBefore) => {
     const store = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
     const stack = store.getState().undoStack as Array<{ label: string }>;
     return stack.slice(depthBefore).map((c) => c.label);
   }, undoDepthBefore);
-  expect(newUndoLabels).toHaveLength(2);
+  expect(newUndoLabels).toHaveLength(1);
   expect(newUndoLabels.some((l) => l.includes('新增任务'))).toBe(true);
 });
 
