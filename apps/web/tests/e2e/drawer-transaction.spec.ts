@@ -17,7 +17,14 @@ import { expect, test, type Page } from '@playwright/test';
  */
 
 interface FileState {
-  tasks: Array<{ id: string; name: string; duration: number; progress: number }>;
+  tasks: Array<{
+    id: string;
+    name: string;
+    start: string;
+    end: string;
+    duration: number;
+    progress: number;
+  }>;
   viewState: Record<string, unknown>;
 }
 
@@ -140,6 +147,49 @@ test('同时修改名称、工期、进度后保存，一次全部生效', async
   expect(t.name).toBe('已保存任务');
   expect(t.duration).toBe(10);
   expect(t.progress).toBe(80);
+});
+
+test('编辑草稿期间发生实时日期更新，保存不会覆盖最新日期', async ({ page }) => {
+  await injectSingleTask(page);
+  const drawer = await openDrawer(page);
+
+  await drawer.locator('input').first().fill('草稿名称');
+  await page.evaluate(() => {
+    const s = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
+    const f = s.getState().file;
+    s.setState({
+      file: {
+        ...f,
+        tasks: f.tasks.map((task) =>
+          task.id === 't1' ? { ...task, start: '2026-03-02', end: '2026-03-06' } : task,
+        ),
+      },
+    });
+  });
+
+  await drawer.getByRole('button', { name: '保存' }).click();
+  const saved = await page.evaluate(() => {
+    const s = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
+    const task = s.getState().file.tasks.find((candidate) => candidate.id === 't1')!;
+    return { name: task.name, start: task.start, end: task.end };
+  });
+  expect(saved).toEqual({
+    name: '草稿名称',
+    start: '2026-03-02',
+    end: '2026-03-06',
+  });
+
+  await page.getByRole('button', { name: /撤销/ }).click();
+  const restored = await page.evaluate(() => {
+    const s = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
+    const task = s.getState().file.tasks.find((candidate) => candidate.id === 't1')!;
+    return { name: task.name, start: task.start, end: task.end };
+  });
+  expect(restored).toEqual({
+    name: '原始任务',
+    start: '2026-03-02',
+    end: '2026-03-06',
+  });
 });
 
 test('保存后按一次撤销，所有字段一起恢复', async ({ page }) => {

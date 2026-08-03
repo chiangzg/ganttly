@@ -33,6 +33,8 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
 }
 
 const alice: Resource = { id: 'r1', name: 'Alice', capacity: 1.0, role: '前端' };
+const bob: Resource = { id: 'r2', name: 'Bob', capacity: 0.8, role: '设计' };
+const carol: Resource = { id: 'r3', name: 'Carol', capacity: 1.0, role: '测试' };
 
 describe('addResourceCommand', () => {
   it('adds a resource on apply and removes it on invert', () => {
@@ -99,6 +101,37 @@ describe('deleteResourceCommand', () => {
     const restored = cmd.invert(next);
     expect(restored.resources).toHaveLength(1);
     expect(restored.resources[0]!.id).toBe('r1');
+  });
+
+  it('restores resource order and complete assignments across undo and redo', () => {
+    const file = makeFile({
+      resources: [bob, alice, carol],
+      tasks: [
+        makeTask('t1', {
+          assignments: [
+            { resourceId: 'r2', load: 20 },
+            { resourceId: 'r1', load: 50 },
+            { resourceId: 'r3', load: 30 },
+          ],
+        }),
+        makeTask('t2', { assignments: [{ resourceId: 'r1', load: 75 }] }),
+      ],
+    });
+    const cmd = deleteResourceCommand('r1');
+
+    const deleted = cmd.apply(file);
+    const restored = cmd.invert(deleted);
+    expect(restored.resources).toEqual(file.resources);
+    expect(restored.tasks.map((task) => task.assignments)).toEqual(
+      file.tasks.map((task) => task.assignments),
+    );
+
+    const redone = cmd.apply(restored);
+    const restoredAgain = cmd.invert(redone);
+    expect(restoredAgain.resources).toEqual(file.resources);
+    expect(restoredAgain.tasks.map((task) => task.assignments)).toEqual(
+      file.tasks.map((task) => task.assignments),
+    );
   });
 });
 

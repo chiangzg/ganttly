@@ -501,7 +501,11 @@ export function TaskTable() {
     // row will set its own target.
     const related = e.relatedTarget as Node | null;
     if (related && e.currentTarget.contains(related)) return;
-    setDropTarget((prev) => (prev && prev.taskId === e.currentTarget.dataset.taskId ? null : prev));
+    // React clears currentTarget after the event callback returns, while a
+    // functional state updater may run later. Capture the primitive id now so
+    // the updater never reads from an expired synthetic event.
+    const leavingTaskId = e.currentTarget.dataset.taskId;
+    setDropTarget((prev) => (prev && prev.taskId === leavingTaskId ? null : prev));
   };
 
   const onDrop = (e: React.DragEvent<HTMLDivElement>, _target: TreeNode) => {

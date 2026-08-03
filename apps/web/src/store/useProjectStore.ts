@@ -772,14 +772,14 @@ export function updateTaskWithRollupCommand(taskId: string, patch: Partial<Task>
  *
  * The TaskDrawer now keeps a complete draft (base fields + assignments +
  * dependencies + constraints) and only commits on explicit "Save". This
- * command replaces the target task wholesale with the `after` draft, then
- * re-runs the same rollup + dependency cascade that a live date edit would,
- * capturing every modified task so a single undo restores the full pre-save
- * state — including cascaded successors and rolled-up ancestors.
+ * command three-way merges the fields changed between `before` and `after`
+ * onto the live task, then re-runs the same rollup + dependency cascade that a
+ * live date edit would. This preserves canvas edits made while the docked
+ * drawer is open while keeping one save as one undoable command.
  *
- * `before` is the task snapshot captured when the drawer opened; it is used
- * directly as the invert (no re-derivation needed), which keeps undo correct
- * even when the live file has diverged (e.g. an autosave race).
+ * `before` is the task snapshot captured when the drawer opened. Undo captures
+ * the live task at apply time, so it restores the state immediately before the
+ * save even when the live file diverged while the drawer was open.
  *
  * When `after` is identical to `before`, `apply` is a no-op and returns the
  * file unchanged (the drawer disables Save in that case, but this is the
@@ -800,22 +800,23 @@ export function updateTaskFromDraftCommand(before: Task, after: Task): Command {
       const existing = file.tasks.find((t) => t.id === before.id);
       if (!existing) return file;
       // No-op when nothing changed (defensive — UI disables Save when clean).
-      if (tasksEqualForCommit(existing, after)) return file;
+      if (tasksEqualForCommit(before, after)) return file;
 
-      // 1. Capture the target exactly, including whether optional keys existed,
-      // then replace it wholesale with the draft.
+      // 1. Capture the live target exactly, then apply only fields the user
+      // changed in the draft. Untouched fields retain concurrent canvas edits.
       capturedTarget = existing;
       capturedOldValues.set(before.id, { ...existing });
-      let tasks = file.tasks.map((t) => (t.id === before.id ? { ...after } : t));
+      const merged = mergeTaskDraft(existing, before, after);
+      let tasks = file.tasks.map((t) => (t.id === before.id ? merged : t));
 
       const dependenciesChanged =
-        JSON.stringify(existing.dependencies) !== JSON.stringify(after.dependencies);
+        JSON.stringify(existing.dependencies) !== JSON.stringify(merged.dependencies);
       const constraintsChanged =
-        JSON.stringify(existing.constraints) !== JSON.stringify(after.constraints);
+        JSON.stringify(existing.constraints) !== JSON.stringify(merged.constraints);
       const datesChanged =
-        existing.start !== after.start ||
-        existing.end !== after.end ||
-        existing.duration !== after.duration;
+        existing.start !== merged.start ||
+        existing.end !== merged.end ||
+        existing.duration !== merged.duration;
 
       // 2. Apply the same dependency -> constraint scheduling layers used by
       // their dedicated commands. This keeps a structural-only draft edit from
@@ -883,6 +884,56 @@ export function updateTaskFromDraftCommand(before: Task, after: Task): Command {
   };
 }
 
+const TASK_DRAFT_FIELDS: Array<keyof Task> = [
+  'name',
+  'start',
+  'end',
+  'duration',
+  'progress',
+  'isMilestone',
+  'color',
+  'note',
+  'overtimeDates',
+  'dependencies',
+  'constraints',
+  'assignments',
+];
+
+/**
+ * Apply the user's draft delta to the latest live task. Draft changes win on a
+ * same-field conflict; fields untouched in the drawer retain their live value.
+ */
+function mergeTaskDraft(existing: Task, before: Task, after: Task): Task {
+  const merged = { ...existing };
+  const mergedRecord = merged as unknown as Record<string, unknown>;
+  const afterRecord = after as unknown as Record<string, unknown>;
+
+  for (const key of TASK_DRAFT_FIELDS) {
+    if (taskDraftFieldEqual(key, before, after)) continue;
+    if (Object.prototype.hasOwnProperty.call(after, key)) {
+      mergedRecord[key] = afterRecord[key];
+    } else {
+      delete mergedRecord[key];
+    }
+  }
+  return merged;
+}
+
+function taskDraftFieldEqual(key: keyof Task, a: Task, b: Task): boolean {
+  return (
+    JSON.stringify(normalizeTaskDraftField(key, a)) ===
+    JSON.stringify(normalizeTaskDraftField(key, b))
+  );
+}
+
+function normalizeTaskDraftField(key: keyof Task, task: Task): unknown {
+  if (key === 'overtimeDates') return task.overtimeDates ?? [];
+  if (key === 'constraints') {
+    return { ...task.constraints, type: task.constraints.type ?? ('none' as const) };
+  }
+  return task[key];
+}
+
 /**
  * Structural equality over the fields a draft save can change. We compare by
  * JSON of a normalised pick rather than reference equality so re-creating a
@@ -895,21 +946,7 @@ export function updateTaskFromDraftCommand(before: Task, after: Task): Command {
  * defeat the no-op fast path.
  */
 function tasksEqualForCommit(a: Task, b: Task): boolean {
-  const norm = (t: Task) => ({
-    name: t.name,
-    start: t.start,
-    end: t.end,
-    duration: t.duration,
-    progress: t.progress,
-    isMilestone: t.isMilestone,
-    color: t.color,
-    note: t.note,
-    overtimeDates: t.overtimeDates ?? [],
-    dependencies: t.dependencies,
-    constraints: { ...t.constraints, type: t.constraints.type ?? ('none' as const) },
-    assignments: t.assignments,
-  });
-  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+  return TASK_DRAFT_FIELDS.every((key) => taskDraftFieldEqual(key, a, b));
 }
 
 /**
@@ -1080,22 +1117,32 @@ export function updateResourceCommand(resourceId: string, patch: Partial<Resourc
 }
 
 export function deleteResourceCommand(resourceId: string): Command {
-  // Captured at apply time: the resource itself + every assignment referencing it.
+  // Captured at apply time: the resource and every assignment, including their
+  // original positions, so undo is lossless for ordering and allocation load.
   let captured: {
     resource: Resource;
-    assignments: Array<{ taskId: string; index: number }>;
+    resourceIndex: number;
+    assignments: Array<{ taskId: string; index: number; assignment: TaskAssignment }>;
   } | null = null;
   return {
     label: `删除资源`,
     apply: (file) => {
-      const resource = file.resources.find((r) => r.id === resourceId);
-      if (!resource) return file;
-      const assignments: Array<{ taskId: string; index: number }> = [];
+      const resourceIndex = file.resources.findIndex((r) => r.id === resourceId);
+      if (resourceIndex < 0) return file;
+      const resource = file.resources[resourceIndex]!;
+      const assignments: Array<{
+        taskId: string;
+        index: number;
+        assignment: TaskAssignment;
+      }> = [];
       for (const t of file.tasks) {
-        const idx = t.assignments.findIndex((a) => a.resourceId === resourceId);
-        if (idx >= 0) assignments.push({ taskId: t.id, index: idx });
+        t.assignments.forEach((assignment, index) => {
+          if (assignment.resourceId === resourceId) {
+            assignments.push({ taskId: t.id, index, assignment: { ...assignment } });
+          }
+        });
       }
-      captured = { resource, assignments };
+      captured = { resource: { ...resource }, resourceIndex, assignments };
       return {
         ...file,
         resources: file.resources.filter((r) => r.id !== resourceId),
@@ -1111,21 +1158,28 @@ export function deleteResourceCommand(resourceId: string): Command {
     },
     invert: (file) => {
       if (!captured) return file;
-      const { resource, assignments } = captured;
-      const assignByTask = new Map(assignments.map((a) => [a.taskId, a.index]));
+      const { resource, resourceIndex, assignments } = captured;
+      const restoredResources = [...file.resources];
+      restoredResources.splice(Math.min(resourceIndex, restoredResources.length), 0, resource);
+      const assignmentsByTask = new Map<
+        string,
+        Array<{ index: number; assignment: TaskAssignment }>
+      >();
+      for (const { taskId, index, assignment } of assignments) {
+        const entries = assignmentsByTask.get(taskId) ?? [];
+        entries.push({ index, assignment });
+        assignmentsByTask.set(taskId, entries);
+      }
       return {
         ...file,
-        resources: [...file.resources, resource],
+        resources: restoredResources,
         tasks: file.tasks.map((t) => {
-          const idx = assignByTask.get(t.id);
-          if (idx === undefined) return t;
-          // Re-insert the assignment at its original index (best-effort order restore).
-          const restored: TaskAssignment = { resourceId, load: 0 };
-          // The original load is lost on delete (we only restored structure);
-          // this is acceptable since delete+undo of a resource is rare and the
-          // user can re-adjust. To preserve load we'd need to capture it too.
+          const entries = assignmentsByTask.get(t.id);
+          if (!entries) return t;
           const next = [...t.assignments];
-          next.splice(Math.min(idx, next.length), 0, restored);
+          for (const { index, assignment } of entries.sort((a, b) => a.index - b.index)) {
+            next.splice(Math.min(index, next.length), 0, assignment);
+          }
           return { ...t, assignments: next };
         }),
       };

@@ -344,6 +344,55 @@ test('Escape cancels an in-flight drag (no dispatch)', async ({ page }) => {
   expect(undoDepthAfter, 'no command pushed for a cancelled drag').toBe(undoDepthBefore);
 });
 
+test('holding a drag after leaving a row does not crash the task table', async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error));
+  await injectTasks(page, [
+    makeTask('a', '任务A', { order: 0 }),
+    makeTask('b', '任务B', { order: 1 }),
+  ]);
+
+  const from = await rowCenter(page, '任务B');
+  const to = await rowCenter(page, '任务A');
+  await page.evaluate(
+    async ({ fromX, fromY, toX, toY }) => {
+      const source = document
+        .elementFromPoint(fromX, fromY)
+        ?.closest('[role="row"]') as HTMLElement | null;
+      const target = document
+        .elementFromPoint(toX, toY)
+        ?.closest('[role="row"]') as HTMLElement | null;
+      if (!source || !target) throw new Error('drag source/target row not found');
+
+      const dataTransfer = new DataTransfer();
+      const fire = (type: string, element: HTMLElement, x: number, y: number) => {
+        element.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      };
+
+      fire('dragstart', source, fromX, fromY);
+      fire('dragover', target, toX, toY);
+      // Let React commit the active drop target before leaving the row. The
+      // previous implementation only dereferenced the expired event when the
+      // functional updater received a non-null target.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      fire('dragleave', target, toX, toY);
+    },
+    { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y },
+  );
+
+  await page.waitForTimeout(2_100);
+  await expect(page.locator('[data-task-table]')).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 test('a move pushes exactly one undo entry labelled 移动任务(含汇总)', async ({ page }) => {
   await injectTasks(page, [
     makeTask('a', '任务A', { order: 0 }),

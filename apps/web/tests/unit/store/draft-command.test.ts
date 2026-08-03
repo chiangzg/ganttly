@@ -78,6 +78,39 @@ describe('updateTaskFromDraftCommand', () => {
     expect(t.color).toBe('#ff0000');
   });
 
+  it('preserves live date changes for fields untouched by the draft', () => {
+    const before = makeTask('t1', { name: 'A' });
+    const live = {
+      ...before,
+      start: '2026-02-02',
+      end: '2026-02-06',
+    };
+    seed([live]);
+
+    useProjectStore
+      .getState()
+      .dispatch(updateTaskFromDraftCommand(before, { ...before, name: 'Draft name' }));
+
+    const saved = fileTasks().find((task) => task.id === 't1')!;
+    expect(saved.name).toBe('Draft name');
+    expect(saved.start).toBe('2026-02-02');
+    expect(saved.end).toBe('2026-02-06');
+  });
+
+  it('lets an explicit draft edit win a same-field conflict and undo restores live state', () => {
+    const before = makeTask('t1', { name: 'Original' });
+    const live = { ...before, name: 'Canvas edit' };
+    seed([live]);
+
+    useProjectStore
+      .getState()
+      .dispatch(updateTaskFromDraftCommand(before, { ...before, name: 'Draft edit' }));
+
+    expect(fileTasks().find((task) => task.id === 't1')!.name).toBe('Draft edit');
+    useProjectStore.getState().undo();
+    expect(fileTasks().find((task) => task.id === 't1')).toEqual(live);
+  });
+
   it('one save pushes exactly ONE undo record (not one per field)', () => {
     const before = makeTask('t1', { name: 'A', progress: 0 });
     seed([before]);
