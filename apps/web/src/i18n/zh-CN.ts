@@ -57,12 +57,21 @@ export const zhCN = {
     none: '全部',
     toggleLabel: '筛选：{{label}}',
   },
-  // §4.6 batch operations (multi-select + batch delete).
+  // §4.6 batch operations (multi-select + batch delete + batch assign).
   batch: {
     deleteTitle: '批量删除任务',
     deleteDesc: '确定删除选中的 {{count}} 个任务吗？',
     confirmDeleteSummary: '共将删除 {{total}} 个任务（含子任务）。',
     deletedN: '已删除 {{count}} 个任务',
+    selectedCount: '已选 {{count}} 项',
+    assignAssignee: '分配负责人',
+    assignTitle: '批量分配负责人',
+    assignLoad: '负载',
+    assignApply: '应用',
+    assignedN: '已为 {{count}} 个任务分配负责人',
+    noResources: '暂无资源，请先添加',
+    allSummaries: '所选均为汇总任务，无法分配负责人',
+    clearSelection: '取消选择',
   },
   baseline: {
     saveTitle: '保存计划基线',

@@ -58,12 +58,21 @@ export const en = {
     none: 'All',
     toggleLabel: 'Filter: {{label}}',
   },
-  // §4.6 batch operations (multi-select + batch delete).
+  // §4.6 batch operations (multi-select + batch delete + batch assign).
   batch: {
     deleteTitle: 'Delete tasks',
     deleteDesc: 'Delete the {{count}} selected tasks?',
     confirmDeleteSummary: '{{total}} tasks will be deleted (including subtasks).',
     deletedN: 'Deleted {{count}} tasks',
+    selectedCount: 'Selected {{count}} items',
+    assignAssignee: 'Assign owner',
+    assignTitle: 'Batch assign owner',
+    assignLoad: 'Load',
+    assignApply: 'Apply',
+    assignedN: 'Assigned owner to {{count}} tasks',
+    noResources: 'No resources yet — add one first',
+    allSummaries: 'All selected tasks are summaries — nothing to assign',
+    clearSelection: 'Clear selection',
   },
   baseline: {
     saveTitle: 'Save plan baseline',

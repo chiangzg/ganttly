@@ -29,6 +29,7 @@ import { ResourceLoadCanvas } from './ResourceLoadCanvas';
 import { StatusBar } from './StatusBar';
 import { TaskDrawer } from './TaskDrawer';
 import { ContextMenu } from './ContextMenu';
+import { BatchActionBar } from './BatchActionBar';
 import { useViewStore } from '@/store/useViewStore';
 import { ProjectHeader } from './projects/ProjectHeader';
 import { UndoToastStack } from '@/lib/toast';
@@ -46,7 +47,8 @@ export function GanttView() {
         <ProjectHeader />
         <Toolbar />
       </div>
-      <div className="flex flex-1 overflow-hidden">
+      {/* `relative` anchors the floating BatchActionBar (plan §4.6). */}
+      <div className="relative flex flex-1 overflow-hidden">
         {viewMode === 'resource' ? (
           <>
             <ResourceList />
@@ -60,6 +62,7 @@ export function GanttView() {
             <TaskDrawer />
           </>
         )}
+        <BatchActionBar />
       </div>
       <StatusBar />
       <ContextMenu />

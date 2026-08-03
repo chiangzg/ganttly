@@ -1271,6 +1271,56 @@ export function assignResourceCommand(taskId: string, assignment: TaskAssignment
   };
 }
 
+/**
+ * Batch-assign a resource to multiple tasks as ONE command (plan §4.6: "批量修
+ * 改必须封装为单个复合 command"). Targets are the selected LEAF tasks — summary
+ * tasks (tasks with children) are skipped, mirroring the drawer's G13 block so
+ * person-days are never double-counted. Per-task semantics match
+ * {@link assignResourceCommand}: an existing assignment for the same resource is
+ * replaced (load updated), never duplicated. The inverse restores every task's
+ * original assignments, so one undo reverts the whole batch (plan §4.6 验收
+ * "一次撤销恢复整个批量操作").
+ */
+export function batchAssignResourceCommand(
+  taskIds: ReadonlyArray<string>,
+  assignment: TaskAssignment,
+): Command {
+  let capturedOldAssignments: Map<string, TaskAssignment[]> | null = null;
+  return {
+    label: `批量分配资源`,
+    apply: (file) => {
+      const targets = new Set(taskIds.filter((id) => !file.tasks.some((t) => t.parentId === id)));
+      if (targets.size === 0) return file;
+      capturedOldAssignments = new Map();
+      return {
+        ...file,
+        tasks: file.tasks.map((t) => {
+          if (!targets.has(t.id)) return t;
+          capturedOldAssignments!.set(t.id, t.assignments);
+          return {
+            ...t,
+            assignments: [
+              ...t.assignments.filter((a) => a.resourceId !== assignment.resourceId),
+              assignment,
+            ],
+          };
+        }),
+      };
+    },
+    invert: (file) => {
+      if (!capturedOldAssignments) return file;
+      return {
+        ...file,
+        tasks: file.tasks.map((t) =>
+          capturedOldAssignments!.has(t.id)
+            ? { ...t, assignments: capturedOldAssignments!.get(t.id)! }
+            : t,
+        ),
+      };
+    },
+  };
+}
+
 export function unassignResourceCommand(taskId: string, resourceId: string): Command {
   let oldAssignment: TaskAssignment | null = null;
   return {
