@@ -328,4 +328,11 @@ export const en = {
   project: {
     groupActions: 'Project actions',
   },
+  // §4.1 panel/column resize handles (aria-labels + reset tooltips).
+  layout: {
+    resizePanel: 'Resize panel',
+    resetPanelWidth: 'Double-click to reset to default width',
+    resizeColumn: 'Resize column',
+    resetColumnWidth: 'Double-click to reset to default width',
+  },
 } as const;

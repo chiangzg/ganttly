@@ -34,18 +34,20 @@ import { nanoid } from 'nanoid';
 import { useTranslation } from 'react-i18next';
 import { DeleteResourceConfirm } from './DeleteResourceConfirm';
 import { EmptyState } from './ui/EmptyState';
+import { usePanelWidth, useColumnWidths } from './useLayoutPrefs';
+import { ResizeHandle, ResizableHeaderCell, startPointerResize } from './ui/ResizeHandle';
+import { DEFAULT_PANEL_WIDTHS, DEFAULT_COLUMN_WIDTHS } from '@/lib/layoutPrefs';
 
-// The fixed pane header describes resource summary rows. Expanded groups add
-// a second, local task header in the scrolling body. Keep the pane wide enough
-// for both sets of labels (the person-days column is always shown).
-const TABLE_WIDTH = 420;
-const GRID_TEMPLATE = 'minmax(0, 1fr) 76px 64px 28px';
+// §4.1: the resource panel width (default 420, 300-640) and the role/capacity
+// column widths are per-project user preferences; the name column stays
+// `minmax(0, 1fr)` and absorbs every width delta.
 /**
  * Task-lane grid: expand arrow | WBS | name | duration | person-days | progress.
  * The person-days column sits between duration and progress (mirrors
- * TaskTable's effort column placement). The resource-row grid (GRID_TEMPLATE)
+ * TaskTable's effort column placement). The resource-row grid (gridTemplate)
  * is unaffected — only the local task header and drilled-down task lanes get
- * the column, consistent with TaskTable.
+ * the column, consistent with TaskTable. Fixed (read-only drill-down; column
+ * resize is out of scope for §4.1).
  */
 const TASK_GRID_TEMPLATE = '20px 44px minmax(0, 1fr) 52px 52px 44px';
 
@@ -62,7 +64,14 @@ export function ResourceList() {
   const selectedTaskIdInResource = useViewStore((s) => s.selectedTaskIdInResource);
   const setSelectedTaskIdInResource = useViewStore((s) => s.setSelectedTaskIdInResource);
   const openDrawer = useViewStore((s) => s.openDrawer);
-  const tableWidth = TABLE_WIDTH;
+  // §4.1: panel + column widths are per-project user preferences (localStorage,
+  // never in the project file or the undo stack).
+  const [panelWidth, setPanelWidth] = usePanelWidth('resource');
+  const { widths: colWidths, setColumnWidth } = useColumnWidths('resource');
+  const roleWidth = colWidths.role ?? DEFAULT_COLUMN_WIDTHS.role;
+  const capacityWidth = colWidths.capacity ?? DEFAULT_COLUMN_WIDTHS.capacity;
+  const tableWidth = panelWidth;
+  const gridTemplate = `minmax(0, 1fr) ${roleWidth}px ${capacityWidth}px 28px`;
   const taskGridTemplate = TASK_GRID_TEMPLATE;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [confirmDeleteResourceId, setConfirmDeleteResourceId] = useState<string | null>(null);
@@ -154,18 +163,44 @@ export function ResourceList() {
     <>
       <div
         data-resource-list
-        className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
+        className="relative flex shrink-0 flex-col border-r border-border bg-bg-elevated"
         style={{ width: tableWidth }}
       >
+        {/* §4.1: drag the right edge to resize the resource panel; double-click
+            resets to the default. The handle straddles the border. */}
+        <ResizeHandle
+          ariaLabel={t('layout.resizePanel')}
+          title={t('layout.resetPanelWidth')}
+          dataResize="resource-panel"
+          className="-right-1"
+          onResizeStart={(e) =>
+            startPointerResize(e, { startWidth: panelWidth, onResize: setPanelWidth })
+          }
+          onReset={() => setPanelWidth(DEFAULT_PANEL_WIDTHS.resource)}
+        />
         <div
           className="shrink-0 border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
           style={{ height: HEADER_HEIGHT }}
         >
           {/* Resource summary columns stay in the fixed view header. */}
-          <div className="grid h-full items-center" style={{ gridTemplateColumns: GRID_TEMPLATE }}>
+          <div className="grid h-full items-center" style={{ gridTemplateColumns: gridTemplate }}>
             <div className="border-r border-border px-2">{t('resource.columnName')}</div>
-            <div className="border-r border-border px-2">{t('resource.columnRole')}</div>
-            <div className="border-r border-border px-2">{t('resource.columnCapacity')}</div>
+            <ResizableHeaderCell
+              label={t('resource.columnRole')}
+              width={roleWidth}
+              defaultWidth={DEFAULT_COLUMN_WIDTHS.role}
+              dataResize="resource-col-role"
+              className="flex h-full items-center"
+              onWidthChange={(w) => setColumnWidth('role', w)}
+            />
+            <ResizableHeaderCell
+              label={t('resource.columnCapacity')}
+              width={capacityWidth}
+              defaultWidth={DEFAULT_COLUMN_WIDTHS.capacity}
+              dataResize="resource-col-capacity"
+              className="flex h-full items-center"
+              onWidthChange={(w) => setColumnWidth('capacity', w)}
+            />
             <div className="px-1 text-center" aria-label={t('resource.columnActions')}>
               ⋯
             </div>
@@ -200,7 +235,7 @@ export function ResourceList() {
                       style={{
                         height: ROW_HEIGHT,
                         transform: `translateY(${y}px)`,
-                        gridTemplateColumns: GRID_TEMPLATE,
+                        gridTemplateColumns: gridTemplate,
                       }}
                       className={cn(
                         'absolute left-0 right-0 grid cursor-pointer items-center border-b border-border text-xs outline-none',
@@ -242,25 +277,32 @@ export function ResourceList() {
                           dispatch(updateResourceCommand(r.id, { role: e.target.value }))
                         }
                       />
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={10}
-                        className="border-r border-border bg-transparent px-2 text-fg-muted outline-none focus:bg-bg"
-                        value={Math.round((r.capacity ?? 1) * 100)}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) =>
-                          dispatch(
-                            updateResourceCommand(r.id, {
-                              capacity: Math.max(
-                                0,
-                                Math.min(1, (Number(e.target.value) || 0) / 100),
-                              ),
-                            }),
-                          )
-                        }
-                      />
+                      {/* §5.3: capacity unit made explicit — the stored value is
+                          0-1 but the input shows ×100, so a bare number would be
+                          ambiguous (the legend already labels with %). */}
+                      <div className="flex items-center overflow-hidden border-r border-border px-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={10}
+                          aria-label={`${t('resource.columnCapacity')}%`}
+                          className="min-w-0 flex-1 bg-transparent px-1 text-right text-fg-muted outline-none focus:bg-bg"
+                          value={Math.round((r.capacity ?? 1) * 100)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) =>
+                            dispatch(
+                              updateResourceCommand(r.id, {
+                                capacity: Math.max(
+                                  0,
+                                  Math.min(1, (Number(e.target.value) || 0) / 100),
+                                ),
+                              }),
+                            )
+                          }
+                        />
+                        <span className="shrink-0 text-[10px] text-fg-muted">%</span>
+                      </div>
                       <button
                         className="px-1 text-fg-muted hover:text-destructive"
                         title={t('resource.delete')}

@@ -51,17 +51,24 @@ import { nanoid } from 'nanoid';
 import type { Task, BaselineTask } from '@ganttly/schema';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
 import { BatchDeleteConfirm } from './BatchDeleteConfirm';
+import { usePanelWidth, useColumnWidths } from './useLayoutPrefs';
+import { ResizeHandle, ResizableHeaderCell, startPointerResize } from './ui/ResizeHandle';
+import { DEFAULT_PANEL_WIDTHS, DEFAULT_COLUMN_WIDTHS } from '@/lib/layoutPrefs';
 
 const TABLE_WIDTH = 480;
 const TABLE_WIDTH_WITH_BASELINE = 552;
+/** §4.1: the baseline comparison mode appends this many px to the user's panel
+ * width (default 480→552, unchanged from pre-§4.1); the deviation COLUMN width
+ * itself is separately adjustable via the header separator. */
+const BASELINE_PANEL_EXTRA = TABLE_WIDTH_WITH_BASELINE - TABLE_WIDTH;
 /**
  * 共享列模板：表头与每行数据必须用同一个，否则列宽按行内容自适应，
  * 会导致 WBS/工期/进度列与表头错位、长任务名挤压（bug: 左侧明细挤在一起）。
  * “人天”列（56px）恒驻于工期与进度之间；基线偏差列（baseline-comparison spec
- * §5.6）仅在比较模式开启时追加 70px。
+ * §5.6）仅在比较模式开启时追加。
+ * §4.1: 除任务名列（minmax(0,1fr) 弹性吸收）外，其余列宽来自
+ * useColumnWidths 状态，模板由组件按状态计算，表头与行引用同一值。
  */
-const GRID_TEMPLATE = '44px minmax(0, 1fr) 72px 56px 56px';
-const GRID_TEMPLATE_WITH_BASELINE = '44px minmax(0, 1fr) 72px 56px 56px 70px';
 
 /**
  * The three task-table cells that support inline editing (plan §4.3). Order
@@ -161,8 +168,30 @@ export function TaskTable() {
   const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
   const hasBaseline = activeBaseline !== null;
 
-  const gridTemplate = hasBaseline ? GRID_TEMPLATE_WITH_BASELINE : GRID_TEMPLATE;
-  const tableWidth = hasBaseline ? TABLE_WIDTH_WITH_BASELINE : TABLE_WIDTH;
+  // §4.1: panel + column widths are per-project user preferences (localStorage,
+  // never in the project file or the undo stack). The name column stays
+  // `minmax(0, 1fr)` and absorbs every width delta, so the grid never shows
+  // empty space at any panel width.
+  const [panelWidth, setPanelWidth] = usePanelWidth('task');
+  const { widths: colWidths, setColumnWidth } = useColumnWidths('task');
+
+  // §4.1: per-column widths (name column stays flexible). Fallbacks keep the
+  // template valid even before the persisted widths load.
+  const durationWidth = colWidths.duration ?? DEFAULT_COLUMN_WIDTHS.duration;
+  const effortWidth = colWidths.effort ?? DEFAULT_COLUMN_WIDTHS.effort;
+  const progressWidth = colWidths.progress ?? DEFAULT_COLUMN_WIDTHS.progress;
+  const baselineWidth = colWidths.baseline ?? DEFAULT_COLUMN_WIDTHS.baseline;
+
+  // Single computed template shared by the header and every row (the historic
+  // misalignment bug was two divergent templates — keep it one source).
+  const gridTemplate = [
+    '44px minmax(0, 1fr)',
+    `${durationWidth}px`,
+    `${effortWidth}px`,
+    `${progressWidth}px`,
+    ...(hasBaseline ? [`${baselineWidth}px`] : []),
+  ].join(' ');
+  const tableWidth = panelWidth + (hasBaseline ? BASELINE_PANEL_EXTRA : 0);
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
   const rows = useMemo(() => {
@@ -665,9 +694,21 @@ export function TaskTable() {
     <>
       <div
         data-task-table
-        className="flex shrink-0 flex-col border-r border-border bg-bg-elevated"
+        className="relative flex shrink-0 flex-col border-r border-border bg-bg-elevated"
         style={{ width: tableWidth }}
       >
+        {/* §4.1: drag the right edge to resize the table panel; double-click
+            resets to the default. The handle straddles the border. */}
+        <ResizeHandle
+          ariaLabel={t('layout.resizePanel')}
+          title={t('layout.resetPanelWidth')}
+          dataResize="task-panel"
+          className="-right-1"
+          onResizeStart={(e) =>
+            startPointerResize(e, { startWidth: panelWidth, onResize: setPanelWidth })
+          }
+          onReset={() => setPanelWidth(DEFAULT_PANEL_WIDTHS.task)}
+        />
         {/* §4.4 search & filter bar — compact, above the table header. Search
             matches name/WBS; the three toggles are mutually-exclusive quick
             filters (unassigned / critical path / overdue). All ephemeral
@@ -736,10 +777,37 @@ export function TaskTable() {
         >
           <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
           <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
-          <div className="border-r border-border px-2 py-1">{t('table.columnDuration')}</div>
-          <div className="border-r border-border px-2 py-1">{t('table.columnEffort')}</div>
-          <div className="border-r border-border px-2 py-1">{t('table.columnProgress')}</div>
-          {hasBaseline && <div className="px-2 py-1">{t('baseline.columnDeviation')}</div>}
+          <ResizableHeaderCell
+            label={t('table.columnDuration')}
+            width={durationWidth}
+            defaultWidth={DEFAULT_COLUMN_WIDTHS.duration}
+            dataResize="task-col-duration"
+            onWidthChange={(w) => setColumnWidth('duration', w)}
+          />
+          <ResizableHeaderCell
+            label={t('table.columnEffort')}
+            width={effortWidth}
+            defaultWidth={DEFAULT_COLUMN_WIDTHS.effort}
+            dataResize="task-col-effort"
+            onWidthChange={(w) => setColumnWidth('effort', w)}
+          />
+          <ResizableHeaderCell
+            label={t('table.columnProgress')}
+            width={progressWidth}
+            defaultWidth={DEFAULT_COLUMN_WIDTHS.progress}
+            dataResize="task-col-progress"
+            onWidthChange={(w) => setColumnWidth('progress', w)}
+          />
+          {hasBaseline && (
+            <ResizableHeaderCell
+              label={t('baseline.columnDeviation')}
+              width={baselineWidth}
+              defaultWidth={DEFAULT_COLUMN_WIDTHS.baseline}
+              dataResize="task-col-baseline"
+              className="border-r-0"
+              onWidthChange={(w) => setColumnWidth('baseline', w)}
+            />
+          )}
         </div>
         <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
           {/* §5.2 empty states. Distinguish TRUE zero tasks (source of truth:

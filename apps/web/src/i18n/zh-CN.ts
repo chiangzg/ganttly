@@ -320,4 +320,11 @@ export const zhCN = {
   project: {
     groupActions: '项目操作',
   },
+  // §4.1 panel/column resize handles (aria-labels + reset tooltips).
+  layout: {
+    resizePanel: '调整面板宽度',
+    resetPanelWidth: '双击恢复默认宽度',
+    resizeColumn: '调整列宽',
+    resetColumnWidth: '双击恢复默认列宽',
+  },
 } as const;
