@@ -14,6 +14,7 @@
  * handle drags on the live bar.
  */
 import { useCallback, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Scene, TaskRow } from '@/engine/render/types';
 import {
   HEADER_HEIGHT,
@@ -139,18 +140,19 @@ function BaselineTooltip({
   viewportWidth: number;
   baselineName: string | null;
 }) {
+  const { t } = useTranslation();
   // Deviation text from the row's variance (single source of truth).
   let finishDeltaText = '—';
   if (row.baselineVariance) {
     const v = row.baselineVariance;
     if (v.status === 'added') {
-      finishDeltaText = '新增任务';
+      finishDeltaText = t('baseline.addedTask');
     } else {
       finishDeltaText =
         v.finishDelta > 0
-          ? `+${v.finishDelta} 工作日`
+          ? t('baseline.deltaWorkDays', { n: `+${v.finishDelta}` })
           : v.finishDelta < 0
-            ? `${MINUS}${Math.abs(v.finishDelta)} 工作日`
+            ? t('baseline.deltaWorkDays', { n: `${MINUS}${Math.abs(v.finishDelta)}` })
             : '0';
     }
   }
@@ -170,19 +172,21 @@ function BaselineTooltip({
         top: Math.max(y - 64, 4),
       }}
     >
-      {baselineName ? <div className="font-medium">{`基线：${baselineName}`}</div> : null}
+      {baselineName ? (
+        <div className="font-medium">{t('toolbar.baselineWithName', { name: baselineName })}</div>
+      ) : null}
       <table className="mt-1 border-collapse">
         <tbody>
           <tr>
-            <td className="pr-3 text-fg-muted">计划</td>
+            <td className="pr-3 text-fg-muted">{t('baseline.planLabel')}</td>
             <td className="tabular-nums">{blRange}</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">当前</td>
+            <td className="pr-3 text-fg-muted">{t('baseline.currentLabel')}</td>
             <td className="tabular-nums">{`${row.start.slice(5)} → ${row.end.slice(5)}`}</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">完成偏差</td>
+            <td className="pr-3 text-fg-muted">{t('baseline.varianceFinish')}</td>
             <td className="tabular-nums font-medium">{finishDeltaText}</td>
           </tr>
         </tbody>

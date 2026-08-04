@@ -11,6 +11,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import type { TFunction } from 'i18next';
 import { Plus, Search, X } from 'lucide-react';
 import {
   useProjectStore,
@@ -1169,10 +1170,11 @@ function BaselineDeviationCell({
   baselineCtx: { effective: Map<string, EffectiveTaskValue>; byId: Map<string, BaselineTask> };
   cal: ReturnType<typeof resolveCalendar>;
 }) {
+  const { t } = useTranslation();
   const eff = baselineCtx.effective.get(taskId);
   if (!eff) return <div className="px-2 text-right tabular-nums text-fg-muted">—</div>;
   const variance = compareTaskToBaseline(eff, baselineCtx.byId.get(taskId), cal);
-  const cell = deviationColumnCell(variance);
+  const cell = deviationColumnCell(variance, t);
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
@@ -1211,15 +1213,15 @@ function DeviationDetail({ variance }: { variance: TaskBaselineVariance }) {
       <tbody>
         <tr>
           <td className="pr-3 text-fg-muted">{t('baseline.varianceStart')}</td>
-          <td className="tabular-nums">{formatSigned(variance.startDelta)}</td>
+          <td className="tabular-nums">{formatSigned(variance.startDelta, t)}</td>
         </tr>
         <tr>
           <td className="pr-3 text-fg-muted">{t('baseline.varianceFinish')}</td>
-          <td className="tabular-nums font-medium">{formatSigned(variance.finishDelta)}</td>
+          <td className="tabular-nums font-medium">{formatSigned(variance.finishDelta, t)}</td>
         </tr>
         <tr>
           <td className="pr-3 text-fg-muted">{t('baseline.varianceDuration')}</td>
-          <td className="tabular-nums">{formatSigned(variance.durationDelta)}</td>
+          <td className="tabular-nums">{formatSigned(variance.durationDelta, t)}</td>
         </tr>
       </tbody>
     </table>
@@ -1227,8 +1229,8 @@ function DeviationDetail({ variance }: { variance: TaskBaselineVariance }) {
 }
 
 const MINUS_CH = '\u2212';
-function formatSigned(n: number): string {
-  if (n > 0) return `+${n} 天`;
-  if (n < 0) return `${MINUS_CH}${Math.abs(n)} 天`;
+function formatSigned(n: number, t: TFunction): string {
+  if (n > 0) return t('baseline.deltaDays', { n: `+${n}` });
+  if (n < 0) return t('baseline.deltaDays', { n: `${MINUS_CH}${Math.abs(n)}` });
   return '0';
 }

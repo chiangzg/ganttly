@@ -12,6 +12,7 @@
  *   alignment, but tests/calculations always use plain numbers (spec §6.10).
  * - Never rely on color alone: every state also shows `+/-`, a number, or 新增.
  */
+import type { TFunction } from 'i18next';
 import type { TaskBaselineVariance } from '@/lib/baseline';
 
 /** Unicode minus for display (tests use plain `-`). */
@@ -19,11 +20,16 @@ const MINUS = '\u2212';
 
 /**
  * Format a signed working-day delta for display, e.g. `+3 天`, `−2 天`, `0`.
- * Positive → danger tone, negative → success tone, zero → muted.
+ * Positive → danger tone, negative → success tone, zero → muted. The unit comes
+ * from the caller's translation function (`baseline.deltaDays`).
  */
-export function formatDelta(delta: number): { text: string; tone: 'danger' | 'success' | 'muted' } {
-  if (delta > 0) return { text: `+${delta} 天`, tone: 'danger' };
-  if (delta < 0) return { text: `${MINUS}${Math.abs(delta)} 天`, tone: 'success' };
+export function formatDelta(
+  delta: number,
+  t: TFunction,
+): { text: string; tone: 'danger' | 'success' | 'muted' } {
+  if (delta > 0) return { text: t('baseline.deltaDays', { n: `+${delta}` }), tone: 'danger' };
+  if (delta < 0)
+    return { text: t('baseline.deltaDays', { n: `${MINUS}${Math.abs(delta)}` }), tone: 'success' };
   return { text: '0', tone: 'muted' };
 }
 
@@ -42,12 +48,15 @@ export function toneClass(tone: 'danger' | 'success' | 'muted'): string {
  * - `on-track`→ `—`     (muted)
  * - `added`   → `新增`  (primary)
  */
-export function deviationColumnCell(v: TaskBaselineVariance): {
+export function deviationColumnCell(
+  v: TaskBaselineVariance,
+  t: TFunction,
+): {
   text: string;
   tone: 'danger' | 'success' | 'muted' | 'primary';
 } {
-  if (v.status === 'added') return { text: '新增', tone: 'primary' };
-  const f = formatDelta(v.finishDelta);
+  if (v.status === 'added') return { text: t('baseline.deviationAdded'), tone: 'primary' };
+  const f = formatDelta(v.finishDelta, t);
   // On-track renders as an em dash, not "0 天".
   if (v.status === 'on-track') return { text: '—', tone: 'muted' };
   return { text: f.text, tone: f.tone };
@@ -63,16 +72,16 @@ export function deviationToneClass(tone: 'danger' | 'success' | 'muted' | 'prima
  * Multi-line detail text for a variance, used in tooltips (TaskTable hover,
  * Canvas hover). Each line is `label: value`.
  */
-export function varianceDetailLines(v: TaskBaselineVariance): Array<{
-  label: string;
-  value: string;
-}> {
+export function varianceDetailLines(
+  v: TaskBaselineVariance,
+  t: TFunction,
+): Array<{ label: string; value: string }> {
   if (v.status === 'added') {
-    return [{ label: '状态', value: '新增任务' }];
+    return [{ label: t('baseline.statusLabel'), value: t('baseline.addedTask') }];
   }
   return [
-    { label: '开始偏差', value: formatDelta(v.startDelta).text },
-    { label: '完成偏差', value: formatDelta(v.finishDelta).text },
-    { label: '工期偏差', value: formatDelta(v.durationDelta).text },
+    { label: t('baseline.varianceStart'), value: formatDelta(v.startDelta, t).text },
+    { label: t('baseline.varianceFinish'), value: formatDelta(v.finishDelta, t).text },
+    { label: t('baseline.varianceDuration'), value: formatDelta(v.durationDelta, t).text },
   ];
 }

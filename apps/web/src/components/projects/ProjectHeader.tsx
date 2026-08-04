@@ -81,7 +81,7 @@ export function ProjectHeader() {
           type="button"
           onClick={() => navigate('/projects')}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary outline-none transition hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary/35"
-          title="项目中心"
+          title={t('project.homeTitle')}
         >
           G
         </button>
@@ -169,7 +169,7 @@ export function ProjectHeader() {
                       ? 'opacity-60 hover:opacity-100'
                       : 'opacity-0 group-hover:opacity-60 group-focus-within:opacity-60 hover:opacity-100',
                   )}
-                  aria-label={`关闭 ${tab.project.name}`}
+                  aria-label={t('project.closeTab', { name: tab.project.name })}
                 >
                   <X size={12} />
                 </button>
@@ -180,7 +180,7 @@ export function ProjectHeader() {
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs text-fg-muted outline-none hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35">
-                  更多 <ChevronDown size={13} />
+                  {t('project.moreTabs')} <ChevronDown size={13} />
                 </button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
@@ -204,7 +204,7 @@ export function ProjectHeader() {
           type="button"
           onClick={() => setCreateOpen(true)}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted outline-none transition hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35"
-          title="新建项目"
+          title={t('project.newProject')}
         >
           <Plus size={17} />
         </button>
@@ -214,7 +214,7 @@ export function ProjectHeader() {
             <button
               type="button"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted outline-none transition hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35"
-              title="项目操作"
+              title={t('project.groupActions')}
             >
               <MoreHorizontal size={18} />
             </button>
@@ -231,7 +231,7 @@ export function ProjectHeader() {
                 {t('project.groupActions')}
               </div>
               <MenuItem icon={<Pencil size={15} />} onSelect={() => setRenameOpen(true)}>
-                重命名
+                {t('project.rename')}
               </MenuItem>
               <MenuItem
                 icon={<Copy size={15} />}
@@ -243,23 +243,23 @@ export function ProjectHeader() {
                   }
                 }}
               >
-                复制项目
+                {t('project.duplicate')}
               </MenuItem>
               <MenuItem
                 icon={<Star size={15} fill={isFavorite ? 'currentColor' : 'none'} />}
                 onSelect={() => activeProjectId && toggleFavorite(activeProjectId)}
               >
-                {isFavorite ? '取消收藏' : '收藏项目'}
+                {isFavorite ? t('project.unfavorite') : t('project.favorite')}
               </MenuItem>
               <MenuItem
                 icon={isPinned ? <PinOff size={15} /> : <Pin size={15} />}
                 onSelect={() => activeProjectId && togglePinned(activeProjectId)}
               >
-                {isPinned ? '取消固定标签' : '固定标签'}
+                {isPinned ? t('project.unpin') : t('project.pin')}
               </MenuItem>
               <DropdownMenu.Separator className="my-1 h-px bg-border" />
               <MenuItem danger icon={<Trash2 size={15} />} onSelect={() => setTrashOpen(true)}>
-                移入回收站
+                {t('project.moveToTrash')}
               </MenuItem>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
@@ -277,9 +277,9 @@ export function ProjectHeader() {
       <ProjectNameDialog
         open={renameOpen}
         onOpenChange={setRenameOpen}
-        title="重命名项目"
+        title={t('project.renameTitle')}
         initialValue={activeName}
-        submitLabel="保存"
+        submitLabel={t('common.save')}
         onSubmit={async (name) => {
           if (activeProjectId) await renameProject(activeProjectId, name);
         }}
@@ -287,14 +287,9 @@ export function ProjectHeader() {
       <ConfirmDialog
         open={trashOpen}
         onOpenChange={setTrashOpen}
-        title="移入回收站？"
-        description={
-          <>
-            项目“<strong className="text-fg">{activeSummary?.name ?? activeName}</strong>
-            ”将从项目列表中移除，之后仍可在回收站恢复。
-          </>
-        }
-        confirmLabel="移入回收站"
+        title={t('project.trashTitle')}
+        description={t('project.trashDesc', { name: activeSummary?.name ?? activeName })}
+        confirmLabel={t('project.moveToTrash')}
         danger
         onConfirm={async () => {
           if (!activeProjectId) return;
@@ -323,6 +318,7 @@ function ProjectSwitcher({
   onCreate(): void;
   onShowAll(): void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -388,7 +384,7 @@ function ProjectSwitcher({
                 {project.name}
               </span>
               <span className="text-xs tabular-nums text-fg-muted">
-                {project.taskCount ? `${project.progress}%` : '空项目'}
+                {project.taskCount ? `${project.progress}%` : t('project.switcher.emptyProject')}
               </span>
               {project.id === activeProjectId ? (
                 <span className="h-1.5 w-1.5 rounded-full bg-primary" />
@@ -413,7 +409,7 @@ function ProjectSwitcher({
               setSelectedIndex(0);
             }}
             onKeyDown={onKeyDown}
-            placeholder="搜索项目…"
+            placeholder={t('project.switcher.searchPlaceholder')}
             className="w-full rounded-xl border border-border bg-bg py-2 pl-9 pr-3 text-sm text-fg outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
         </div>
@@ -421,18 +417,20 @@ function ProjectSwitcher({
           type="button"
           onClick={onCreate}
           className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white hover:bg-primary/90"
-          title="新建项目"
+          title={t('project.newProject')}
         >
           <Plus size={17} />
         </button>
       </div>
       <div className="max-h-[55vh] overflow-y-auto px-1 pb-1">
-        {normalizedQuery ? renderSection('搜索结果', filtered) : null}
-        {!normalizedQuery ? renderSection('收藏', favoriteProjects) : null}
-        {!normalizedQuery ? renderSection('最近访问', recentProjects) : null}
-        {!normalizedQuery ? renderSection('全部项目', allProjects) : null}
+        {normalizedQuery ? renderSection(t('project.switcher.searchResults'), filtered) : null}
+        {!normalizedQuery ? renderSection(t('project.switcher.favorites'), favoriteProjects) : null}
+        {!normalizedQuery ? renderSection(t('project.switcher.recent'), recentProjects) : null}
+        {!normalizedQuery ? renderSection(t('project.switcher.allProjects'), allProjects) : null}
         {filtered.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-fg-muted">没有找到项目</div>
+          <div className="px-4 py-10 text-center text-sm text-fg-muted">
+            {t('project.switcher.noResults')}
+          </div>
         ) : null}
       </div>
       <div className="mt-1 border-t border-border p-1">
@@ -441,7 +439,7 @@ function ProjectSwitcher({
           onClick={onShowAll}
           className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-fg hover:bg-bg"
         >
-          <LayoutGrid size={15} /> 查看全部项目
+          <LayoutGrid size={15} /> {t('project.switcher.viewAll')}
         </button>
       </div>
     </div>
