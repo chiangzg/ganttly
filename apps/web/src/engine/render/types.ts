@@ -39,6 +39,8 @@ export interface TaskRow {
   name: string;
   start: string; // ISO date
   end: string; // ISO date
+  /** Working-day duration. Leaves use task.duration; summaries use the rollup. */
+  duration: number;
   progress: number; // 0-100
   isMilestone: boolean;
   color?: string;
@@ -65,6 +67,31 @@ export interface TaskRow {
   baseline?: BaselineTask;
   /** Deviation vs. the baseline snapshot. Present when baseline is active. */
   baselineVariance?: TaskBaselineVariance;
+  /**
+   * Short assignee summary for the Canvas bar label (plan §3.3):
+   *   - assigned:  primary owner name, optionally with ` +N` extras ("王强 +2")
+   *   - unassigned: empty string (the label renderer shows a muted "未分配")
+   *   - undefined: not computed (older scenes / summary rows that keep a
+   *     name-only label)
+   */
+  assigneeSummary?: string;
+  /**
+   * Full assignee list (plan §3.3) for the task Tooltip — every assignment
+   * resolved to its resource name and load percent. Empty when unassigned or
+   * when not computed. Order matches the task's `assignments` array.
+   */
+  assignees?: Array<{ id: string; name: string; load: number }>;
+  /**
+   * Number of predecessor dependencies this task has (its own
+   * `dependencies.length`). For the Tooltip (plan §3.2). 0 when not computed.
+   */
+  predecessorCount?: number;
+  /**
+   * Number of successor tasks that depend on this one (other tasks whose
+   * `dependencies` reference this task as a predecessor). For the Tooltip
+   * (plan §3.2). 0 when not computed.
+   */
+  successorCount?: number;
 }
 
 /** A dependency arrow in the rendered scene. */
@@ -90,6 +117,14 @@ export interface ResourceLoadBar {
   date: string;
   /** Total load 0-100+ for this resource on this date (>100 = overload). */
   load: number;
+  /**
+   * The leaf tasks that contribute load to this resource on this date
+   * (plan §3.5 / §6.2 — pre-computed at scene assembly so the hover tooltip
+   * can render the contribution list without a per-move O(tasks) scan).
+   * Each entry is `{ taskId, name, load }` (load is this task's contribution
+   * in percent for this resource on this date). Absent/empty = no tasks.
+   */
+  contributions?: Array<{ taskId: string; name: string; load: number }>;
 }
 
 /**
@@ -171,7 +206,27 @@ export interface ResourceScene {
   selectedResourceId: string | null;
   /** Selected drilled-down task lane (G19: independent of selectedTaskId). */
   selectedTaskIdInResource: string | null;
+  /**
+   * Resource lookup by id (plan §3.5): the hover/click tooltip needs the
+   * resource's name/role/capacity for a `resource-day` or `task-lane` hit.
+   * Pre-built at assembly so the hot path is O(1), not an O(n) rows scan.
+   */
+  resourceById: ReadonlyMap<string, { id: string; name: string; role?: string; capacity: number }>;
 }
+
+/**
+ * Read-only hit result for the resource view Canvas (plan §3.5 / §6.2).
+ *
+ * Used by hover/cursor/click arbitration in `ResourceLoadCanvas`. Distinct
+ * from the task view's `HitZone` because the geometry is different (daily
+ * load columns + task-lane spans instead of task bars/handles). A
+ * `resource-day` hit carries the load bar (so the tooltip can read its
+ * `load` / `contributions` directly); a `task-lane` hit carries the lane row.
+ */
+export type ResourceHit =
+  | { kind: 'empty' }
+  | { kind: 'resource-day'; resourceId: string; date: string; bar: ResourceLoadBar }
+  | { kind: 'task-lane'; resourceId: string; taskId: string };
 
 /** The complete immutable scene passed to render functions. */
 export interface Scene {
@@ -204,8 +259,14 @@ export interface Scene {
    * draws dual-layer bars; when false, no baseline geometry is drawn at all.
    */
   hasActiveBaseline: boolean;
-  /** Currently selected task id (draws a focus ring). */
+  /** Currently selected task id — the anchor / primary selection (focus ring). */
   selectedTaskId: string | null;
+  /**
+   * Multi-select set (plan §4.6). Every id in this set gets a selected outline;
+   * `selectedTaskId` (the anchor) additionally gets the focus ring so the
+   * primary selection stays distinguishable within a multi-selection.
+   */
+  selectedTaskIds: ReadonlySet<string>;
 }
 
 /** The full render options. */

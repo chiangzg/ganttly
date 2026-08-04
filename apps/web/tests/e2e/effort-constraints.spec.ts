@@ -115,7 +115,10 @@ test.describe('person-days column', () => {
       });
     });
 
-    await page.getByText('开发').dblclick();
+    // Open the drawer via right-click → "编辑" (double-click edits inline now).
+    await page.locator('[role="row"]', { hasText: '开发' }).first().click({ button: 'right' });
+    await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
+    await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
     const drawer = page.locator('aside');
     await expect(drawer.getByText('3', { exact: true })).toBeVisible();
 
@@ -144,8 +147,10 @@ test.describe('constraint editor', () => {
   });
 
   test('the drawer exposes the constraint editor section', async ({ page }) => {
-    // Open the task drawer by double-clicking the task row.
-    await page.getByText('开发').dblclick();
+    // Open the task drawer via right-click → "编辑" (double-click edits inline
+    // now — PR 8 §4.3).
+    await page.locator('[role="row"]', { hasText: '开发' }).first().click({ button: 'right' });
+    await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
     await page.waitForTimeout(200);
     // The constraint field label "约束" should be visible in the drawer.
     await expect(page.getByText('约束')).toBeVisible();

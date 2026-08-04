@@ -109,6 +109,7 @@ function makeScene(opts: {
     ],
     selectedResourceId: null,
     selectedTaskIdInResource: null,
+    resourceById: new Map([['r1', { id: 'r1', name: 'Alice', capacity: opts.capacity }]]),
   };
 }
 

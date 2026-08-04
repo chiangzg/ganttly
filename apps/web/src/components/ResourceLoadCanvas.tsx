@@ -23,6 +23,7 @@
  * panes render offset by the same value.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useProjectStore, setViewStateCommand } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
 import { assembleResourceScene, originDateFor, chartEndDate } from '@/engine/scene';
@@ -33,6 +34,8 @@ import { tasksByResource } from '@/lib/resourceTasks';
 import { PAN_THRESHOLD } from '@/engine/interaction';
 import { cn } from '@/lib/cn';
 import { useHolidayHover } from '@/components/useHolidayHover';
+import { useResourceHover } from '@/components/useResourceHover';
+import { ResourceLegend } from '@/components/ResourceLegend';
 import type { ResourceScene } from '@/engine/render/types';
 import type { ZoomLevel } from '@ganttly/schema';
 
@@ -54,12 +57,16 @@ export function ResourceLoadCanvas() {
   const resourceScrollTop = useViewStore((s) => s.resourceScrollTop);
   const setResourceScrollTop = useViewStore((s) => s.setResourceScrollTop);
   const selectedResourceId = useViewStore((s) => s.selectedResourceId);
+  const setSelectedResourceId = useViewStore((s) => s.setSelectedResourceId);
   const expandedResourceIds = useViewStore((s) => s.expandedResourceIds);
   const selectedTaskIdInResource = useViewStore((s) => s.selectedTaskIdInResource);
+  const setSelectedTaskIdInResource = useViewStore((s) => s.setSelectedTaskIdInResource);
+  const openDrawer = useViewStore((s) => s.openDrawer);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const dragRef = useRef<DragState>({ kind: 'idle' });
+  const { t } = useTranslation();
 
   // Keep a fresh scene ref so the holiday hover handler can read the latest
   // scene (zoom/origin/scroll/holidays) without re-binding the pointer handler.
@@ -72,8 +79,8 @@ export function ResourceLoadCanvas() {
 
   // Holiday hover tooltip — shared with the task view (PRD §3.5, §7.3).
   const {
-    onHoverMove,
-    clearHover,
+    onHoverMove: onHolidayHoverMove,
+    clearHover: clearHolidayHover,
     tooltip: holidayTooltip,
   } = useHolidayHover({
     getSceneFields: () => {
@@ -86,6 +93,19 @@ export function ResourceLoadCanvas() {
         holidays: scene.holidays,
       };
     },
+    viewportWidth: size.width,
+  });
+
+  // Resource load/task-lane hover tooltip (plan §3.5). Highest priority: when
+  // the pointer is over a load bar or task lane, this tooltip wins and the
+  // holiday tooltip is suppressed (priority: resource load/task-lane > holiday).
+  const {
+    onHoverMove: onResourceHoverMove,
+    clearHover: clearResourceHover,
+    tooltip: resourceTooltip,
+    hitResourceAt,
+  } = useResourceHover({
+    getScene: () => sceneRef.current,
     viewportWidth: size.width,
   });
 
@@ -208,7 +228,12 @@ export function ResourceLoadCanvas() {
     return () => el.removeEventListener('wheel', handler);
   }, [dispatch]);
 
-  // ----- Pointer drag-to-pan (mirrors GanttCanvas pan path, simplified) -----
+  // ----- Pointer drag-to-pan + click-select + double-click-open -----
+  // Press anywhere starts a *tentative* pan. If the pointer never crosses
+  // PAN_THRESHOLD we treat pointer-up as a click (plan §3.6): a resource-day
+  // hit selects the resource, a task-lane hit selects the lane, empty clears
+  // the selection. A real drag (past threshold) pans both axes instead. This
+  // mirrors GanttCanvas's pan-vs-click disambiguation (PRD §3.6).
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -229,9 +254,17 @@ export function ResourceLoadCanvas() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // When idle, detect holiday hover for the tooltip (PRD §3.5).
+    // When idle, run hover arbitration (plan §3.5): resource load/task-lane
+    // wins over holiday. Only when no resource hit do we hand the point to the
+    // holiday hover detector.
     if (dragRef.current.kind === 'idle') {
-      onHoverMove(x, y);
+      onResourceHoverMove(x, y);
+      const hit = hitResourceAt(x, y);
+      if (hit.kind === 'empty') {
+        onHolidayHoverMove(x, y);
+      } else {
+        clearHolidayHover();
+      }
       return;
     }
 
@@ -240,6 +273,9 @@ export function ResourceLoadCanvas() {
     if (!dragRef.current.engaged) {
       if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
       dragRef.current.engaged = true;
+      // A real pan suppresses any open hover tooltip.
+      clearResourceHover();
+      clearHolidayHover();
     }
     setScroll({
       scrollLeft: Math.max(0, dragRef.current.startScrollLeft + dx),
@@ -248,13 +284,48 @@ export function ResourceLoadCanvas() {
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current.kind === 'pan') {
-      dragRef.current = { kind: 'idle' };
-    }
+    const wasPanning = dragRef.current.kind === 'pan';
+    const engaged = dragRef.current.kind === 'pan' && dragRef.current.engaged;
+    dragRef.current = { kind: 'idle' };
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* ignore */
+    }
+    if (!wasPanning) return;
+    // If a real pan engaged, the scroll already updated — don't treat as click.
+    if (engaged) return;
+
+    // Click on empty space (no pan): plan §3.6 clears the current selection.
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = hitResourceAt(x, y);
+    if (hit.kind === 'resource-day') {
+      setSelectedResourceId(hit.resourceId);
+    } else if (hit.kind === 'task-lane') {
+      setSelectedResourceId(hit.resourceId);
+      setSelectedTaskIdInResource(hit.taskId);
+    } else {
+      setSelectedResourceId(null);
+      setSelectedTaskIdInResource(null);
+    }
+  };
+
+  // Double-click a task lane opens the drawer (plan §3.6): set the file-level
+  // selectedTaskId (which TaskDrawer reads) and open, mirroring ResourceList's
+  // lane double-click. A resource-day double-click is a no-op (no task to open).
+  const onDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = hitResourceAt(x, y);
+    if (hit.kind === 'task-lane') {
+      // §4.6: selection is ephemeral now; selectSingle mirrors the anchor into
+      // file.viewState.selectedTaskId for the drawer.
+      useViewStore.getState().selectSingle(hit.taskId);
+      setSelectedTaskIdInResource(hit.taskId);
+      openDrawer();
     }
   };
 
@@ -292,17 +363,21 @@ export function ResourceLoadCanvas() {
     <div
       ref={wrapRef}
       className={cn(
-        'relative flex-1 overflow-hidden bg-bg',
+        'relative flex-1 overflow-hidden bg-bg outline-none',
         dragRef.current.kind === 'pan' && dragRef.current.engaged
           ? 'cursor-grabbing'
           : 'cursor-default',
       )}
+      tabIndex={0}
+      aria-label={t('resource.canvasAriaLabel')}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onDoubleClick={onDoubleClick}
       onPointerLeave={() => {
-        clearHover();
+        clearResourceHover();
+        clearHolidayHover();
       }}
     >
       {/* Spacer reserves the full vertical scroll height so the store-driven
@@ -317,7 +392,11 @@ export function ResourceLoadCanvas() {
         className="pointer-events-none absolute inset-0"
         style={{ width: size.width, height: size.height }}
       />
+      {resourceTooltip}
       {holidayTooltip}
+      {/* Legend (plan §5.3): explains the green/red/capacity-line encoding so
+          overload is identifiable without relying on color alone. */}
+      <ResourceLegend />
       {/* Horizontal scroll shim — mirrors GanttCanvas's ScrollShim; keeps the
           thumb in sync with the store (incl. Today button / wheel pan) via the
           userScrolling guard to avoid feedback loops. */}

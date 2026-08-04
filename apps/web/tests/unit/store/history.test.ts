@@ -78,6 +78,20 @@ describe('history — undo/redo basics', () => {
     expect(store().file.tasks).toHaveLength(0);
   });
 
+  it('undoCommand only undoes the command while it is still the latest entry', () => {
+    const store = useProjectStore.getState;
+    const first = addTaskCommand(makeTask('first'), null, 0);
+    const second = addTaskCommand(makeTask('second'), null, 1);
+    store().dispatch(first);
+    store().dispatch(second);
+
+    expect(store().undoCommand(first)).toBe(false);
+    expect(store().file.tasks.map((task) => task.id)).toEqual(['first', 'second']);
+
+    expect(store().undoCommand(second)).toBe(true);
+    expect(store().file.tasks.map((task) => task.id)).toEqual(['first']);
+  });
+
   it('each command type round-trips', () => {
     const store = useProjectStore.getState;
 
@@ -142,6 +156,43 @@ describe('history — undo/redo basics', () => {
     const t2Undo = store().file.tasks.find((t) => t.id === 't2')!;
     expect(t2Undo.dependencies).toHaveLength(0);
     expect(t2Undo.start).toBe('2026-01-05'); // original restored
+  });
+
+  it('undoing a cascade delete restores internal and surviving dependency edges', () => {
+    const store = useProjectStore.getState;
+    store().dispatch(addTaskCommand(makeTask('parent'), null, 0));
+    store().dispatch(
+      addTaskCommand(
+        makeTask('child', {
+          parentId: 'parent',
+          dependencies: [{ targetId: 'parent', type: 'SS', lag: 0 }],
+        }),
+        'parent',
+        0,
+      ),
+    );
+    store().dispatch(
+      addTaskCommand(
+        makeTask('survivor', {
+          order: 1,
+          dependencies: [{ targetId: 'child', type: 'FS', lag: 0 }],
+        }),
+        null,
+        1,
+      ),
+    );
+
+    store().dispatch(deleteTaskCommand('parent'));
+    expect(store().file.tasks).toHaveLength(1);
+    expect(store().file.tasks[0]!.dependencies).toEqual([]);
+
+    store().undo();
+    expect(store().file.tasks.find((task) => task.id === 'child')!.dependencies).toEqual([
+      { targetId: 'parent', type: 'SS', lag: 0 },
+    ]);
+    expect(store().file.tasks.find((task) => task.id === 'survivor')!.dependencies).toEqual([
+      { targetId: 'child', type: 'FS', lag: 0 },
+    ]);
   });
 
   it('updateTaskWithRollupCommand cascades: moving a predecessor reschedules successors', () => {

@@ -16,6 +16,7 @@
  */
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Pencil, Trash2, Eye } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import type { Baseline } from '@ganttly/schema';
@@ -31,11 +32,12 @@ import { useBaselineSelection } from './useBaselineSelection';
 
 const NAME_MAX = 40;
 
-/** First unused positive integer for default name `计划基线 N` (spec §2.2). */
+/** First unused positive integer for the default name (spec §2.2). Matches both
+ * the zh (`计划基线 N`) and en (`Baseline N`) default-name prefixes. */
 export function nextBaselineNumber(baselines: ReadonlyArray<Baseline>): number {
   const used = new Set<number>();
   for (const b of baselines) {
-    const m = /^计划基线\s+(\d+)$/.exec(b.name.trim());
+    const m = /^(计划基线|Baseline)\s+(\d+)$/.exec(b.name.trim());
     if (m) used.add(Number(m[1]));
   }
   let n = 1;
@@ -44,8 +46,9 @@ export function nextBaselineNumber(baselines: ReadonlyArray<Baseline>): number {
 }
 
 /**
- * Validate a baseline name (spec §2.2). Returns an error key or null.
- * Uniqueness ignores ASCII case; Chinese compared as-is.
+ * Validate a baseline name (spec §2.2). Returns an i18n KEY (translated at the
+ * call site via `t(err)`) or null when valid. Uniqueness ignores ASCII case;
+ * Chinese compared as-is.
  */
 export function validateBaselineName(
   name: string,
@@ -53,12 +56,12 @@ export function validateBaselineName(
   exceptId?: string,
 ): string | null {
   const trimmed = name.trim();
-  if (!trimmed) return '名称不能为空';
-  if (trimmed.length > NAME_MAX) return `名称不能超过 ${NAME_MAX} 个字符`;
+  if (!trimmed) return 'baseline.nameEmpty';
+  if (trimmed.length > NAME_MAX) return 'baseline.nameTooLong';
   const lower = trimmed.toLowerCase();
   for (const b of baselines) {
     if (exceptId && b.id === exceptId) continue;
-    if (b.name.trim().toLowerCase() === lower) return '名称已存在';
+    if (b.name.trim().toLowerCase() === lower) return 'baseline.nameDuplicate';
   }
   return null;
 }
@@ -73,20 +76,23 @@ interface CreateBaselineDialogProps {
 }
 
 export function CreateBaselineDialog({ open, onOpenChange }: CreateBaselineDialogProps) {
+  const { t } = useTranslation();
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
   const selectBaseline = useBaselineSelection();
 
-  const defaultName = `计划基线 ${nextBaselineNumber(file.baselines)}`;
+  const defaultName = t('baseline.defaultName', {
+    n: nextBaselineNumber(file.baselines),
+  });
   const [name, setName] = useState(defaultName);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setName(`计划基线 ${nextBaselineNumber(file.baselines)}`);
+      setName(t('baseline.defaultName', { n: nextBaselineNumber(file.baselines) }));
       setError(null);
     }
-  }, [open, file.baselines]);
+  }, [open, file.baselines, t]);
 
   const taskCount = file.tasks.length;
 
@@ -94,7 +100,7 @@ export function CreateBaselineDialog({ open, onOpenChange }: CreateBaselineDialo
     event.preventDefault();
     const err = validateBaselineName(name, file.baselines);
     if (err) {
-      setError(err);
+      setError(t(err));
       return;
     }
     // Capture the snapshot from the CURRENT file state, then dispatch + activate.
@@ -113,17 +119,19 @@ export function CreateBaselineDialog({ open, onOpenChange }: CreateBaselineDialo
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-[2px]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-bg-elevated p-6 shadow-2xl outline-none">
-          <Dialog.Title className="text-lg font-semibold text-fg">保存计划基线</Dialog.Title>
+          <Dialog.Title className="text-lg font-semibold text-fg">
+            {t('baseline.saveTitle')}
+          </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-fg-muted">
-            基线用于对比后续计划变化，创建后快照内容不可更新。
+            {t('baseline.saveDescription')}
           </Dialog.Description>
           <Dialog.Close className="absolute right-4 top-4 rounded-lg p-1.5 text-fg-muted hover:bg-bg hover:text-fg">
             <X size={17} />
-            <span className="sr-only">关闭</span>
+            <span className="sr-only">{t('common.close')}</span>
           </Dialog.Close>
           <form onSubmit={submit} className="mt-5">
             <label className="text-sm font-medium text-fg" htmlFor="baseline-name">
-              基线名称
+              {t('baseline.nameLabel')}
             </label>
             <input
               id="baseline-name"
@@ -140,17 +148,17 @@ export function CreateBaselineDialog({ open, onOpenChange }: CreateBaselineDialo
               </span>
             </div>
             <p className="mt-3 text-xs text-fg-muted">
-              将保存 {taskCount} 个任务的开始、完成、工期和进度。
+              {t('baseline.savingTasksHint', { count: taskCount })}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <Dialog.Close className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-fg hover:bg-bg">
-                取消
+                {t('common.cancel')}
               </Dialog.Close>
               <button
                 type="submit"
                 className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary/90"
               >
-                保存并比较
+                {t('baseline.saveAndCompare')}
               </button>
             </div>
           </form>
@@ -170,6 +178,7 @@ interface RenameBaselineDialogProps {
 }
 
 export function RenameBaselineDialog({ baseline, onOpenChange }: RenameBaselineDialogProps) {
+  const { t } = useTranslation();
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
   const [name, setName] = useState('');
@@ -189,7 +198,7 @@ export function RenameBaselineDialog({ baseline, onOpenChange }: RenameBaselineD
     event.preventDefault();
     const err = validateBaselineName(name, file.baselines, baseline.id);
     if (err) {
-      setError(err);
+      setError(t(err));
       return;
     }
     dispatch(renameBaselineCommand(baseline.id, name.trim()));
@@ -201,17 +210,19 @@ export function RenameBaselineDialog({ baseline, onOpenChange }: RenameBaselineD
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-[2px]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-bg-elevated p-6 shadow-2xl outline-none">
-          <Dialog.Title className="text-lg font-semibold text-fg">重命名基线</Dialog.Title>
+          <Dialog.Title className="text-lg font-semibold text-fg">
+            {t('baseline.renameTitle')}
+          </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-fg-muted">
-            只修改名称，不影响快照内容与捕获时间。
+            {t('baseline.renameDescription')}
           </Dialog.Description>
           <Dialog.Close className="absolute right-4 top-4 rounded-lg p-1.5 text-fg-muted hover:bg-bg hover:text-fg">
             <X size={17} />
-            <span className="sr-only">关闭</span>
+            <span className="sr-only">{t('common.close')}</span>
           </Dialog.Close>
           <form onSubmit={submit} className="mt-5">
             <label className="text-sm font-medium text-fg" htmlFor="rename-baseline-name">
-              基线名称
+              {t('baseline.nameLabel')}
             </label>
             <input
               id="rename-baseline-name"
@@ -229,13 +240,13 @@ export function RenameBaselineDialog({ baseline, onOpenChange }: RenameBaselineD
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <Dialog.Close className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-fg hover:bg-bg">
-                取消
+                {t('common.cancel')}
               </Dialog.Close>
               <button
                 type="submit"
                 className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary/90"
               >
-                保存
+                {t('common.save')}
               </button>
             </div>
           </form>
@@ -260,6 +271,7 @@ export function DeleteBaselineDialog({
   onOpenChange,
   onSelectBaseline,
 }: DeleteBaselineDialogProps) {
+  const { t } = useTranslation();
   const dispatch = useProjectStore((s) => s.dispatch);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
 
@@ -280,21 +292,24 @@ export function DeleteBaselineDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-[2px]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-bg-elevated p-6 shadow-2xl outline-none">
-          <Dialog.Title className="text-lg font-semibold text-fg">删除基线</Dialog.Title>
+          <Dialog.Title className="text-lg font-semibold text-fg">
+            {t('baseline.deleteTitle')}
+          </Dialog.Title>
           <Dialog.Description className="mt-2 text-sm leading-6 text-fg-muted">
-            确认删除基线「{baseline.name}」？只删除基线，不修改当前任务。
-            {isActive ? ' 删除后将退出比较模式。' : ''}
+            {t(isActive ? 'baseline.deleteConfirmActive' : 'baseline.deleteConfirm', {
+              name: baseline.name,
+            })}
           </Dialog.Description>
           <div className="mt-6 flex justify-end gap-2">
             <Dialog.Close className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-fg hover:bg-bg">
-              取消
+              {t('common.cancel')}
             </Dialog.Close>
             <button
               type="button"
               onClick={confirm}
               className="rounded-xl bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90"
             >
-              删除
+              {t('drawer.delete')}
             </button>
           </div>
         </Dialog.Content>
@@ -324,6 +339,7 @@ export function ManageBaselinesDialog({
   onDelete,
   onSelectBaseline,
 }: ManageBaselinesDialogProps) {
+  const { t } = useTranslation();
   const file = useProjectStore((s) => s.file);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
 
@@ -337,18 +353,20 @@ export function ManageBaselinesDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-[2px]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-64px)] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-bg-elevated p-6 shadow-2xl outline-none">
-          <Dialog.Title className="text-lg font-semibold text-fg">管理基线</Dialog.Title>
+          <Dialog.Title className="text-lg font-semibold text-fg">
+            {t('baseline.manageTitle')}
+          </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-fg-muted">
-            查看、重命名或删除已保存的基线。基线内容不可更新。
+            {t('baseline.manageDescription')}
           </Dialog.Description>
           <Dialog.Close className="absolute right-4 top-4 rounded-lg p-1.5 text-fg-muted hover:bg-bg hover:text-fg">
             <X size={17} />
-            <span className="sr-only">关闭</span>
+            <span className="sr-only">{t('common.close')}</span>
           </Dialog.Close>
 
           {sorted.length === 0 ? (
             <div className="mt-8 flex flex-col items-center gap-4 py-10 text-center">
-              <p className="text-sm text-fg-muted">尚未保存基线</p>
+              <p className="text-sm text-fg-muted">{t('baseline.manageEmpty')}</p>
               <button
                 type="button"
                 onClick={() => {
@@ -357,17 +375,17 @@ export function ManageBaselinesDialog({
                 }}
                 className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
               >
-                创建基线
+                {t('toolbar.createBaseline')}
               </button>
             </div>
           ) : (
             <div className="mt-5 min-h-0 flex-1 overflow-y-auto">
               {/* Header row */}
               <div className="grid grid-cols-[minmax(0,1fr)_140px_64px_120px] gap-2 border-b border-border pb-2 text-xs font-medium text-fg-muted">
-                <span>名称</span>
-                <span>捕获时间</span>
-                <span className="text-right">任务数</span>
-                <span className="text-right">操作</span>
+                <span>{t('baseline.columnName')}</span>
+                <span>{t('baseline.columnCapturedAt')}</span>
+                <span className="text-right">{t('baseline.columnTaskCount')}</span>
+                <span className="text-right">{t('baseline.columnActions')}</span>
               </div>
               <ul className="divide-y divide-border">
                 {sorted.map((b) => {
@@ -383,7 +401,9 @@ export function ManageBaselinesDialog({
                           {b.name}
                         </span>
                         {isActive ? (
-                          <span className="shrink-0 text-[11px] text-primary">比较中</span>
+                          <span className="shrink-0 text-[11px] text-primary">
+                            {t('baseline.comparing')}
+                          </span>
                         ) : null}
                       </span>
                       <span className="truncate text-xs text-fg-muted" title={captured}>
@@ -396,8 +416,12 @@ export function ManageBaselinesDialog({
                         <button
                           type="button"
                           onClick={() => onSelectBaseline(isActive ? null : b.id)}
-                          aria-label={isActive ? '停止比较此基线' : '启用此基线比较'}
-                          title={isActive ? '停止比较' : '比较'}
+                          aria-label={
+                            isActive ? t('baseline.stopCompare') : t('baseline.startCompare')
+                          }
+                          title={
+                            isActive ? t('baseline.stopCompareShort') : t('baseline.compareShort')
+                          }
                           className="rounded-lg p-1.5 text-fg-muted hover:bg-bg hover:text-fg"
                         >
                           <Eye size={15} />
@@ -405,8 +429,8 @@ export function ManageBaselinesDialog({
                         <button
                           type="button"
                           onClick={() => onRename(b)}
-                          aria-label={`重命名基线 ${b.name}`}
-                          title="重命名"
+                          aria-label={t('baseline.renameAria', { name: b.name })}
+                          title={t('baseline.renameShort')}
                           className="rounded-lg p-1.5 text-fg-muted hover:bg-bg hover:text-fg"
                         >
                           <Pencil size={15} />
@@ -414,8 +438,8 @@ export function ManageBaselinesDialog({
                         <button
                           type="button"
                           onClick={() => onDelete(b)}
-                          aria-label={`删除基线 ${b.name}`}
-                          title="删除"
+                          aria-label={t('baseline.deleteAria', { name: b.name })}
+                          title={t('drawer.delete')}
                           className="rounded-lg p-1.5 text-danger hover:bg-danger/10"
                         >
                           <Trash2 size={15} />
@@ -437,7 +461,7 @@ export function ManageBaselinesDialog({
               }}
               className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
             >
-              保存当前计划为基线…
+              {t('baseline.saveAsBaseline')}
             </button>
           </div>
         </Dialog.Content>

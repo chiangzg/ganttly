@@ -16,20 +16,19 @@ import { useViewStore } from '@/store/useViewStore';
 import { todayISO } from '@/engine/layout';
 import { dateToPixel } from '@/engine/layout';
 import { originDateFor } from '@/engine/scene';
-import type { ZoomLevel } from '@ganttly/schema';
 import { ToolbarButton } from './ui/ToolbarButton';
 import { ToolbarDivider } from './ui/ToolbarDivider';
 import { ExportMenu } from './ExportMenu';
 import { BaselineControl } from './BaselineControl';
 import { findActiveBaseline } from '@/lib/baseline';
-import { nanoid } from 'nanoid';
-import { addTaskCommand } from '@/store/useProjectStore';
-import type { Task } from '@ganttly/schema';
+import { fitProjectRange } from '@/lib/fitProjectRange';
+import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   CalendarDays,
   Check,
   CircleAlert,
+  Expand,
   GitBranch,
   ListTree,
   LoaderCircle,
@@ -43,8 +42,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
-
-const ZOOM_ORDER: ZoomLevel[] = ['day', 'week', 'month', 'year'];
+import { modKeyLabel } from '@/lib/platform';
 
 export function Toolbar() {
   const { t } = useTranslation();
@@ -54,11 +52,12 @@ export function Toolbar() {
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
   const canUndo = useProjectStore((s) => s.canUndo());
+  // Platform modifier for shortcut hints in tooltips (plan §4.2): ⌘ / Ctrl.
+  const mod = modKeyLabel();
   const canRedo = useProjectStore((s) => s.canRedo());
   const nextUndoLabel = useProjectStore((s) => s.nextUndoLabel());
   const nextRedoLabel = useProjectStore((s) => s.nextRedoLabel());
   const saveState = useProjectStore((s) => s.saveState);
-  const openDrawer = useViewStore((s) => s.openDrawer);
 
   const jumpToToday = () => {
     // Use the SAME origin the renderer uses (assembleScene → originDateFor).
@@ -89,49 +88,42 @@ export function Toolbar() {
     });
   };
 
-  const zoomIn = () => {
-    const idx = ZOOM_ORDER.indexOf(file.viewState.zoom);
-    const next = ZOOM_ORDER[Math.max(0, idx - 1)]!;
-    dispatch(setViewStateCommand({ zoom: next }));
+  // Zoom in/out anchored on the VIEWPORT CENTER (plan §4.5). The date under the
+  // centre stays at the centre after the zoom change — no drift. These are
+  // NAVIGATION (direct setState), not undoable: a zoom step shouldn't pollute
+  // the undo stack, consistent with Today/revealTask/fit (plan §6.4).
+  const zoomAroundCenter = (direction: -1 | 1) => {
+    const activeBaseline = findActiveBaseline(
+      file.baselines,
+      useViewStore.getState().activeBaselineId,
+    );
+    const origin = originDateFor(file, { activeBaseline });
+    const current = file.viewState.zoom;
+    const next = nextZoomLevel(current, direction);
+    if (next === current) return;
+    const chartEl = document.querySelector('[data-gantt-chart]') as HTMLElement | null;
+    const viewportWidth = chartEl ? chartEl.clientWidth : 800;
+    const centerX = file.viewState.scrollLeft + viewportWidth / 2;
+    const result = computeZoomAround(origin, current, next, centerX, viewportWidth / 2);
+    useProjectStore.setState({
+      file: {
+        ...file,
+        viewState: { ...file.viewState, zoom: result.zoom, scrollLeft: result.scrollLeft },
+      },
+    });
   };
 
-  const zoomOut = () => {
-    const idx = ZOOM_ORDER.indexOf(file.viewState.zoom);
-    const next = ZOOM_ORDER[Math.min(ZOOM_ORDER.length - 1, idx + 1)]!;
-    dispatch(setViewStateCommand({ zoom: next }));
-  };
+  const zoomIn = () => zoomAroundCenter(-1);
+  const zoomOut = () => zoomAroundCenter(1);
 
   const toggleCriticalPath = () => {
     dispatch(setViewStateCommand({ showCriticalPath: !file.viewState.showCriticalPath }));
   };
 
-  const addRootTask = () => {
-    const start = todayISO();
-    const id = nanoid(10);
-    const task: Task = {
-      id,
-      name: t('table.placeholderName'),
-      parentId: null,
-      order: file.tasks.filter((x) => x.parentId === null).length,
-      start,
-      end: start,
-      duration: 1,
-      overtimeDates: [],
-      progress: 0,
-      isMilestone: false,
-      dependencies: [],
-      constraints: { type: 'none' },
-      assignments: [],
-      customFields: {},
-    };
-    // Select the new task atomically with creating it, then open the drawer.
-    dispatch(addTaskCommand(task, null, task.order));
-    dispatch(setViewStateCommand({ selectedTaskId: id }));
-    openDrawer();
-  };
-
   const viewMode = useViewStore((s) => s.viewMode);
   const setViewMode = useViewStore((s) => s.setViewMode);
+  const taskViewControlsDisabled = viewMode !== 'task';
+  const taskViewOnlyTitle = t('toolbar.taskViewOnly');
 
   return (
     <div
@@ -143,7 +135,18 @@ export function Toolbar() {
           <CalendarDays size={15} />
           <span>{t('toolbar.today')}</span>
         </ToolbarButton>
-        <div className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex" aria-label="时间缩放">
+        <ToolbarButton
+          onClick={fitProjectRange}
+          title={t('toolbar.fitProjectRangeHint')}
+          aria-label={t('toolbar.fitProjectRange')}
+        >
+          <Expand size={15} />
+          <span className="hidden xl:inline">{t('toolbar.fitProjectRange')}</span>
+        </ToolbarButton>
+        <div
+          className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex"
+          aria-label={t('toolbar.groupZoom')}
+        >
           <ToolbarButton
             size="icon"
             onClick={zoomOut}
@@ -170,12 +173,16 @@ export function Toolbar() {
 
       <ToolbarDivider className="hidden lg:block" />
       <ToolbarGroup className="hidden lg:flex" aria-label="计划显示">
-        <div className="hidden xl:block">
+        <div
+          className="hidden xl:block"
+          title={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+        >
           <ToolbarButton
             onClick={toggleCriticalPath}
-            title={t('toolbar.criticalPath')}
+            title={taskViewControlsDisabled ? taskViewOnlyTitle : t('toolbar.criticalPath')}
             aria-label={t('toolbar.criticalPath')}
             pressed={file.viewState.showCriticalPath}
+            disabled={taskViewControlsDisabled}
           >
             <GitBranch size={15} />
             {file.viewState.showCriticalPath
@@ -183,7 +190,9 @@ export function Toolbar() {
               : t('toolbar.showCriticalPath')}
           </ToolbarButton>
         </div>
-        {viewMode === 'task' ? <BaselineControl /> : null}
+        <BaselineControl
+          disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+        />
       </ToolbarGroup>
 
       <ToolbarDivider className="hidden lg:block" />
@@ -218,16 +227,12 @@ export function Toolbar() {
 
       <div className="min-w-1 flex-1" />
       <ToolbarGroup aria-label="编辑操作">
-        <ToolbarButton onClick={addRootTask} title={t('toolbar.newTask')} variant="primary">
-          <Plus size={15} strokeWidth={2.25} />
-          {t('toolbar.newTask')}
-        </ToolbarButton>
         <ToolbarButton
           size="icon"
           onClick={undo}
           disabled={!canUndo}
           aria-label={t('toolbar.undo')}
-          title={nextUndoLabel ? t('status.undo', { label: nextUndoLabel }) : t('toolbar.undo')}
+          title={`${nextUndoLabel ? t('status.undo', { label: nextUndoLabel }) : t('toolbar.undo')} (${mod}Z)`}
         >
           <Undo2 size={16} />
         </ToolbarButton>
@@ -236,7 +241,7 @@ export function Toolbar() {
           onClick={redo}
           disabled={!canRedo}
           aria-label={t('toolbar.redo')}
-          title={nextRedoLabel ? t('status.redo', { label: nextRedoLabel }) : t('toolbar.redo')}
+          title={`${nextRedoLabel ? t('status.redo', { label: nextRedoLabel }) : t('toolbar.redo')} (${mod}⇧Z)`}
         >
           <Redo2 size={16} />
         </ToolbarButton>
@@ -244,7 +249,7 @@ export function Toolbar() {
           size="icon"
           onClick={() => void save()}
           aria-label={t('toolbar.save')}
-          title={saveTitle(saveState, t('toolbar.save'), t('status.saving'), t('status.saved'))}
+          title={`${saveTitle(saveState, t('toolbar.save'), t('status.saving'), t('status.saved'))} (${mod}S)`}
           className={saveState.status === 'error' ? 'text-danger hover:text-danger' : undefined}
         >
           {saveState.status === 'saving' ? (
@@ -275,7 +280,7 @@ export function Toolbar() {
             >
               <div className="lg:hidden">
                 <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  时间缩放
+                  {t('toolbar.groupZoom')}
                 </div>
                 <DropdownMenu.Item onSelect={zoomIn} className={menuItemClass}>
                   <ZoomIn size={15} className="text-fg-muted" />
@@ -288,16 +293,21 @@ export function Toolbar() {
                   <Minus size={15} className="text-fg-muted" />
                   {t('toolbar.zoomOut')}
                 </DropdownMenu.Item>
-                {viewMode === 'task' ? <BaselineControl presentation="menu" /> : null}
+                <BaselineControl
+                  presentation="menu"
+                  disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+                />
                 <DropdownMenu.Separator className="my-1 h-px bg-border" />
               </div>
               <div className="xl:hidden">
                 <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  显示选项
+                  {t('toolbar.groupDisplay')}
                 </div>
                 <DropdownMenu.CheckboxItem
                   checked={file.viewState.showCriticalPath}
                   onCheckedChange={toggleCriticalPath}
+                  disabled={taskViewControlsDisabled}
+                  title={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
                   className={menuItemClass}
                 >
                   <GitBranch size={15} className="text-fg-muted" />
@@ -309,7 +319,7 @@ export function Toolbar() {
                 <DropdownMenu.Separator className="my-1 h-px bg-border" />
               </div>
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                导出当前项目
+                {t('toolbar.groupExport')}
               </div>
               <ExportMenu />
             </DropdownMenu.Content>
@@ -325,7 +335,7 @@ function cap(s: string): string {
 }
 
 const menuItemClass =
-  'flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg';
+  'flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40';
 
 function ToolbarGroup({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div {...props} className={cn('flex shrink-0 items-center gap-1', className)} />;

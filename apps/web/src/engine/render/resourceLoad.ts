@@ -57,6 +57,7 @@ export function renderResourceLoad(
     // renders baseline tracks, so this minimal projection is always false.
     hasActiveBaseline: false,
     selectedTaskId: null,
+    selectedTaskIds: new Set<string>(),
   };
   renderGrid(ctx, gridScene, theme);
   // Today line (PRD §3.10) — keep it visible in the resource view too, over the

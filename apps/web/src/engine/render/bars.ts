@@ -26,6 +26,7 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
     scrollLeft,
     rows,
     selectedTaskId,
+    selectedTaskIds,
     showCriticalPath,
     hasActiveBaseline,
   } = scene;
@@ -51,6 +52,7 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
       scrollLeft,
       theme,
       selectedTaskId,
+      selectedTaskIds,
       showCriticalPath,
       hasActiveBaseline,
       viewportWidth: scene.viewportWidth,
@@ -63,7 +65,10 @@ interface DrawCtx {
   originDate: string;
   scrollLeft: number;
   theme: ThemeColors;
+  /** Anchor / primary selected task id (draws the focus ring). */
   selectedTaskId: string | null;
+  /** Multi-select set (plan §4.6); every member gets a selected outline. */
+  selectedTaskIds: ReadonlySet<string>;
   showCriticalPath: boolean;
   /** When true, rows draw a baseline reference track below the live bar. */
   hasActiveBaseline: boolean;
@@ -131,10 +136,13 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
     }
   }
 
-  // Bar outline (always visible, sharper when selected)
+  // Bar outline (always visible, sharper when selected). §4.6: every task in
+  // the multi-select set gets a 2px primary outline; the anchor additionally
+  // gets the selection ring further below. Non-selected bars use a 1px darken.
+  const isSelected = env.selectedTaskIds.has(row.id);
   drawRoundedRect(ctx, xStart, barY, width, barH, BAR_RADIUS);
-  ctx.strokeStyle = row.id === env.selectedTaskId ? env.theme.primary : darken(barColor);
-  ctx.lineWidth = row.id === env.selectedTaskId ? 2 : 1;
+  ctx.strokeStyle = isSelected ? env.theme.primary : darken(barColor);
+  ctx.lineWidth = isSelected ? 2 : 1;
   ctx.stroke();
 
   // Constraint marker (G5): a small icon at the constrained edge.
@@ -209,7 +217,18 @@ function drawBaselineMilestone(
   ctx.restore();
 }
 
-/** Shared row-label drawing (extracted to avoid duplication in compare paths). */
+/**
+ * Shared row-label drawing (extracted to avoid duplication in compare paths).
+ *
+ * Combines the task name with a short assignee summary (plan §3.3):
+ *   - assigned:   "开发实现 · 王强"  (or "开发实现 · 王强 +2")
+ *   - unassigned: "开发实现 · 未分配" (muted)
+ *   - no summary (summary rows / legacy scenes): name only.
+ *
+ * Truncation keeps the task name intact as long as possible: if the combined
+ * label overflows, the trailing assignee part is cut first, then the whole
+ * label is ellipsised as a fallback.
+ */
 function drawRowLabel(
   ctx: CanvasRenderingContext2D,
   row: TaskRow,
@@ -218,19 +237,66 @@ function drawRowLabel(
   yTop: number,
   env: DrawCtx,
 ): void {
-  const label = row.name;
-  if (!label) return;
-  ctx.fillStyle = env.theme.fg;
-  ctx.font = '12px system-ui, sans-serif';
+  const name = row.name;
+  if (!name) return;
+  // `assigneeSummary === undefined` means the scene didn't compute one
+  // (e.g. a summary row) — keep the legacy name-only label.
+  const hasAssigneeField = row.assigneeSummary !== undefined;
+  const summary = hasAssigneeField ? row.assigneeSummary || UNASSIGNED : null;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   const labelX = xStart + width + 6;
   const maxLabelWidth = env.viewportWidth - labelX;
-  if (maxLabelWidth > 20) {
-    const truncated = ellipsis(ctx, label, Math.max(20, maxLabelWidth));
-    ctx.fillText(truncated, labelX, yTop + ROW_HEIGHT / 2);
+  if (maxLabelWidth <= 20) return;
+
+  const centerY = yTop + ROW_HEIGHT / 2;
+
+  // Name-only path: single fill, theme.fg.
+  if (summary === null) {
+    ctx.fillStyle = env.theme.fg;
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(ellipsis(ctx, name, Math.max(20, maxLabelWidth)), labelX, centerY);
+    return;
   }
+
+  // Combined path: "name · summary". Measure both to truncate the summary
+  // first, then the name, so the name survives as long as possible.
+  ctx.font = '12px system-ui, sans-serif';
+  const sep = ' · ';
+  const nameW = ctx.measureText(name).width;
+  const sepW = ctx.measureText(sep).width;
+  const summaryW = ctx.measureText(summary).width;
+  const total = nameW + sepW + summaryW;
+
+  // Everything fits → draw name in fg, separator+summary in fgMuted.
+  if (total <= maxLabelWidth) {
+    ctx.fillStyle = env.theme.fg;
+    ctx.fillText(name, labelX, centerY);
+    ctx.fillStyle = env.theme.fgMuted;
+    ctx.fillText(sep + summary, labelX + nameW, centerY);
+    return;
+  }
+
+  // Truncate the summary to whatever room remains after the name + separator.
+  // Keep at least the full name; the summary is allowed to vanish entirely.
+  const roomForSummary = Math.max(0, maxLabelWidth - nameW - sepW);
+  if (roomForSummary > 4) {
+    const trimmedSummary = ellipsis(ctx, summary, roomForSummary);
+    ctx.fillStyle = env.theme.fg;
+    ctx.fillText(name, labelX, centerY);
+    ctx.fillStyle = env.theme.fgMuted;
+    ctx.fillText(sep + trimmedSummary, labelX + nameW, centerY);
+    return;
+  }
+
+  // Not enough room even for "name · …" — ellipsis the name alone (fg).
+  ctx.fillStyle = env.theme.fg;
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillText(ellipsis(ctx, name, Math.max(20, maxLabelWidth)), labelX, centerY);
 }
+
+/** Muted placeholder shown after the task name when a leaf has no assignees. */
+const UNASSIGNED = '未分配';
 
 function drawSummaryBar(
   ctx: CanvasRenderingContext2D,

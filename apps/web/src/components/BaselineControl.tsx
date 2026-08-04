@@ -15,6 +15,7 @@
  */
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Layers3, Check, ChevronRight, Plus, Settings2 } from 'lucide-react';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useViewStore } from '@/store/useViewStore';
@@ -35,10 +36,13 @@ const NAME_MAX_WIDTH = 120;
 
 export function BaselineControl({
   presentation = 'toolbar',
+  disabledReason,
 }: {
   presentation?: 'toolbar' | 'menu';
+  disabledReason?: string;
 }) {
   const file = useProjectStore((s) => s.file);
+  const { t } = useTranslation();
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const setActiveBaselineId = useViewStore((s) => s.setActiveBaselineId);
   const switchBaseline = useBaselineSelection();
@@ -65,12 +69,12 @@ export function BaselineControl({
   let label: string;
   let pressed = false;
   if (!hasBaselines) {
-    label = '创建基线';
+    label = t('toolbar.createBaseline');
   } else if (active) {
-    label = `基线：${active.name}`;
+    label = t('toolbar.baselineWithName', { name: active.name });
     pressed = true;
   } else {
-    label = '基线';
+    label = t('toolbar.baseline');
   }
 
   // Newest-first for the menu (spec §2.1).
@@ -85,28 +89,35 @@ export function BaselineControl({
   }, [active, file.tasks, file.resources, file.calendar]);
   const summaryText = summary
     ? summary.lateLeafCount > 0
-      ? `${summary.lateLeafCount} 项延期 · 最大 +${summary.maxFinishDelay} 工作日`
-      : '无完成延期'
+      ? t('baseline.summaryDelay', {
+          count: summary.lateLeafCount,
+          max: summary.maxFinishDelay,
+        })
+      : t('baseline.summaryNoDelay')
     : null;
   const structureSummaryText = summary
     ? [
-        summary.addedLeafCount > 0 ? `新增 ${summary.addedLeafCount} 项` : null,
-        summary.deletedTaskCount > 0 ? `原任务已删除 ${summary.deletedTaskCount} 项` : null,
+        summary.addedLeafCount > 0
+          ? t('baseline.addedCount', { count: summary.addedLeafCount })
+          : null,
+        summary.deletedTaskCount > 0
+          ? t('baseline.deletedCount', { count: summary.deletedTaskCount })
+          : null,
       ]
         .filter(Boolean)
         .join(' · ')
     : '';
 
-  // The trigger is disabled only when there are no tasks (spec §4.1: empty
-  // projects can't create baselines). With baselines present, it opens the menu.
-  const triggerDisabled = !hasTasks && !hasBaselines;
-  const triggerTitle = triggerDisabled ? '至少添加一个任务后才能创建基线' : label;
+  // Empty projects cannot create a baseline (spec §4.1). The toolbar can also
+  // disable this task-only control while keeping its width stable in other views.
+  const triggerDisabled = Boolean(disabledReason) || (!hasTasks && !hasBaselines);
+  const triggerTitle = disabledReason ?? (triggerDisabled ? t('toolbar.baselineEmptyHint') : label);
 
   const openCreate = () => setCreateOpen(true);
   const menuContent = (
     <>
       <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-        基线对比
+        {t('toolbar.baselineCompare')}
       </div>
 
       {active && summaryText ? (
@@ -125,7 +136,7 @@ export function BaselineControl({
           className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
         >
           <RadioIndicator />
-          不比较
+          {t('baseline.noCompare')}
         </DropdownMenu.RadioItem>
         {sortedBaselines.map((b) => (
           <DropdownMenu.RadioItem
@@ -139,7 +150,7 @@ export function BaselineControl({
                 {b.name}
               </span>
               <span className="text-[11px] text-fg-muted">
-                {b.capturedAt.slice(0, 10)} · {b.tasks.length} 任务
+                {b.capturedAt.slice(0, 10)} · {t('baseline.taskCount', { count: b.tasks.length })}
               </span>
             </span>
           </DropdownMenu.RadioItem>
@@ -153,14 +164,14 @@ export function BaselineControl({
         className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
       >
         <Plus size={15} />
-        保存当前计划为基线…
+        {t('baseline.saveAsBaseline')}
       </DropdownMenu.Item>
       <DropdownMenu.Item
         onSelect={() => setManageOpen(true)}
         className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg"
       >
         <Settings2 size={15} />
-        管理基线…
+        {t('baseline.manageBaselines')}
       </DropdownMenu.Item>
     </>
   );
@@ -168,32 +179,35 @@ export function BaselineControl({
   return (
     <>
       {presentation === 'toolbar' ? (
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <ToolbarButton pressed={pressed} disabled={triggerDisabled} title={triggerTitle}>
-              <Layers3 size={15} />
-              <span
-                className="max-w-[var(--baseline-name-max)] truncate"
-                style={{ ['--baseline-name-max' as string]: `${NAME_MAX_WIDTH}px` }}
+        <span title={triggerTitle}>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <ToolbarButton pressed={pressed} disabled={triggerDisabled} title={triggerTitle}>
+                <Layers3 size={15} />
+                <span
+                  className="max-w-[var(--baseline-name-max)] truncate"
+                  style={{ ['--baseline-name-max' as string]: `${NAME_MAX_WIDTH}px` }}
+                >
+                  {label}
+                </span>
+              </ToolbarButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                align="start"
+                sideOffset={6}
+                className="z-40 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
               >
-                {label}
-              </span>
-            </ToolbarButton>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              align="start"
-              sideOffset={6}
-              className="z-40 w-[280px] rounded-xl border border-border bg-bg-elevated p-2 shadow-xl"
-            >
-              {menuContent}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+                {menuContent}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </span>
       ) : (
         <DropdownMenu.Sub>
           <DropdownMenu.SubTrigger
             disabled={triggerDisabled}
+            title={triggerTitle}
             className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-fg outline-none data-[highlighted]:bg-bg data-[state=open]:bg-bg data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
           >
             <Layers3 size={15} className="text-fg-muted" />

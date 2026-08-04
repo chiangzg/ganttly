@@ -16,7 +16,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   useProjectStore,
-  setViewStateCommand,
   addDependencyCommand,
   updateTaskWithRollupCommand,
 } from '@/store/useProjectStore';
@@ -31,16 +30,28 @@ import {
   clamp,
   ROW_HEIGHT,
 } from '@/engine/layout';
-import { hitTest, applyDrag, type DragState, PAN_THRESHOLD } from '@/engine/interaction';
+import {
+  hitTest,
+  applyDrag,
+  cursorForHit,
+  type DragState,
+  PAN_THRESHOLD,
+} from '@/engine/interaction';
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeCascadeRollup } from '@/lib/summary';
 import { findActiveBaseline } from '@/lib/baseline';
+import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
+import { computeSelectionOnPointerDown } from '@/lib/selection';
 import { cn } from '@/lib/cn';
+import { isEditableTarget } from '@/lib/shortcutTarget';
 import { useHolidayHover } from '@/components/useHolidayHover';
 import { useBaselineHover } from '@/components/useBaselineHover';
-import type { ZoomLevel, DependencyType, Task, Baseline } from '@ganttly/schema';
+import { useTaskHover } from '@/components/useTaskHover';
+import { useTranslation } from 'react-i18next';
+import { DeleteTaskConfirm } from '@/components/DeleteTaskConfirm';
+import type { DependencyType, Task, Baseline } from '@ganttly/schema';
 
 export function GanttCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,6 +66,17 @@ export function GanttCanvas() {
   // ScrollShim see the same active snapshot.
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
   const activeBaseline = findActiveBaseline(file.baselines, activeBaselineId);
+  // §4.4: the canvas mirrors the task table's search/filter so the two panes
+  // stay in sync (matched rows + force-expanded ancestors appear on both sides).
+  const searchQuery = useViewStore((s) => s.searchQuery);
+  const taskFilter = useViewStore((s) => s.taskFilter);
+  // §4.6 multi-select — shared with the task table (plan §4.6: "Canvas 与任务表
+  // 共享 selection set"). Selection is ephemeral (plan §9.1).
+  const selectSingle = useViewStore((s) => s.selectSingle);
+  const clearSelection = useViewStore((s) => s.clearSelection);
+  // §4.6: subscribe to the multi-select set so the canvas re-renders bars with
+  // the selected outline whenever the selection changes.
+  const selectedTaskIds = useViewStore((s) => s.selectedTaskIds);
   const [, forceRerender] = useState(0);
   const dragRef = useRef<DragState>({ kind: 'idle' });
   const hoverConnectRef = useRef<string | null>(null);
@@ -109,6 +131,31 @@ export function GanttCanvas() {
     activeBaselineName: activeBaseline?.name ?? null,
   });
 
+  // Task hover tooltip (plan §3.2). Highest priority: when over a task bar,
+  // this tooltip wins (it includes the merged baseline deviation), and the
+  // baseline + holiday tooltips are suppressed.
+  const {
+    onHoverMove: onTaskHoverMove,
+    clearHover: clearTaskHover,
+    tooltip: taskTooltip,
+    hitTask,
+    hitTaskId,
+  } = useTaskHover({
+    getScene: () => sceneRef.current,
+    viewportWidth: size.width,
+  });
+
+  const { t } = useTranslation();
+  const openContextMenu = useViewStore((s) => s.openContextMenu);
+
+  // Canvas keyboard Delete opens the same confirm dialog the left table uses
+  // (plan §3.4) — never a hard delete.
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+
+  // Idle cursor reflects the current hit kind (plan §3.4). Updated during the
+  // idle pointer-move branch; overridden to grabbing while panning.
+  const [idleCursor, setIdleCursor] = useState('default');
+
   // Latest file kept in a ref so the non-passive wheel listener (added once)
   // can read the current view state without going stale or being re-bound.
   const fileRef = useRef(file);
@@ -145,13 +192,27 @@ export function GanttCanvas() {
     const handler = (e: WheelEvent) => {
       const f = fileRef.current;
       if (e.ctrlKey || e.metaKey) {
-        // Pinch-zoom on trackpad fires ctrlKey+wheel; let the React onWheel
-        // path handle discrete zoom steps.
+        // Ctrl/Cmd+wheel (and trackpad pinch) zooms. Anchor on the DATE UNDER
+        // THE CURSOR so that date stays at the same screen X after the zoom
+        // (plan §4.5) — previously zoom changed the level but left scrollLeft
+        // alone, so the cursor date drifted. This is NAVIGATION (direct
+        // setState, not dispatch) so each wheel tick doesn't push a "视图变更"
+        // onto the undo stack (plan §6.4).
         e.preventDefault();
-        const order: ZoomLevel[] = ['day', 'week', 'month', 'year'];
-        const idx = order.indexOf(f.viewState.zoom);
-        const next = order[Math.max(0, Math.min(order.length - 1, idx + (e.deltaY > 0 ? 1 : -1)))];
-        if (next) dispatch(setViewStateCommand({ zoom: next }));
+        const current = f.viewState.zoom;
+        const next = nextZoomLevel(current, e.deltaY > 0 ? 1 : -1);
+        if (next === current) return;
+        const ab = findActiveBaseline(f.baselines, useViewStore.getState().activeBaselineId);
+        const origin = originDateFor(f, { activeBaseline: ab });
+        const offsetX = e.offsetX; // cursor X relative to the canvas element
+        const anchorChartX = f.viewState.scrollLeft + offsetX;
+        const result = computeZoomAround(origin, current, next, anchorChartX, offsetX);
+        useProjectStore.setState({
+          file: {
+            ...f,
+            viewState: { ...f.viewState, zoom: result.zoom, scrollLeft: result.scrollLeft },
+          },
+        });
         return;
       }
       e.preventDefault();
@@ -200,12 +261,15 @@ export function GanttCanvas() {
       viewportHeight: size.height,
       today: todayISO(),
       activeBaseline,
+      searchQuery,
+      taskFilter,
+      selectedTaskIds,
     });
     sceneRef.current = scene;
     maxScrollTopRef.current = Math.max(0, scene.totalRows * ROW_HEIGHT - size.height);
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
-  }, [file, size, activeBaseline]);
+  }, [file, size, activeBaseline, searchQuery, taskFilter, selectedTaskIds]);
 
   // ----- Pointer interaction -----
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -230,7 +294,22 @@ export function GanttCanvas() {
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
-    dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
+    // §4.6: modifier-clicks (Cmd/Ctrl toggle, Shift range) only change the
+    // selection — they never start a drag. Plain click selects the single task
+    // (the historical behaviour) and then proceeds to the drag setup below.
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      const cur = useViewStore.getState();
+      const visibleIds = scene.rows.map((r) => r.id);
+      const next = computeSelectionOnPointerDown(
+        hit.taskId,
+        { ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey },
+        { ids: cur.selectedTaskIds, anchor: cur.anchorTaskId },
+        visibleIds,
+      );
+      useViewStore.getState().setSelection(next);
+      return;
+    }
+    selectSingle(hit.taskId);
     const row = scene.rows.find((r) => r.id === hit.taskId);
     if (!row) return;
 
@@ -271,16 +350,32 @@ export function GanttCanvas() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // When not dragging, detect baseline bar hover first (spec §5.10) — if the
-    // pointer is over a live bar or baseline track, show the deviation tooltip
-    // and suppress the holiday tooltip. Only fall back to holiday hover when no
-    // task/baseline is hit (empty time column).
+    // When not dragging, arbitrate the three hover tooltips (plan §3.2):
+    //   task bar > baseline > holiday.
+    // The task tooltip wins because it includes the merged baseline deviation.
+    // Also drive the idle cursor from the interactive hit kind (plan §3.4).
     if (dragRef.current.kind === 'idle') {
-      onBaselineHoverMove(x, y);
-      if (!hitBaseline(x, y)) {
-        onHolidayHoverMove(x, y);
-      } else {
+      onTaskHoverMove(x, y);
+      if (hitTask(x, y)) {
+        clearBaselineHover();
         clearHolidayHover();
+        setIdleCursor('pointer');
+      } else {
+        onBaselineHoverMove(x, y);
+        if (!hitBaseline(x, y)) {
+          onHolidayHoverMove(x, y);
+        } else {
+          clearHolidayHover();
+        }
+      }
+      // Cursor by hit kind (move / ew-resize / crosshair / grab) — read-only
+      // for summary bars, which hitTest returns as 'empty' (not draggable).
+      const hit = hitTest(scene, x, y);
+      if (hit.kind !== 'empty') {
+        setIdleCursor(cursorForHit(hit));
+      } else if (!hitTask(x, y)) {
+        // Empty space → grab hints at panning.
+        setIdleCursor(y < 56 ? 'default' : 'grab');
       }
       return;
     }
@@ -359,7 +454,7 @@ export function GanttCanvas() {
       // If we never crossed the threshold, treat it as a click on empty space:
       // clear the selection. Otherwise the pan already updated scroll.
       if (!drag.engaged) {
-        dispatch(setViewStateCommand({ selectedTaskId: null }));
+        clearSelection();
       }
       return;
     }
@@ -401,8 +496,65 @@ export function GanttCanvas() {
     const y = e.clientY - rect.top;
     const hit = hitTest(scene, x, y);
     if (hit.kind !== 'empty') {
-      dispatch(setViewStateCommand({ selectedTaskId: hit.taskId }));
+      selectSingle(hit.taskId);
       openDrawer();
+    }
+  };
+
+  // ----- Right-click → open the shared task context menu (plan §3.4) -----
+  // Covers leaf bars (hitTest) and summary bars (read-only hitTaskId, which
+  // the interactive hitTest returns as 'empty' since summaries aren't
+  // draggable). Both go to the same ContextMenu the left table uses.
+  const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = hitTest(scene, x, y);
+    const taskId = hit.kind === 'empty' ? hitTaskId(x, y) : hit.taskId;
+    if (taskId) {
+      e.preventDefault();
+      // Right-click focuses a single task (the menu is single-task today).
+      selectSingle(taskId);
+      openContextMenu(taskId, e.clientX, e.clientY);
+    }
+  };
+
+  // ----- Keyboard on the focused canvas (plan §3.4) -----
+  // Enter opens the drawer, Delete/Backspace opens the confirm dialog,
+  // Escape clears the selection. Inputs elsewhere keep their own keys.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    // Defensive: the canvas shouldn't host editable elements, but a bubbled
+    // key from an overlay input (drawer/tooltip) must not trigger task ops.
+    if (isEditableTarget(e.target)) return;
+    const view = useViewStore.getState();
+    // §4.6: with a multi-selection, Escape clears the whole set and Delete
+    // opens the batch-delete confirm (signalled to TaskTable, which owns the
+    // dialog). Falls through to single-task handling when ≤1 is selected.
+    if (view.selectedTaskIds.size > 1) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        clearSelection();
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        view.requestBatchDelete();
+        return;
+      }
+    }
+    const selectedId = file.viewState.selectedTaskId;
+    if (!selectedId) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      openDrawer();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      setConfirmDeleteTaskId(selectedId);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      clearSelection();
     }
   };
 
@@ -411,25 +563,37 @@ export function GanttCanvas() {
     <div ref={containerRef} data-gantt-chart className="relative flex-1 overflow-hidden bg-bg">
       <canvas
         ref={canvasRef}
+        tabIndex={0}
+        aria-label={t('canvas.ariaLabel')}
         className={cn(
-          'absolute inset-0',
+          'absolute inset-0 outline-none',
           dragRef.current.kind === 'pan' && dragRef.current.engaged
             ? 'cursor-grabbing'
-            : 'cursor-default',
+            : `cursor-${idleCursor}`,
         )}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
+        onKeyDown={onKeyDown}
         onPointerLeave={() => {
           clearHolidayHover();
           clearBaselineHover();
+          clearTaskHover();
         }}
       />
       {holidayTooltip}
       {baselineTooltip}
+      {taskTooltip}
       <ScrollShim viewportWidth={size.width} activeBaseline={activeBaseline} />
+      {confirmDeleteTaskId && (
+        <DeleteTaskConfirm
+          taskId={confirmDeleteTaskId}
+          onClose={() => setConfirmDeleteTaskId(null)}
+        />
+      )}
     </div>
   );
 }

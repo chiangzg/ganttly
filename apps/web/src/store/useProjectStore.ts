@@ -85,6 +85,8 @@ interface ProjectStoreState {
   undoStack: Command[];
   redoStack: Command[];
   undo(): void;
+  /** Undo `command` only while it is still the latest history entry. */
+  undoCommand(command: Command): boolean;
   redo(): void;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -266,6 +268,13 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     scheduleSave(get().activeProjectId);
   },
 
+  undoCommand(command) {
+    const latest = get().undoStack.at(-1);
+    if (latest !== command) return false;
+    get().undo();
+    return true;
+  },
+
   redo() {
     const { undoStack, redoStack, file } = get();
     if (redoStack.length === 0) return;
@@ -416,6 +425,11 @@ export function updateTaskCommand(taskId: string, patch: Partial<Task>): Command
 }
 
 export function deleteTaskCommand(taskId: string): Command {
+  // Captured at apply time: every deleted task and their dependencies (for
+  // dependency arrows that reference them). The undo toast (editor-interaction
+  // plan §2.4) must restore the full tree, so best-effort invert is insufficient.
+  let capturedDeletedTasks: Task[] | null = null;
+  let capturedSurvivorDependencies: Map<string, Dependency[]> | null = null;
   return {
     label: `删除任务`,
     apply: (file) => {
@@ -431,12 +445,98 @@ export function deleteTaskCommand(taskId: string): Command {
           }
         }
       }
+      capturedDeletedTasks = file.tasks.filter((t) => idsToDelete.has(t.id));
+      capturedSurvivorDependencies = new Map();
+      // Also remove dependency edges pointing to any deleted task.
+      const tasksAfterDelete = file.tasks
+        .filter((t) => !idsToDelete.has(t.id))
+        .map((t) => {
+          const affected = t.dependencies.some((dependency) =>
+            idsToDelete.has(dependency.targetId),
+          );
+          if (!affected) return t;
+          capturedSurvivorDependencies!.set(t.id, t.dependencies);
+          return {
+            ...t,
+            dependencies: t.dependencies.filter(
+              (dependency) => !idsToDelete.has(dependency.targetId),
+            ),
+          };
+        });
+      return { ...file, tasks: tasksAfterDelete };
+    },
+    invert: (file) => {
+      if (!capturedDeletedTasks || !capturedSurvivorDependencies) return file;
+      const survivingTasks = file.tasks.map((task) => {
+        const dependencies = capturedSurvivorDependencies!.get(task.id);
+        return dependencies ? { ...task, dependencies } : task;
+      });
       return {
         ...file,
-        tasks: file.tasks.filter((t) => !idsToDelete.has(t.id)),
+        tasks: [...survivingTasks, ...capturedDeletedTasks],
       };
     },
-    invert: (file) => file, // best-effort — full inverse captured at dispatch site
+  };
+}
+
+/**
+ * Batch-delete multiple tasks as ONE command (plan §4.6: "批量修改必须封装为
+ * 单个复合 command"). Generalises {@link deleteTaskCommand}: the initial set
+ * is closed transitively under `parentId` (deleting a parent removes its
+ * children), so selecting both a parent and its child deletes the subtree once
+ * rather than twice (plan §4.6 验收 "删除父子任务同时被选中时避免重复计数和
+ * 重复删除"). A single undo restores every deleted task and every trimmed
+ * dependency edge.
+ */
+export function batchDeleteTasksCommand(ids: ReadonlyArray<string>): Command {
+  let capturedDeletedTasks: Task[] | null = null;
+  let capturedSurvivorDependencies: Map<string, Dependency[]> | null = null;
+  return {
+    label: `批量删除任务`,
+    apply: (file) => {
+      const idsToDelete = new Set<string>(ids);
+      // Cascade-delete descendants of every selected task (same closure as
+      // deleteTaskCommand, just seeded with multiple roots).
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const t of file.tasks) {
+          if (t.parentId && idsToDelete.has(t.parentId) && !idsToDelete.has(t.id)) {
+            idsToDelete.add(t.id);
+            changed = true;
+          }
+        }
+      }
+      capturedDeletedTasks = file.tasks.filter((t) => idsToDelete.has(t.id));
+      capturedSurvivorDependencies = new Map();
+      const tasksAfterDelete = file.tasks
+        .filter((t) => !idsToDelete.has(t.id))
+        .map((t) => {
+          const affected = t.dependencies.some((dependency) =>
+            idsToDelete.has(dependency.targetId),
+          );
+          if (!affected) return t;
+          capturedSurvivorDependencies!.set(t.id, t.dependencies);
+          return {
+            ...t,
+            dependencies: t.dependencies.filter(
+              (dependency) => !idsToDelete.has(dependency.targetId),
+            ),
+          };
+        });
+      return { ...file, tasks: tasksAfterDelete };
+    },
+    invert: (file) => {
+      if (!capturedDeletedTasks || !capturedSurvivorDependencies) return file;
+      const survivingTasks = file.tasks.map((task) => {
+        const dependencies = capturedSurvivorDependencies!.get(task.id);
+        return dependencies ? { ...task, dependencies } : task;
+      });
+      return {
+        ...file,
+        tasks: [...survivingTasks, ...capturedDeletedTasks],
+      };
+    },
   };
 }
 
@@ -728,6 +828,189 @@ export function updateTaskWithRollupCommand(taskId: string, patch: Partial<Task>
 }
 
 /**
+ * Commit a full task-draft edit as ONE undoable command (editor-interaction-
+ * optimization-plan §2.2 / §6.5).
+ *
+ * The TaskDrawer now keeps a complete draft (base fields + assignments +
+ * dependencies + constraints) and only commits on explicit "Save". This
+ * command three-way merges the fields changed between `before` and `after`
+ * onto the live task, then re-runs the same rollup + dependency cascade that a
+ * live date edit would. This preserves canvas edits made while the docked
+ * drawer is open while keeping one save as one undoable command.
+ *
+ * `before` is the task snapshot captured when the drawer opened. Undo captures
+ * the live task at apply time, so it restores the state immediately before the
+ * save even when the live file diverged while the drawer was open.
+ *
+ * When `after` is identical to `before`, `apply` is a no-op and returns the
+ * file unchanged (the drawer disables Save in that case, but this is the
+ * safety net).
+ *
+ * Why a dedicated command (instead of dispatching updateTask +
+ * assignResource + addDependency …): the plan §6.5 explicitly forbids
+ * "simulating one save via several consecutive commands" because that yields
+ * N undo records and breaks the "one save = one undo" contract.
+ */
+export function updateTaskFromDraftCommand(before: Task, after: Task): Command {
+  let capturedOldValues: Map<string, Partial<Task>> | null = null;
+  let capturedTarget: Task | null = null;
+  return {
+    label: `保存任务: ${after.name || before.name}`,
+    apply: (file) => {
+      capturedOldValues = new Map();
+      const existing = file.tasks.find((t) => t.id === before.id);
+      if (!existing) return file;
+      // No-op when nothing changed (defensive — UI disables Save when clean).
+      if (tasksEqualForCommit(before, after)) return file;
+
+      // 1. Capture the live target exactly, then apply only fields the user
+      // changed in the draft. Untouched fields retain concurrent canvas edits.
+      capturedTarget = existing;
+      capturedOldValues.set(before.id, { ...existing });
+      const merged = mergeTaskDraft(existing, before, after);
+      let tasks = file.tasks.map((t) => (t.id === before.id ? merged : t));
+
+      const dependenciesChanged =
+        JSON.stringify(existing.dependencies) !== JSON.stringify(merged.dependencies);
+      const constraintsChanged =
+        JSON.stringify(existing.constraints) !== JSON.stringify(merged.constraints);
+      const datesChanged =
+        existing.start !== merged.start ||
+        existing.end !== merged.end ||
+        existing.duration !== merged.duration;
+
+      // 2. Apply the same dependency -> constraint scheduling layers used by
+      // their dedicated commands. This keeps a structural-only draft edit from
+      // leaving the task in an immediately invalid schedule.
+      if (dependenciesChanged || constraintsChanged || datesChanged) {
+        const cal = resolveCalendar(getCalendar(file.calendar.id));
+        let target = tasks.find((t) => t.id === before.id)!;
+
+        for (const dependency of target.dependencies) {
+          const predecessor = tasks.find((t) => t.id === dependency.targetId);
+          if (!predecessor) continue;
+          const result = satisfyDependency(predecessor, target, dependency, cal);
+          if (result.start || result.end) {
+            tasks = applyPatchAndCapture(
+              tasks,
+              before.id,
+              { start: result.start, end: result.end },
+              capturedOldValues,
+            );
+            target = tasks.find((t) => t.id === before.id)!;
+          }
+        }
+
+        const constrained = satisfyConstraint(
+          target,
+          target.constraints,
+          cal,
+          target.dependencies.length > 0 ? target.start : undefined,
+        );
+        if (constrained.start !== target.start || constrained.end !== target.end) {
+          tasks = applyPatchAndCapture(
+            tasks,
+            before.id,
+            { start: constrained.start, end: constrained.end },
+            capturedOldValues,
+          );
+        }
+      }
+
+      // 3. Cascade rollup to ancestor summary tasks (start/end/progress).
+      const rollupPatches = computeCascadeRollup(tasks, before.id);
+      for (const { id, patch: rp } of rollupPatches) {
+        tasks = applyPatchAndCapture(tasks, id, rp, capturedOldValues);
+      }
+
+      // 4. Cascade from the target after its own dependencies and constraint
+      // are final, so every downstream successor sees the committed dates.
+      if (dependenciesChanged || constraintsChanged || datesChanged) {
+        const cal = resolveCalendar(getCalendar(file.calendar.id));
+        const cascadePatches = cascadeSchedule(tasks, before.id, cal);
+        for (const cp of cascadePatches) {
+          tasks = applyPatchAndCapture(tasks, cp.id, cp.patch, capturedOldValues);
+        }
+      }
+
+      return { ...file, tasks };
+    },
+    invert: (file) => {
+      if (!capturedOldValues || !capturedTarget) return file;
+      const restored = restoreCaptured(file.tasks, capturedOldValues).map((task) =>
+        task.id === capturedTarget!.id ? capturedTarget! : task,
+      );
+      return { ...file, tasks: restored };
+    },
+  };
+}
+
+const TASK_DRAFT_FIELDS: Array<keyof Task> = [
+  'name',
+  'start',
+  'end',
+  'duration',
+  'progress',
+  'isMilestone',
+  'color',
+  'note',
+  'overtimeDates',
+  'dependencies',
+  'constraints',
+  'assignments',
+];
+
+/**
+ * Apply the user's draft delta to the latest live task. Draft changes win on a
+ * same-field conflict; fields untouched in the drawer retain their live value.
+ */
+function mergeTaskDraft(existing: Task, before: Task, after: Task): Task {
+  const merged = { ...existing };
+  const mergedRecord = merged as unknown as Record<string, unknown>;
+  const afterRecord = after as unknown as Record<string, unknown>;
+
+  for (const key of TASK_DRAFT_FIELDS) {
+    if (taskDraftFieldEqual(key, before, after)) continue;
+    if (Object.prototype.hasOwnProperty.call(after, key)) {
+      mergedRecord[key] = afterRecord[key];
+    } else {
+      delete mergedRecord[key];
+    }
+  }
+  return merged;
+}
+
+function taskDraftFieldEqual(key: keyof Task, a: Task, b: Task): boolean {
+  return (
+    JSON.stringify(normalizeTaskDraftField(key, a)) ===
+    JSON.stringify(normalizeTaskDraftField(key, b))
+  );
+}
+
+function normalizeTaskDraftField(key: keyof Task, task: Task): unknown {
+  if (key === 'overtimeDates') return task.overtimeDates ?? [];
+  if (key === 'constraints') {
+    return { ...task.constraints, type: task.constraints.type ?? ('none' as const) };
+  }
+  return task[key];
+}
+
+/**
+ * Structural equality over the fields a draft save can change. We compare by
+ * JSON of a normalised pick rather than reference equality so re-creating a
+ * draft object with identical values still counts as "no change".
+ *
+ * `constraints` and `overtimeDates` are normalised on both sides because the
+ * TaskDrawer normalises its draft (legacy `constraints: {}` → `{type:'none'}`,
+ * missing `overtimeDates` → `[]`) — without normalising here, opening a task
+ * whose stored shape differs only by these defaults would look "changed" and
+ * defeat the no-op fast path.
+ */
+function tasksEqualForCommit(a: Task, b: Task): boolean {
+  return TASK_DRAFT_FIELDS.every((key) => taskDraftFieldEqual(key, a, b));
+}
+
+/**
  * Move a task and rollup both old and new parent chains.
  *
  * Uses {@link recomputeSelfAndAncestors} so that the old parent (which may have
@@ -740,8 +1023,6 @@ export function moveTaskWithRollupCommand(
   newOrder: number,
 ): Command {
   let capturedOldValues: Map<string, Partial<Task>> | null = null;
-  let oldParentId: string | null = null;
-  let oldOrder = 0;
 
   return {
     label: `移动任务(含汇总)`,
@@ -750,18 +1031,27 @@ export function moveTaskWithRollupCommand(
       const target = file.tasks.find((t) => t.id === taskId);
       if (!target) return file;
 
-      oldParentId = target.parentId;
-      oldOrder = target.order;
+      const oldParentId = target.parentId;
 
-      // Capture the move itself (parentId/order) for the target
-      capturedOldValues.set(taskId, { parentId: oldParentId, order: oldOrder });
+      // 1. Capture the target's own move (parentId/order) for undo.
+      capturedOldValues.set(taskId, { parentId: oldParentId, order: target.order });
 
-      // 1. Apply move
-      let tasks = file.tasks.map((t) =>
-        t.id === taskId ? { ...t, parentId: newParentId, order: newOrder } : t,
-      );
+      // 2. Build the new sibling list for the destination parent: remove the
+      //    moved task from wherever it currently sits, then insert it at the
+      //    requested index (`newOrder`, clamped to [0, siblingCount]). Repack
+      //    to 0..n-1 so there are no duplicate or skipped orders (plan §2.3
+      //    step 4). Capture every sibling whose order changes so undo restores
+      //    the whole group, not just the target.
+      let tasks = file.tasks.map((t) => (t.id === taskId ? { ...t, parentId: newParentId } : t));
+      tasks = repackWithInsertion(tasks, taskId, newParentId, newOrder, capturedOldValues);
 
-      // 2. Recompute old parent (it lost a child) and its ancestors.
+      // If the task changed parents, the OLD parent's remaining children must
+      // also be re-packed (the moved task left a gap).
+      if (oldParentId !== newParentId) {
+        tasks = repackSiblingOrders(tasks, oldParentId, capturedOldValues);
+      }
+
+      // 3. Recompute old parent (it lost a child) and its ancestors.
       if (oldParentId && oldParentId !== newParentId) {
         const oldPatches = recomputeSelfAndAncestors(tasks, oldParentId);
         for (const { id, patch } of oldPatches) {
@@ -769,7 +1059,7 @@ export function moveTaskWithRollupCommand(
         }
       }
 
-      // 3. Recompute new parent (it gained a child) and its ancestors.
+      // 4. Recompute new parent (it gained a child) and its ancestors.
       if (newParentId && newParentId !== oldParentId) {
         const newPatches = recomputeSelfAndAncestors(tasks, newParentId);
         for (const { id, patch } of newPatches) {
@@ -784,6 +1074,68 @@ export function moveTaskWithRollupCommand(
       return { ...file, tasks: restoreCaptured(file.tasks, capturedOldValues) };
     },
   };
+}
+
+/**
+ * Re-pack siblings under `parentId` to 0..n-1, preserving the existing order.
+ * Captures every changed order. Used for the group the moved task just left.
+ */
+function repackSiblingOrders(
+  tasks: Task[],
+  parentId: string | null,
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  const siblings = tasks
+    .filter((t) => t.parentId === parentId)
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  return assignOrders(tasks, siblings, captured);
+}
+
+/**
+ * Re-pack the destination parent's siblings, inserting `movedId` at
+ * `insertIndex` (clamped). The moved task lands at exactly that index; the
+ * others shift to make room. Captures every changed order for undo.
+ */
+function repackWithInsertion(
+  tasks: Task[],
+  movedId: string,
+  parentId: string | null,
+  insertIndex: number,
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  const others = tasks
+    .filter((t) => t.parentId === parentId && t.id !== movedId)
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  const clamped = Math.max(0, Math.min(insertIndex, others.length));
+  const moved = tasks.find((t) => t.id === movedId)!;
+  const ordered = [...others.slice(0, clamped), moved, ...others.slice(clamped)];
+  return assignOrders(tasks, ordered, captured);
+}
+
+/** Assign sequential 0..n-1 orders to `ordered` (already in final sequence). */
+function assignOrders(
+  tasks: Task[],
+  ordered: Task[],
+  captured: Map<string, Partial<Task>>,
+): Task[] {
+  const newOrderByIndex = new Map<string, number>();
+  ordered.forEach((t, i) => newOrderByIndex.set(t.id, i));
+  return tasks.map((t) => {
+    const newOrder = newOrderByIndex.get(t.id);
+    if (newOrder === undefined || newOrder === t.order) return t;
+    captureOrder(t, captured);
+    return { ...t, order: newOrder };
+  });
+}
+
+/** Record a task's pre-change order, merged into any existing capture entry. */
+function captureOrder(task: Task, captured: Map<string, Partial<Task>>): void {
+  const existing = captured.get(task.id);
+  if (existing) {
+    if (!('order' in existing)) captured.set(task.id, { ...existing, order: task.order });
+  } else {
+    captured.set(task.id, { order: task.order });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -826,22 +1178,32 @@ export function updateResourceCommand(resourceId: string, patch: Partial<Resourc
 }
 
 export function deleteResourceCommand(resourceId: string): Command {
-  // Captured at apply time: the resource itself + every assignment referencing it.
+  // Captured at apply time: the resource and every assignment, including their
+  // original positions, so undo is lossless for ordering and allocation load.
   let captured: {
     resource: Resource;
-    assignments: Array<{ taskId: string; index: number }>;
+    resourceIndex: number;
+    assignments: Array<{ taskId: string; index: number; assignment: TaskAssignment }>;
   } | null = null;
   return {
     label: `删除资源`,
     apply: (file) => {
-      const resource = file.resources.find((r) => r.id === resourceId);
-      if (!resource) return file;
-      const assignments: Array<{ taskId: string; index: number }> = [];
+      const resourceIndex = file.resources.findIndex((r) => r.id === resourceId);
+      if (resourceIndex < 0) return file;
+      const resource = file.resources[resourceIndex]!;
+      const assignments: Array<{
+        taskId: string;
+        index: number;
+        assignment: TaskAssignment;
+      }> = [];
       for (const t of file.tasks) {
-        const idx = t.assignments.findIndex((a) => a.resourceId === resourceId);
-        if (idx >= 0) assignments.push({ taskId: t.id, index: idx });
+        t.assignments.forEach((assignment, index) => {
+          if (assignment.resourceId === resourceId) {
+            assignments.push({ taskId: t.id, index, assignment: { ...assignment } });
+          }
+        });
       }
-      captured = { resource, assignments };
+      captured = { resource: { ...resource }, resourceIndex, assignments };
       return {
         ...file,
         resources: file.resources.filter((r) => r.id !== resourceId),
@@ -857,21 +1219,28 @@ export function deleteResourceCommand(resourceId: string): Command {
     },
     invert: (file) => {
       if (!captured) return file;
-      const { resource, assignments } = captured;
-      const assignByTask = new Map(assignments.map((a) => [a.taskId, a.index]));
+      const { resource, resourceIndex, assignments } = captured;
+      const restoredResources = [...file.resources];
+      restoredResources.splice(Math.min(resourceIndex, restoredResources.length), 0, resource);
+      const assignmentsByTask = new Map<
+        string,
+        Array<{ index: number; assignment: TaskAssignment }>
+      >();
+      for (const { taskId, index, assignment } of assignments) {
+        const entries = assignmentsByTask.get(taskId) ?? [];
+        entries.push({ index, assignment });
+        assignmentsByTask.set(taskId, entries);
+      }
       return {
         ...file,
-        resources: [...file.resources, resource],
+        resources: restoredResources,
         tasks: file.tasks.map((t) => {
-          const idx = assignByTask.get(t.id);
-          if (idx === undefined) return t;
-          // Re-insert the assignment at its original index (best-effort order restore).
-          const restored: TaskAssignment = { resourceId, load: 0 };
-          // The original load is lost on delete (we only restored structure);
-          // this is acceptable since delete+undo of a resource is rare and the
-          // user can re-adjust. To preserve load we'd need to capture it too.
+          const entries = assignmentsByTask.get(t.id);
+          if (!entries) return t;
           const next = [...t.assignments];
-          next.splice(Math.min(idx, next.length), 0, restored);
+          for (const { index, assignment } of entries.sort((a, b) => a.index - b.index)) {
+            next.splice(Math.min(index, next.length), 0, assignment);
+          }
           return { ...t, assignments: next };
         }),
       };
@@ -899,6 +1268,56 @@ export function assignResourceCommand(taskId: string, assignment: TaskAssignment
       ),
     }),
     invert: (file) => file, // best-effort — full inverse captured at dispatch site
+  };
+}
+
+/**
+ * Batch-assign a resource to multiple tasks as ONE command (plan §4.6: "批量修
+ * 改必须封装为单个复合 command"). Targets are the selected LEAF tasks — summary
+ * tasks (tasks with children) are skipped, mirroring the drawer's G13 block so
+ * person-days are never double-counted. Per-task semantics match
+ * {@link assignResourceCommand}: an existing assignment for the same resource is
+ * replaced (load updated), never duplicated. The inverse restores every task's
+ * original assignments, so one undo reverts the whole batch (plan §4.6 验收
+ * "一次撤销恢复整个批量操作").
+ */
+export function batchAssignResourceCommand(
+  taskIds: ReadonlyArray<string>,
+  assignment: TaskAssignment,
+): Command {
+  let capturedOldAssignments: Map<string, TaskAssignment[]> | null = null;
+  return {
+    label: `批量分配资源`,
+    apply: (file) => {
+      const targets = new Set(taskIds.filter((id) => !file.tasks.some((t) => t.parentId === id)));
+      if (targets.size === 0) return file;
+      capturedOldAssignments = new Map();
+      return {
+        ...file,
+        tasks: file.tasks.map((t) => {
+          if (!targets.has(t.id)) return t;
+          capturedOldAssignments!.set(t.id, t.assignments);
+          return {
+            ...t,
+            assignments: [
+              ...t.assignments.filter((a) => a.resourceId !== assignment.resourceId),
+              assignment,
+            ],
+          };
+        }),
+      };
+    },
+    invert: (file) => {
+      if (!capturedOldAssignments) return file;
+      return {
+        ...file,
+        tasks: file.tasks.map((t) =>
+          capturedOldAssignments!.has(t.id)
+            ? { ...t, assignments: capturedOldAssignments!.get(t.id)! }
+            : t,
+        ),
+      };
+    },
   };
 }
 

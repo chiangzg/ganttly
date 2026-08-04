@@ -6,7 +6,13 @@
  * - Tests (constructing fixtures).
  * - The `.gan` importer (M4) to produce a fresh file before populating.
  */
-import { SCHEMA_VERSION, type GanttlyFile, type Locale, type CalendarId } from './types.js';
+import {
+  SCHEMA_VERSION,
+  type GanttlyFile,
+  type Locale,
+  type CalendarId,
+  type Task,
+} from './types.js';
 
 const APP_VERSION = '0.1.0';
 
@@ -52,5 +58,46 @@ export function createEmptyFile(options: CreateEmptyFileOptions = {}): GanttlyFi
       updatedAt: now,
       appVersion: options.appVersion ?? APP_VERSION,
     },
+  };
+}
+
+export interface CreateDefaultTaskOptions {
+  /** Task id. Caller supplies this (nanoid) so the same value is known up front
+   * for selection / reveal / undo wiring. */
+  id: string;
+  /** Display name. Pass the localised placeholder when creating a blank task. */
+  name: string;
+  /** ISO date `YYYY-MM-DD` for both `start` and `end` (1-day task). */
+  start: string;
+  /** Parent task id, or null for a top-level task. */
+  parentId: string | null;
+  /** 0-based sort order among siblings. */
+  order: number;
+}
+
+/**
+ * Returns a minimally-valid `Task` with neutral defaults suitable for a freshly
+ * created task: a 1-day span at `start`, zero progress, no dependencies,
+ * constraints or assignments.
+ *
+ * Used by the Toolbar "new task", TaskTable "new sibling / child / root" and
+ * paste flows so they all share identical initial field shape (plan §3.1).
+ */
+export function createDefaultTask(options: CreateDefaultTaskOptions): Task {
+  return {
+    id: options.id,
+    name: options.name,
+    parentId: options.parentId,
+    order: options.order,
+    start: options.start,
+    end: options.start,
+    duration: 1,
+    overtimeDates: [],
+    progress: 0,
+    isMilestone: false,
+    dependencies: [],
+    constraints: { type: 'none' },
+    assignments: [],
+    customFields: {},
   };
 }

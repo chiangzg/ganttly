@@ -85,6 +85,7 @@ function row(yIndex: number, id = `t${yIndex}`) {
     name: id,
     start: '2026-02-02',
     end: '2026-02-06',
+    duration: 5,
     progress: 0,
     isMilestone: false,
     depth: 0,
@@ -109,6 +110,7 @@ function makeScene(rows: ReturnType<typeof row>[], scrollTop: number): Scene {
     showCriticalPath: false,
     hasActiveBaseline: false,
     selectedTaskId: null,
+    selectedTaskIds: new Set<string>(),
   };
 }
 

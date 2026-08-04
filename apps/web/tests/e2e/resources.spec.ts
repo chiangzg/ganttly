@@ -62,6 +62,46 @@ test.describe('resource view', () => {
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
   });
 
+  test('keeps task-only toolbar controls in place and disables them in resource view', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const criticalPath = page.getByRole('button', { name: '关键路径', exact: true });
+    const baseline = page.getByRole('button', { name: '创建基线', exact: true });
+    const taskView = page.getByRole('button', { name: '任务视图', exact: true });
+    const resourceView = page.getByRole('button', { name: '资源视图', exact: true });
+
+    await expect(criticalPath).toBeEnabled();
+    await expect(baseline).toBeEnabled();
+    const taskViewX = await taskView.evaluate((element) => element.getBoundingClientRect().x);
+
+    await criticalPath.click();
+    await resourceView.click();
+
+    await expect(criticalPath).toBeVisible();
+    await expect(criticalPath).toBeDisabled();
+    await expect(criticalPath).toHaveAttribute('aria-pressed', 'true');
+    await expect(criticalPath).toHaveAttribute('title', '仅在任务视图中可用');
+    await expect(baseline).toBeVisible();
+    await expect(baseline).toBeDisabled();
+    await expect(baseline).toHaveAttribute('title', '仅在任务视图中可用');
+    await expect
+      .poll(() => taskView.evaluate((element) => element.getBoundingClientRect().x))
+      .toBe(taskViewX);
+
+    await taskView.click();
+    await expect(criticalPath).toBeEnabled();
+    await expect(criticalPath).toHaveAttribute('aria-pressed', 'true');
+    await expect(baseline).toBeEnabled();
+
+    await page.setViewportSize({ width: 768, height: 720 });
+    await resourceView.click();
+    await page.getByRole('button', { name: '更多操作' }).click();
+    await expect(page.getByRole('menuitem', { name: '创建基线' })).toBeDisabled();
+    await expect(page.getByRole('menuitemcheckbox', { name: '关键路径' })).toBeDisabled();
+  });
+
   test('adds a resource via the list footer button', async ({ page }) => {
     await page.getByRole('button', { name: '资源视图' }).click();
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
@@ -73,11 +113,13 @@ test.describe('resource view', () => {
   test('removes a resource via the row × button', async ({ page }) => {
     await page.getByRole('button', { name: '资源视图' }).click();
     await expect(page.locator('input[value="Alice"]')).toBeVisible();
-    // Click the × button inside Alice's row (the row containing the input).
+    // Click the × button inside Alice's row.
     const aliceRow = page
       .locator('[role="row"]')
       .filter({ has: page.locator('input[value="Alice"]') });
     await aliceRow.locator('button', { hasText: '×' }).click();
+    // Confirm deletion in the in-app dialog.
+    await page.getByRole('button', { name: '删除资源' }).click();
     await expect(page.locator('input[value="Alice"]')).toHaveCount(0);
   });
 
