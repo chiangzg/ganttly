@@ -4,7 +4,7 @@
  * Features:
  * - Render the task tree (WBS numbers, names, dates, duration, progress)
  * - Click to select, double-click to open the edit drawer
- * - Keyboard: Tab/Shift+Tab indent/outdent, Enter new sibling, Delete, F2 rename
+ * - Keyboard: arrows navigate/collapse, Tab indents, Enter adds, Delete removes, F2 renames
  * - Mouse drag to reorder + reparent (HTML5 DnD)
  * - Right-click for the context menu
  * - Vertical scroll shared with GanttCanvas via projectStore.scrollTop
@@ -55,9 +55,12 @@ import { BatchDeleteConfirm } from './BatchDeleteConfirm';
 import { usePanelWidth, useColumnWidths } from './useLayoutPrefs';
 import { ResizeHandle, ResizableHeaderCell, startPointerResize } from './ui/ResizeHandle';
 import { DEFAULT_PANEL_WIDTHS, DEFAULT_COLUMN_WIDTHS } from '@/lib/layoutPrefs';
+import { adjacentSelectableRow, focusAndRevealRow } from '@/lib/rowKeyboardNavigation';
 
 const TABLE_WIDTH = 480;
 const TABLE_WIDTH_WITH_BASELINE = 552;
+/** Keep task controls within the canvas's shared two-row header height. */
+const TASK_SEARCH_HEIGHT = 36;
 /** §4.1: the baseline comparison mode appends this many px to the user's panel
  * width (default 480→552, unchanged from pre-§4.1); the deviation COLUMN width
  * itself is separately adjustable via the header separator. */
@@ -183,15 +186,6 @@ export function TaskTable() {
   const progressWidth = colWidths.progress ?? DEFAULT_COLUMN_WIDTHS.progress;
   const baselineWidth = colWidths.baseline ?? DEFAULT_COLUMN_WIDTHS.baseline;
 
-  // Single computed template shared by the header and every row (the historic
-  // misalignment bug was two divergent templates — keep it one source).
-  const gridTemplate = [
-    '44px minmax(0, 1fr)',
-    `${durationWidth}px`,
-    `${effortWidth}px`,
-    `${progressWidth}px`,
-    ...(hasBaseline ? [`${baselineWidth}px`] : []),
-  ].join(' ');
   const tableWidth = panelWidth + (hasBaseline ? BASELINE_PANEL_EXTRA : 0);
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
 
@@ -205,13 +199,43 @@ export function TaskTable() {
     }
     const tree = buildTree(file.tasks);
     return flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
-  }, [file, searchQuery, taskFilter]);
+  }, [file.tasks, file.calendar, file.viewState.collapsedTaskIds, searchQuery, taskFilter]);
+
+  // The WBS cell contains the hierarchy indentation, the drag affordance, an
+  // optional expand button, and the number itself. A fixed 44px track cannot
+  // hold those pieces once a task is nested, so the number gets clipped (for
+  // example, `3.1` is rendered as just `3`). Keep the header and every row on
+  // one computed track and let the task-name column absorb the extra width.
+  const wbsWidth = useMemo(() => {
+    const minWidth = 44;
+    const charWidth = 8;
+    const dragHandleWidth = 14;
+    const expandControlWidth = 18;
+    const rightPadding = 8;
+    return rows.reduce((max, node) => {
+      const indentation = 8 + node.depth * 16;
+      const controls = dragHandleWidth + (node.children.length > 0 ? expandControlWidth : 0);
+      const numberWidth = Math.max(1, node.wbsNumber.length) * charWidth;
+      return Math.max(max, indentation + controls + numberWidth + rightPadding);
+    }, minWidth);
+  }, [rows]);
+
+  // Single computed template shared by the header and every row (the historic
+  // misalignment bug was two divergent templates — keep it one source).
+  const gridTemplate = [
+    `${wbsWidth}px minmax(0, 1fr)`,
+    `${durationWidth}px`,
+    `${effortWidth}px`,
+    `${progressWidth}px`,
+    ...(hasBaseline ? [`${baselineWidth}px`] : []),
+  ].join(' ');
 
   // §4.6: the visible row id sequence drives Shift+Click range selection. It
   // must reflect the CURRENT rendered list (post-collapse, post-filter) so the
   // range stays correct when rows are hidden (plan §4.6 验收 "多选在折叠、
   // 筛选和滚动后保持一致").
   const visibleRowIds = useMemo(() => rows.map((n) => n.task.id), [rows]);
+  const visibleRowIndexes = useMemo(() => rows.map((_, index) => index), [rows]);
 
   // Person-days rollup map (summary tasks use rolled-up children sum, G13).
   const effortMap = useMemo(
@@ -295,6 +319,13 @@ export function TaskTable() {
     dispatch(setViewStateCommand({ collapsedTaskIds: next }));
   };
 
+  const selectAndFocusTaskRow = (rowIndex: number) => {
+    const target = rows[rowIndex];
+    if (!target) return;
+    selectSingle(target.task.id);
+    focusAndRevealRow(scrollRef.current, rowIndex, ROW_HEIGHT);
+  };
+
   // ---- Keyboard navigation (PRD §3.10) ----
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, node: TreeNode) => {
     const task = node.task;
@@ -360,6 +391,76 @@ export function TaskTable() {
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       e.preventDefault();
       moveSibling(task.id, e.key === 'ArrowUp' ? -1 : 1);
+      return;
+    }
+
+    if (
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+    ) {
+      e.preventDefault();
+      const currentIndex = rows.findIndex((row) => row.task.id === task.id);
+      const nextIndex = adjacentSelectableRow(
+        currentIndex,
+        visibleRowIndexes,
+        e.key === 'ArrowUp' ? -1 : 1,
+      );
+      if (nextIndex === null) return;
+      selectAndFocusTaskRow(nextIndex);
+      return;
+    }
+
+    if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowRight') {
+      // 流式展开：与 ArrowLeft（流式收起）对称。当前行折叠就展开它；
+      // 否则向下找第一个"折叠且有子任务"的可见行展开，避免在叶子或已
+      // 展开节点上卡住（按住 → 一口气展开整棵子树）。焦点停在刚展开的
+      // 那行。整棵树都已展开时什么都不做——行间导航交给 ↑/↓。
+      const collapsedIds = file.viewState.collapsedTaskIds;
+      const isCollapsed = (row: TreeNode): boolean =>
+        row.children.length > 0 && collapsedIds.includes(row.task.id);
+      const currentIndex = rows.findIndex((row) => row.task.id === task.id);
+      const current = currentIndex === -1 ? null : (rows[currentIndex] ?? null);
+      if (!current) return;
+      // 找到展开目标：当前行折叠就用它，否则向下找第一个折叠的行。
+      let target = isCollapsed(current) ? current : null;
+      for (let i = currentIndex + 1; !target && i < rows.length; i++) {
+        const candidate = rows[i];
+        if (candidate && isCollapsed(candidate)) target = candidate;
+      }
+      if (!target) return;
+
+      const targetIndex = rows.indexOf(target);
+      e.preventDefault();
+      selectAndFocusTaskRow(targetIndex);
+      toggleCollapse(target.task.id);
+      return;
+    }
+
+    if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowLeft') {
+      // 流式收起：当前行没有可收起的子树时，继续向上找第一个"已展开
+      // 且有子任务"的可见行收起它，避免在叶子或已折叠节点上卡住（按住
+      // ← 一口气收起整棵子树）。焦点停在最终被收起的那一行。
+      const collapsedIds = file.viewState.collapsedTaskIds;
+      const isExpanded = (row: TreeNode): boolean =>
+        row.children.length > 0 && !collapsedIds.includes(row.task.id);
+      const currentIndex = rows.findIndex((row) => row.task.id === task.id);
+      const current = currentIndex === -1 ? null : (rows[currentIndex] ?? null);
+      if (!current) return;
+      // 找到收起目标：当前行已展开就用它，否则向上找第一个已展开的行。
+      let target = isExpanded(current) ? current : null;
+      for (let i = currentIndex - 1; !target && i >= 0; i--) {
+        const candidate = rows[i];
+        if (candidate && isExpanded(candidate)) target = candidate;
+      }
+      if (!target) return;
+
+      const targetIndex = rows.indexOf(target);
+      e.preventDefault();
+      selectAndFocusTaskRow(targetIndex);
+      toggleCollapse(target.task.id);
       return;
     }
 
@@ -714,7 +815,11 @@ export function TaskTable() {
             matches name/WBS; the three toggles are mutually-exclusive quick
             filters (unassigned / critical path / overdue). All ephemeral
             (useViewStore), never in the undo stack. */}
-        <div data-task-search className="flex items-center gap-1 border-b border-border px-2 py-1">
+        <div
+          data-task-search
+          className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1"
+          style={{ height: TASK_SEARCH_HEIGHT }}
+        >
           <div className="relative flex min-w-0 flex-1 items-center">
             <Search
               size={13}
@@ -773,16 +878,24 @@ export function TaskTable() {
           </button>
         </div>
         <div
-          className="grid border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
-          style={{ height: HEADER_HEIGHT, gridTemplateColumns: gridTemplate }}
+          className="grid shrink-0 items-center overflow-hidden border-b border-border bg-bg-elevated text-xs font-semibold text-fg-muted"
+          style={{
+            height: HEADER_HEIGHT - TASK_SEARCH_HEIGHT,
+            gridTemplateColumns: gridTemplate,
+          }}
         >
-          <div className="border-r border-border px-2 py-1">{t('table.columnWbs')}</div>
-          <div className="border-r border-border px-2 py-1">{t('table.columnName')}</div>
+          <div className="flex h-full items-center border-r border-border px-2">
+            {t('table.columnWbs')}
+          </div>
+          <div className="flex h-full items-center border-r border-border px-2">
+            {t('table.columnName')}
+          </div>
           <ResizableHeaderCell
             label={t('table.columnDuration')}
             width={durationWidth}
             defaultWidth={DEFAULT_COLUMN_WIDTHS.duration}
             dataResize="task-col-duration"
+            className="flex h-full items-center py-0"
             onWidthChange={(w) => setColumnWidth('duration', w)}
           />
           <ResizableHeaderCell
@@ -790,6 +903,7 @@ export function TaskTable() {
             width={effortWidth}
             defaultWidth={DEFAULT_COLUMN_WIDTHS.effort}
             dataResize="task-col-effort"
+            className="flex h-full items-center py-0"
             onWidthChange={(w) => setColumnWidth('effort', w)}
           />
           <ResizableHeaderCell
@@ -797,6 +911,7 @@ export function TaskTable() {
             width={progressWidth}
             defaultWidth={DEFAULT_COLUMN_WIDTHS.progress}
             dataResize="task-col-progress"
+            className="flex h-full items-center py-0"
             onWidthChange={(w) => setColumnWidth('progress', w)}
           />
           {hasBaseline && (
@@ -805,12 +920,17 @@ export function TaskTable() {
               width={baselineWidth}
               defaultWidth={DEFAULT_COLUMN_WIDTHS.baseline}
               dataResize="task-col-baseline"
-              className="border-r-0"
+              className="flex h-full items-center border-r-0 py-0"
               onWidthChange={(w) => setColumnWidth('baseline', w)}
             />
           )}
         </div>
-        <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
+        <div
+          ref={scrollRef}
+          data-task-scroll
+          className="relative flex-1 overflow-y-auto"
+          onScroll={onScroll}
+        >
           {/* §5.2 empty states. Distinguish TRUE zero tasks (source of truth:
               file.tasks.length) from filter-induced emptiness (project has
               tasks but the projection is empty) — only the former offers the
@@ -854,6 +974,7 @@ export function TaskTable() {
                     onDragLeave={onDragLeave}
                     onDragEnd={onDragEnd}
                     data-task-id={node.task.id}
+                    data-keyboard-row-index={i}
                     onClick={(e) => {
                       // Modifier-clicks (Cmd/Ctrl/Shift) are pure selection
                       // changes — never open the drawer or start inline edit, so

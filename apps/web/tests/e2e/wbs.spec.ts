@@ -26,6 +26,51 @@ test('Tab indents a task under its predecessor', async ({ page }) => {
   await expect(second).toContainText('1.1');
 });
 
+test('nested WBS numbers remain visible as the hierarchy gets deeper', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: '新建任务', exact: true })).toBeVisible();
+
+  await page.evaluate(() => {
+    type TestStore = {
+      getState: () => { file: Record<string, unknown> };
+      setState: (state: { file: Record<string, unknown> }) => void;
+    };
+    const store = (window as unknown as { __ganttlyStore?: TestStore }).__ganttlyStore;
+    if (!store) throw new Error('store not exposed');
+    const file = store.getState().file;
+    const task = (id: string, parentId: string | null, order: number) => ({
+      id,
+      name: id,
+      parentId,
+      order,
+      start: '2026-01-05',
+      end: '2026-01-05',
+      duration: 1,
+      progress: 0,
+      isMilestone: false,
+      dependencies: [],
+      constraints: { type: 'none' },
+      assignments: [],
+      customFields: {},
+    });
+    store.setState({
+      file: {
+        ...file,
+        tasks: [task('root', null, 0), task('child', 'root', 0), task('grandchild', 'child', 0)],
+      },
+    });
+  });
+  const grandchildRow = page.locator('[data-task-id="grandchild"]');
+  await expect(grandchildRow).toBeVisible();
+  const grandchildWbs = grandchildRow.locator('[data-field="wbs"]');
+  await expect(grandchildWbs).toContainText('1.1.1');
+  const metrics = await grandchildWbs.evaluate((el) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }));
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+});
+
 test('Delete removes a task after confirmation', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: '新建任务' }).click();

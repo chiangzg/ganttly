@@ -81,6 +81,36 @@ test('canvas renders with a single task', async ({ page }) => {
   });
 });
 
+test('task table rows start at the same vertical position as canvas rows', async ({ page }) => {
+  await loadFixture(page, {
+    tasks: [
+      {
+        id: 'aligned-task',
+        name: 'Aligned task',
+        parentId: null,
+        order: 0,
+        start: '2026-02-02',
+        end: '2026-02-06',
+        duration: 5,
+        progress: 40,
+        isMilestone: false,
+        dependencies: [],
+        constraints: {},
+        assignments: [],
+        customFields: {},
+      },
+    ],
+  });
+
+  const canvasBox = await page.locator('canvas').boundingBox();
+  const tableRowsBox = await page.locator('[data-task-scroll]').boundingBox();
+  expect(canvasBox).not.toBeNull();
+  expect(tableRowsBox).not.toBeNull();
+
+  // Search controls and column labels must share HEADER_HEIGHT (56px).
+  expect(tableRowsBox!.y).toBeCloseTo(canvasBox!.y + 56, 0);
+});
+
 test('day-view zoom renders compact columns', async ({ page }) => {
   await loadFixture(page, {
     tasks: [
