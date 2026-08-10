@@ -37,6 +37,8 @@ import { EmptyState } from './ui/EmptyState';
 import { usePanelWidth, useColumnWidths } from './useLayoutPrefs';
 import { ResizeHandle, ResizableHeaderCell, startPointerResize } from './ui/ResizeHandle';
 import { DEFAULT_PANEL_WIDTHS, DEFAULT_COLUMN_WIDTHS } from '@/lib/layoutPrefs';
+import { isEditableTarget } from '@/lib/shortcutTarget';
+import { adjacentSelectableRow, focusAndRevealRow } from '@/lib/rowKeyboardNavigation';
 
 // §4.1: the resource panel width (default 420, 300-640) and the role/capacity
 // column widths are per-project user preferences; the name column stays
@@ -123,6 +125,10 @@ export function ResourceList() {
     }
     return out;
   }, [file.resources, expandedResourceIds, tasksByRes]);
+  const selectableRowIndexes = useMemo(
+    () => flatRows.flatMap((row, index) => (row.kind === 'task-header' ? [] : [index])),
+    [flatRows],
+  );
 
   // Reflect store-driven scroll changes onto this panel (mirrors TaskTable).
   const localScrolling = useRef(false);
@@ -157,6 +163,79 @@ export function ResourceList() {
 
   const removeResource = (resourceId: string) => {
     setConfirmDeleteResourceId(resourceId);
+  };
+
+  const selectFlatRow = (row: FlatRow) => {
+    if (row.kind === 'resource') {
+      setSelectedResourceId(row.resourceId);
+      return;
+    }
+    if (row.kind === 'task') {
+      setSelectedResourceId(row.resourceId);
+      setSelectedTaskIdInResource(row.task.id);
+    }
+  };
+
+  const selectAndFocusFlatRow = (rowIndex: number) => {
+    const target = flatRows[rowIndex];
+    if (!target || target.kind === 'task-header') return;
+    selectFlatRow(target);
+    focusAndRevealRow(scrollRef.current, rowIndex, ROW_HEIGHT);
+  };
+
+  const onRowKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, row: FlatRow) => {
+    if (isEditableTarget(e.target)) return;
+    const hasModifier = e.altKey || e.ctrlKey || e.metaKey || e.shiftKey;
+    if (!hasModifier && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      const nextIndex = adjacentSelectableRow(
+        row.yIndex,
+        selectableRowIndexes,
+        e.key === 'ArrowUp' ? -1 : 1,
+      );
+      if (nextIndex === null) return;
+      selectAndFocusFlatRow(nextIndex);
+      return;
+    }
+
+    if (hasModifier) return;
+    if (e.key === 'ArrowRight' && row.kind === 'resource') {
+      const expanded = expandedResourceIds.has(row.resourceId);
+      const hasTasks = (tasksByRes.map.get(row.resourceId)?.length ?? 0) > 0;
+      if (!hasTasks) return;
+      e.preventDefault();
+      if (!expanded) {
+        setSelectedResourceId(row.resourceId);
+        toggleResourceExpanded(row.resourceId);
+        return;
+      }
+
+      const childIndex = flatRows.findIndex(
+        (candidate, index) =>
+          index > row.yIndex &&
+          candidate.kind === 'task' &&
+          candidate.resourceId === row.resourceId,
+      );
+      if (childIndex !== -1) selectAndFocusFlatRow(childIndex);
+      return;
+    }
+
+    if (e.key === 'ArrowLeft') {
+      if (row.kind === 'resource') {
+        if (!expandedResourceIds.has(row.resourceId)) return;
+        e.preventDefault();
+        setSelectedResourceId(row.resourceId);
+        toggleResourceExpanded(row.resourceId);
+        return;
+      }
+
+      const parentIndex = flatRows.findIndex(
+        (candidate) => candidate.kind === 'resource' && candidate.resourceId === row.resourceId,
+      );
+      if (parentIndex === -1) return;
+      e.preventDefault();
+      selectAndFocusFlatRow(parentIndex);
+    }
   };
 
   return (
@@ -231,7 +310,11 @@ export function ResourceList() {
                       key={`r-${r.id}`}
                       role="row"
                       tabIndex={0}
+                      aria-selected={selected}
+                      data-resource-id={r.id}
+                      data-keyboard-row-index={row.yIndex}
                       onClick={() => setSelectedResourceId(r.id)}
+                      onKeyDown={(e) => onRowKeyDown(e, row)}
                       style={{
                         height: ROW_HEIGHT,
                         transform: `translateY(${y}px)`,
@@ -352,7 +435,11 @@ export function ResourceList() {
                     key={`t-${row.resourceId}-${task.id}`}
                     role="row"
                     tabIndex={0}
-                    onClick={() => setSelectedTaskIdInResource(task.id)}
+                    aria-selected={selected}
+                    data-resource-task-id={task.id}
+                    data-keyboard-row-index={row.yIndex}
+                    onClick={() => selectFlatRow(row)}
+                    onKeyDown={(e) => onRowKeyDown(e, row)}
                     onDoubleClick={() => {
                       // TaskDrawer reads file.viewState.selectedTaskId, so set it
                       // at open time. The lane highlight stays on the resource-view

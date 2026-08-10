@@ -71,6 +71,58 @@ async function loadChain(page: Page, type: DepType) {
   await page.waitForTimeout(250);
 }
 
+async function loadHierarchy(page: Page) {
+  await page.goto('/');
+  await page.getByText('已保存').or(page.getByText('保存中')).waitFor();
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    const store = (window as unknown as { __ganttlyStore: unknown }).__ganttlyStore as {
+      setState: (s: unknown) => void;
+      getState: () => { file: Record<string, unknown> };
+    };
+    const f = store.getState().file;
+    const makeTask = (id: string, name: string, parentId: string | null, order: number) => ({
+      id,
+      name,
+      parentId,
+      order,
+      start: '2026-02-02',
+      end: '2026-02-06',
+      duration: 5,
+      progress: 0,
+      isMilestone: false,
+      dependencies: [],
+      constraints: {},
+      assignments: [],
+      customFields: {},
+    });
+    const tasks = [
+      makeTask('project-a', '项目甲', null, 0),
+      makeTask('group-a', '后端开发', 'project-a', 0),
+      makeTask('release-a', '发布', 'group-a', 0),
+      makeTask('project-b', '项目乙', null, 1),
+      makeTask('release-b', '发布', 'project-b', 0),
+      makeTask('successor', '后继任务', null, 2),
+    ];
+    store.setState({
+      file: {
+        ...f,
+        tasks,
+        viewState: {
+          ...(f.viewState as object),
+          zoom: 'week',
+          scrollLeft: 0,
+          scrollTop: 0,
+          selectedTaskId: null,
+          showCriticalPath: false,
+          collapsedTaskIds: [],
+        },
+      },
+    });
+  });
+  await page.waitForTimeout(250);
+}
+
 for (const type of ['FS', 'SS', 'FF', 'SF'] as DepType[]) {
   test(`${type} dependency arrow renders`, async ({ page }) => {
     await loadChain(page, type);
@@ -125,4 +177,30 @@ test('deleting a dependency via the task drawer removes it after Save', async ({
     return b ? !b.dependencies.some((d) => d.targetId === 'A') : true;
   });
   expect(gone, 'FS dependency should be removed after Save').toBe(true);
+});
+
+test('dependency picker and selected dependency show WBS with the full task path', async ({
+  page,
+}) => {
+  await loadHierarchy(page);
+
+  const successorRow = page.locator('[role="row"]', { hasText: '后继任务' }).first();
+  await successorRow.click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
+
+  const drawer = page.locator('aside');
+  await expect(drawer.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
+  const dependencyField = drawer.locator('label', { hasText: '依赖' });
+  const picker = dependencyField.locator('select').first();
+
+  await expect(picker.locator('option[value="project-a"]')).toHaveText('1 项目甲');
+  await expect(picker.locator('option[value="release-a"]')).toHaveText(
+    '1.1.1 项目甲 / 后端开发 / 发布',
+  );
+  await expect(picker.locator('option[value="release-b"]')).toHaveText('2.1 项目乙 / 发布');
+
+  await picker.selectOption('release-b');
+  await dependencyField.getByRole('button', { name: '+' }).click();
+
+  await expect(dependencyField).toContainText('2.1 项目乙 / 发布');
 });

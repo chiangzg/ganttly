@@ -43,6 +43,7 @@ import { wouldCreateCycle } from '@/lib/schedule';
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
 import { snapConstraintDate } from '@/lib/schedule';
+import { buildTree, flattenAll } from '@/engine/scene';
 import {
   findActiveBaseline,
   buildEffectiveValues,
@@ -64,6 +65,7 @@ export function TaskDrawer() {
   const selectedId = file.viewState.selectedTaskId;
   const selectedTask = file.tasks.find((x) => x.id === selectedId) ?? null;
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
+  const dependencyLabels = useMemo(() => buildTaskHierarchyLabels(file.tasks), [file.tasks]);
 
   // ---- Transactional draft (plan §2.2) ----
   // `before` is the snapshot captured when the drawer opened (or when the
@@ -548,7 +550,7 @@ export function TaskDrawer() {
                     return (
                       <div key={dep.targetId} className="flex items-center gap-2">
                         <span className="flex-1 truncate text-xs">
-                          {pred?.name ?? dep.targetId}
+                          {dependencyLabels.get(dep.targetId) ?? pred?.name ?? dep.targetId}
                         </span>
                         <span className="text-xs text-fg-muted">
                           {t(`drawer.depType${dep.type}` as `drawer.depType${string}`)}
@@ -566,6 +568,7 @@ export function TaskDrawer() {
                   <DependencyAdder
                     existingTargetIds={draft.dependencies.map((d) => d.targetId)}
                     candidates={file.tasks.filter((x) => x.id !== task.id)}
+                    labels={dependencyLabels}
                     onAdd={(targetId, type, lag) => addDependency({ targetId, type, lag })}
                   />
                 </div>
@@ -965,13 +968,29 @@ function BaselineVarianceBlock({
   );
 }
 
+function buildTaskHierarchyLabels(tasks: ReadonlyArray<Task>): Map<string, string> {
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+  const labels = new Map<string, string>();
+
+  for (const node of flattenAll(buildTree(tasks))) {
+    const path = [...node.ancestorIds, node.task.id]
+      .map((id) => tasksById.get(id)?.name || id)
+      .join(' / ');
+    labels.set(node.task.id, `${node.wbsNumber} ${path}`);
+  }
+
+  return labels;
+}
+
 function DependencyAdder({
   existingTargetIds,
   candidates,
+  labels,
   onAdd,
 }: {
   existingTargetIds: string[];
   candidates: Task[];
+  labels: ReadonlyMap<string, string>;
   onAdd: (targetId: string, type: DependencyType, lag: number) => void;
 }) {
   const { t } = useTranslation();
@@ -991,7 +1010,7 @@ function DependencyAdder({
         <option value="">{t('drawer.addDependency')}</option>
         {available.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.name || c.id}
+            {labels.get(c.id) ?? (c.name || c.id)}
           </option>
         ))}
       </select>
