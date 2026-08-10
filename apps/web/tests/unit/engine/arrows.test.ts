@@ -73,6 +73,17 @@ const OPTS = {
   today: '2026-02-04',
 };
 
+function longestVerticalSegmentX(route: ReturnType<typeof computeArrowRoute>): number {
+  let longest = { x: Number.NaN, length: -1 };
+  for (let index = 1; index < route.length; index++) {
+    const previous = route[index - 1]!;
+    const point = route[index]!;
+    const length = previous.x === point.x ? Math.abs(point.y - previous.y) : -1;
+    if (length > longest.length) longest = { x: point.x, length };
+  }
+  return longest.x;
+}
+
 describe('assembleScene arrow geometry — 4 dependency types', () => {
   // week zoom = 20px/day. Tasks below share origin = '2026-02-02' (earliest
   // start), so:
@@ -195,9 +206,68 @@ describe('orthogonal dependency routing', () => {
     ).toBe(true);
   });
 
+  it('stays near aligned endpoints when another successor is an intervening milestone', () => {
+    const predecessor = baseTask('A', { order: 0 });
+    const milestone = baseTask('M', {
+      order: 1,
+      start: '2026-02-07',
+      end: '2026-02-07',
+      duration: 0,
+      isMilestone: true,
+      dependencies: [{ targetId: 'A', type: 'FS', lag: 0 }],
+    });
+    const successor = baseTask('B', {
+      order: 2,
+      start: '2026-02-07',
+      end: '2026-02-20',
+      duration: 10,
+      dependencies: [{ targetId: 'A', type: 'FS', lag: 0 }],
+    });
+    const scene = assembleScene(makeFile([predecessor, milestone, successor]), OPTS);
+    const arrow = scene.arrows.find((candidate) => candidate.toId === 'B')!;
+    const route = computeArrowRoute(arrow, scene);
+
+    // All three shapes meet at x=100. The route may skirt either side of the
+    // milestone, but must not detour around the predecessor's far left edge.
+    expect(Math.min(...route.map((point) => point.x))).toBeGreaterThanOrEqual(75);
+    expect(Math.max(...route.map((point) => point.x))).toBeLessThanOrEqual(125);
+  });
+
+  it('keeps converging dependencies local instead of routing around endpoint bars', () => {
+    const backend = baseTask('backend', {
+      order: 0,
+      start: '2026-02-12',
+      end: '2026-02-20',
+    });
+    const frontend = baseTask('frontend', {
+      order: 1,
+      start: '2026-02-02',
+      end: '2026-02-10',
+    });
+    const testing = baseTask('testing', {
+      order: 2,
+      start: '2026-02-21',
+      end: '2026-03-03',
+      dependencies: [
+        { targetId: 'backend', type: 'FS', lag: 0 },
+        { targetId: 'frontend', type: 'FS', lag: 0 },
+      ],
+    });
+    const scene = assembleScene(makeFile([backend, frontend, testing]), OPTS);
+    const backendArrow = scene.arrows.find((arrow) => arrow.fromId === 'backend')!;
+    const backendRoute = computeArrowRoute(backendArrow, scene);
+
+    // Backend ends where testing starts (x=380). The target is long, so
+    // including endpoint bars as corridor obstacles used to choose x=589 or
+    // the predecessor's far left edge.
+    expect(Math.min(...backendRoute.map((point) => point.x))).toBeGreaterThanOrEqual(360);
+    expect(Math.max(...backendRoute.map((point) => point.x))).toBeLessThanOrEqual(400);
+    expect(new Set(scene.arrows.map((arrow) => arrow.toY)).size).toBe(2);
+  });
+
   it('fans multiple dependencies into distinct milestone edge ports', () => {
     const milestone = baseTask('M', {
-      order: 3,
+      order: 4,
       start: '2026-02-16',
       end: '2026-02-16',
       duration: 0,
@@ -212,6 +282,7 @@ describe('orthogonal dependency routing', () => {
       baseTask('A', { order: 0 }),
       baseTask('B', { order: 1, start: '2026-02-03', end: '2026-02-07' }),
       baseTask('C', { order: 2, start: '2026-02-04', end: '2026-02-08' }),
+      baseTask('spacer', { order: 3, start: '2026-03-02', end: '2026-03-06' }),
       milestone,
     ]);
     const scene = assembleScene(file, OPTS);
@@ -224,6 +295,10 @@ describe('orthogonal dependency routing', () => {
     expect(Math.max(...targetYs) - Math.min(...targetYs)).toBeLessThanOrEqual(14);
     expect(targetXs.every((x) => x >= milestoneCenterX - MILESTONE_RADIUS)).toBe(true);
     expect(targetXs.every((x) => x < milestoneCenterX)).toBe(true);
+    const corridorXs = scene.arrows.map((arrow) =>
+      longestVerticalSegmentX(computeArrowRoute(arrow, scene)),
+    );
+    expect(new Set(corridorXs).size).toBe(3);
   });
 
   it('chooses a vertical corridor outside intervening task bars', () => {

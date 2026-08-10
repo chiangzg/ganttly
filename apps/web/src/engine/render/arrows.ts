@@ -13,6 +13,7 @@ import { MILESTONE_RADIUS } from './geometry';
 
 const ARROW_HEAD_SIZE = 6;
 const ROUTE_GAP = 8;
+const CHANNEL_GAP = 6;
 type Side = 'left' | 'right';
 export interface ArrowRoutePoint {
   x: number;
@@ -132,27 +133,30 @@ export function computeArrowRoute(arrow: Scene['arrows'][number], scene: Scene):
   }));
   const yMin = Math.min(arrow.fromY, arrow.toY);
   const yMax = Math.max(arrow.fromY, arrow.toY);
-  const blocking = expanded.filter((o) => o.bottom >= yMin && o.top <= yMax);
+  // The endpoint shapes only constrain their short exit/entry segments. The
+  // vertical corridor starts in the row gap, so treating those shapes as if
+  // they blocked the whole route forces aligned dependencies to detour around
+  // the far edge of their own bars.
+  const blocking = expanded.filter(
+    (o) => o.id !== arrow.fromId && o.id !== arrow.toId && o.bottom >= yMin && o.top <= yMax,
+  );
   const peers = scene.arrows
     .filter(
       (candidate) => candidate.toId === arrow.toId && sideFor(candidate.type, 'to') === toSide,
     )
     .sort((a, b) => a.fromY - b.fromY || a.fromId.localeCompare(b.fromId));
   const channelIndex = Math.max(0, peers.indexOf(arrow));
-  const outward = toSide === 'left' ? -1 : 1;
   const midpoint = (fromExit.x + toEntry.x) / 2;
-  const preferredX = midpoint + outward * channelIndex * 6;
+  const preferredX = midpoint + centeredChannelOffset(channelIndex, peers.length);
   const candidateXs = new Set<number>([fromExit.x, toEntry.x, midpoint, preferredX]);
   for (const obstacle of blocking) {
     candidateXs.add(obstacle.left - 1);
     candidateXs.add(obstacle.right + 1);
-    candidateXs.add(obstacle.left - 1 + outward * channelIndex * 6);
-    candidateXs.add(obstacle.right + 1 + outward * channelIndex * 6);
+    const offset = centeredChannelOffset(channelIndex, peers.length);
+    candidateXs.add(obstacle.left - 1 + offset);
+    candidateXs.add(obstacle.right + 1 + offset);
   }
   const safeXs = [...candidateXs].filter((x) => blocking.every((o) => x < o.left || x > o.right));
-  const corridorX = (safeXs.length > 0 ? safeXs : [midpoint]).sort(
-    (a, b) => Math.abs(a - preferredX) - Math.abs(b - preferredX),
-  )[0]!;
   const fromRow = scene.rows.find((row) => row.id === arrow.fromId);
   const toRow = scene.rows.find((row) => row.id === arrow.toId);
   const fromCenterY = fromRow
@@ -163,32 +167,108 @@ export function computeArrowRoute(arrow: Scene['arrows'][number], scene: Scene):
     : arrow.toY;
   const above = fromCenterY - ROW_HEIGHT / 2 - ROUTE_GAP;
   const below = fromCenterY + ROW_HEIGHT / 2 + ROUTE_GAP;
-  if (fromCenterY === toCenterY) {
-    const detourY = above >= HEADER_HEIGHT + 2 ? above : below;
+  const buildRoute = (corridorX: number): ArrowRoutePoint[] => {
+    if (fromCenterY === toCenterY) {
+      const detourY = above >= HEADER_HEIGHT + 2 ? above : below;
+      return compactRoute([
+        { x: arrow.fromX, y: arrow.fromY },
+        fromExit,
+        { x: fromExit.x, y: detourY },
+        { x: corridorX, y: detourY },
+        { x: toEntry.x, y: detourY },
+        toEntry,
+        { x: arrow.toX, y: arrow.toY },
+      ]);
+    }
+
+    const verticalDirection = Math.sign(toCenterY - fromCenterY);
+    const fromLaneY = fromCenterY + (verticalDirection * ROW_HEIGHT) / 2;
+    const toLaneY = toCenterY - (verticalDirection * ROW_HEIGHT) / 2;
     return compactRoute([
       { x: arrow.fromX, y: arrow.fromY },
       fromExit,
-      { x: fromExit.x, y: detourY },
-      { x: corridorX, y: detourY },
-      { x: toEntry.x, y: detourY },
+      { x: fromExit.x, y: fromLaneY },
+      { x: corridorX, y: fromLaneY },
+      { x: corridorX, y: toLaneY },
+      { x: toEntry.x, y: toLaneY },
       toEntry,
       { x: arrow.toX, y: arrow.toY },
     ]);
-  }
+  };
 
-  const verticalDirection = Math.sign(toCenterY - fromCenterY);
-  const fromLaneY = fromCenterY + (verticalDirection * ROW_HEIGHT) / 2;
-  const toLaneY = toCenterY - (verticalDirection * ROW_HEIGHT) / 2;
-  return compactRoute([
-    { x: arrow.fromX, y: arrow.fromY },
-    fromExit,
-    { x: fromExit.x, y: fromLaneY },
-    { x: corridorX, y: fromLaneY },
-    { x: corridorX, y: toLaneY },
-    { x: toEntry.x, y: toLaneY },
-    toEntry,
-    { x: arrow.toX, y: arrow.toY },
-  ]);
+  const candidates = (safeXs.length > 0 ? safeXs : [midpoint]).map((x) => ({
+    x,
+    route: buildRoute(x),
+  }));
+  candidates.sort((a, b) => {
+    const aScore = routeScore(a.route, a.x, preferredX, midpoint, arrow, peers);
+    const bScore = routeScore(b.route, b.x, preferredX, midpoint, arrow, peers);
+    return compareScores(aScore, bScore);
+  });
+  return candidates[0]!.route;
+}
+
+function centeredChannelOffset(index: number, count: number): number {
+  if (count <= 1 || index < 0) return 0;
+  return (index - (count - 1) / 2) * CHANNEL_GAP;
+}
+
+type RouteScore = readonly [
+  length: number,
+  sharedChannelRisk: number,
+  bends: number,
+  preferredDistance: number,
+  midpointDistance: number,
+  x: number,
+];
+
+function routeScore(
+  route: ArrowRoutePoint[],
+  corridorX: number,
+  preferredX: number,
+  midpoint: number,
+  arrow: Scene['arrows'][number],
+  peers: Scene['arrows'],
+): RouteScore {
+  const length = route.slice(1).reduce((total, point, index) => {
+    const previous = route[index]!;
+    return total + Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y);
+  }, 0);
+  const sharedChannelRisk = peers.reduce((risk, peer, index) => {
+    if (peer === arrow) return risk;
+    const peerFromSide = sideFor(peer.type, 'from');
+    const peerToSide = sideFor(peer.type, 'to');
+    const peerMidpoint =
+      (peer.fromX +
+        (peerFromSide === 'right' ? ROUTE_GAP : -ROUTE_GAP) +
+        peer.toX +
+        (peerToSide === 'right' ? ROUTE_GAP : -ROUTE_GAP)) /
+      2;
+    const peerChannel = peerMidpoint + centeredChannelOffset(index, peers.length);
+    const peerEntry = peer.toX + (peerToSide === 'right' ? ROUTE_GAP : -ROUTE_GAP);
+    return (
+      risk +
+      Math.max(0, CHANNEL_GAP - Math.abs(corridorX - peerChannel)) +
+      Math.max(0, CHANNEL_GAP - Math.abs(corridorX - peerEntry))
+    );
+  }, 0);
+  const bends = Math.max(0, route.length - 2);
+  return [
+    length,
+    sharedChannelRisk,
+    bends,
+    Math.abs(corridorX - preferredX),
+    Math.abs(corridorX - midpoint),
+    corridorX,
+  ];
+}
+
+function compareScores(a: RouteScore, b: RouteScore): number {
+  for (let index = 0; index < a.length; index++) {
+    const difference = a[index]! - b[index]!;
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 function compactRoute(points: ArrowRoutePoint[]): ArrowRoutePoint[] {
