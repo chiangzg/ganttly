@@ -14,10 +14,9 @@
  */
 import type { Scene, ThemeColors, TaskRow } from './types';
 import { COLUMN_WIDTH, HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dateRangeWidth } from '../layout';
+import { BAR_INSET_Y, MILESTONE_HALF } from './geometry';
 
-const BAR_INSET_Y = 5; // px padding inside row, top/bottom
 const BAR_RADIUS = 4;
-const MILESTONE_HALF = 9; // half-width of the diamond
 
 export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: ThemeColors): void {
   const {

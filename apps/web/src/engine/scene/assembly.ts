@@ -12,6 +12,7 @@
  */
 import type { GanttlyFile, Holiday, Task, Baseline, BaselineTask, Resource } from '@ganttly/schema';
 import type { Scene, TaskRow, ArrowSpec } from '../render/types';
+import { MILESTONE_RADIUS } from '../render/geometry';
 import type { TaskBaselineVariance } from '@/lib/baseline';
 import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff, pixelsPerDay } from '../layout';
 import { buildTree, flattenVisible } from './tree';
@@ -267,15 +268,42 @@ function computeArrows(
   const rowIndex = new Map<string, number>();
   visible.forEach((n, i) => rowIndex.set(n.task.id, i));
 
+  const outgoing = new Map<string, Array<{ successorId: string; depIndex: number }>>();
   for (const successor of file.tasks) {
-    for (const dep of successor.dependencies) {
+    successor.dependencies.forEach((dep, depIndex) => {
+      const list = outgoing.get(dep.targetId) ?? [];
+      list.push({ successorId: successor.id, depIndex });
+      outgoing.set(dep.targetId, list);
+    });
+  }
+  for (const list of outgoing.values()) {
+    list.sort(
+      (a, b) =>
+        (rowIndex.get(a.successorId) ?? Number.MAX_SAFE_INTEGER) -
+        (rowIndex.get(b.successorId) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }
+
+  const incomingSlots = new Map<string, Map<number, number>>();
+  for (const successor of file.tasks) {
+    const ordered = successor.dependencies
+      .map((dep, depIndex) => ({
+        depIndex,
+        row: rowIndex.get(dep.targetId) ?? Number.MAX_SAFE_INTEGER,
+      }))
+      .sort((a, b) => a.row - b.row || a.depIndex - b.depIndex);
+    incomingSlots.set(successor.id, new Map(ordered.map((entry, slot) => [entry.depIndex, slot])));
+  }
+
+  for (const successor of file.tasks) {
+    for (const [depIndex, dep] of successor.dependencies.entries()) {
       const predecessor = file.tasks.find((t) => t.id === dep.targetId);
       if (!predecessor) continue;
       const fromIdx = rowIndex.get(predecessor.id);
       const toIdx = rowIndex.get(successor.id);
       if (fromIdx === undefined || toIdx === undefined) continue;
 
-      const fromX = endpointX(
+      const fromBaseX = endpointX(
         predecessor,
         dep.type,
         'from',
@@ -283,13 +311,35 @@ function computeArrows(
         zoom,
         file.viewState.scrollLeft,
       );
-      const toX = endpointX(successor, dep.type, 'to', originDate, zoom, file.viewState.scrollLeft);
+      const toBaseX = endpointX(
+        successor,
+        dep.type,
+        'to',
+        originDate,
+        zoom,
+        file.viewState.scrollLeft,
+      );
       // Y in viewport pixels: global row index → chart px, minus scrollTop.
       // Matches bars.ts (`HEADER_HEIGHT + row.yIndex*ROW_HEIGHT - scrollTop`)
       // so arrow endpoints land exactly on their bar centres, aligned with the
       // left TaskTable during sub-row scroll.
-      const fromY = HEADER_HEIGHT + (fromIdx + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
-      const toY = HEADER_HEIGHT + (toIdx + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
+      const fromBaseY = HEADER_HEIGHT + (fromIdx + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
+      const toBaseY = HEADER_HEIGHT + (toIdx + 0.5) * ROW_HEIGHT - file.viewState.scrollTop;
+      const outgoingPorts = outgoing.get(predecessor.id) ?? [];
+      const outgoingIndex = outgoingPorts.findIndex(
+        (entry) => entry.successorId === successor.id && entry.depIndex === depIndex,
+      );
+      const incomingIndex = incomingSlots.get(successor.id)?.get(depIndex) ?? depIndex;
+      const fromOffset = portOffset(outgoingIndex, outgoingPorts.length);
+      const toOffset = portOffset(incomingIndex, successor.dependencies.length);
+      const fromSide = endpointSide(dep.type, 'from');
+      const toSide = endpointSide(dep.type, 'to');
+      const fromX = predecessor.isMilestone
+        ? fromBaseX - fromSide * Math.abs(fromOffset)
+        : fromBaseX;
+      const toX = successor.isMilestone ? toBaseX - toSide * Math.abs(toOffset) : toBaseX;
+      const fromY = fromBaseY + fromOffset;
+      const toY = toBaseY + toOffset;
 
       out.push({
         fromId: predecessor.id,
@@ -308,6 +358,17 @@ function computeArrows(
   return out;
 }
 
+function portOffset(index: number, count: number): number {
+  if (count <= 1 || index < 0) return 0;
+  const spacing = Math.min(6, 14 / (count - 1));
+  return (index - (count - 1) / 2) * spacing;
+}
+
+function endpointSide(depType: 'FS' | 'SS' | 'FF' | 'SF', role: 'from' | 'to'): -1 | 1 {
+  if (role === 'from') return depType === 'SS' || depType === 'SF' ? -1 : 1;
+  return depType === 'FF' || depType === 'SF' ? 1 : -1;
+}
+
 /** Returns the X pixel (viewport-local) for the appropriate edge of a bar. */
 function endpointX(
   task: Task,
@@ -322,6 +383,14 @@ function endpointX(
   const useEnd =
     (role === 'from' && (depType === 'FS' || depType === 'FF')) ||
     (role === 'to' && (depType === 'FF' || depType === 'SF'));
+  // A milestone is rendered as a diamond centred on its start date, not as a
+  // one-day bar. Connect to the diamond edge so arrows do not terminate under
+  // the marker when several dependencies converge on it.
+  if (task.isMilestone) {
+    const center = dateToPixel(task.start, originDate, zoom);
+    const side = endpointSide(depType, role);
+    return center + side * MILESTONE_RADIUS - scrollLeft;
+  }
   const iso = useEnd ? task.end : task.start;
   const offsetDays = useEnd ? 1 : 0; // end is inclusive — pixel position of day AFTER end
   const px = dateToPixel(iso, originDate, zoom) + offsetDays * pixelsPerDay(zoom);
