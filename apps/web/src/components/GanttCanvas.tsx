@@ -13,13 +13,19 @@
  * interaction helpers, then dispatch to projectStore (which also pushes to
  * the undo stack — PRD §3.7).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useProjectStore,
   addDependencyCommand,
   updateTaskWithRollupCommand,
 } from '@/store/useProjectStore';
-import { assembleScene, originDateFor, chartEndDate } from '@/engine/scene';
+import {
+  assembleScene,
+  originDateFor,
+  chartEndDate,
+  buildTree,
+  flattenVisible,
+} from '@/engine/scene';
 import { renderScene, resolveThemeColors } from '@/engine/render';
 import {
   todayISO,
@@ -29,6 +35,7 @@ import {
   dayDiff,
   clamp,
   ROW_HEIGHT,
+  HEADER_HEIGHT,
 } from '@/engine/layout';
 import {
   hitTest,
@@ -44,6 +51,7 @@ import { computeCascadeRollup } from '@/lib/summary';
 import { findActiveBaseline } from '@/lib/baseline';
 import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
 import { computeSelectionOnPointerDown } from '@/lib/selection';
+import { computeFilteredRows, isAnyFilterActive, type TaskFilter } from '@/lib/taskFilter';
 import { cn } from '@/lib/cn';
 import { isEditableTarget } from '@/lib/shortcutTarget';
 import { useHolidayHover } from '@/components/useHolidayHover';
@@ -266,7 +274,14 @@ export function GanttCanvas() {
       selectedTaskIds,
     });
     sceneRef.current = scene;
-    maxScrollTopRef.current = Math.max(0, scene.totalRows * ROW_HEIGHT - size.height);
+    // Subtract HEADER_HEIGHT: the fixed header occupies the top band and is
+    // not scrollable content, mirroring the left TaskTable whose overflow
+    // container starts below its own 56px header. Without this the canvas
+    // could scroll ~56px past the last row's alignment with the table.
+    maxScrollTopRef.current = Math.max(
+      0,
+      scene.totalRows * ROW_HEIGHT - (size.height - HEADER_HEIGHT),
+    );
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
   }, [file, size, activeBaseline, searchQuery, taskFilter, selectedTaskIds]);
@@ -588,6 +603,11 @@ export function GanttCanvas() {
       {baselineTooltip}
       {taskTooltip}
       <ScrollShim viewportWidth={size.width} activeBaseline={activeBaseline} />
+      <VerticalScrollShim
+        viewportHeight={size.height - HEADER_HEIGHT}
+        searchQuery={searchQuery}
+        taskFilter={taskFilter}
+      />
       {confirmDeleteTaskId && (
         <DeleteTaskConfirm
           taskId={confirmDeleteTaskId}
@@ -647,6 +667,98 @@ function ScrollShim({
       }}
     >
       <div style={{ width: contentWidth, height: 1 }} />
+    </div>
+  );
+}
+
+/**
+ * Vertical scrollbar shim — the right pane's native, draggable vertical
+ * scrollbar. The canvas itself has overflow:hidden and no scrollable content
+ * (it self-draws rows offset by scrollTop), so without this there is NO
+ * visible vertical scrollbar on the gantt side: scrolling relied solely on the
+ * non-passive wheel listener attached to <canvas>. That worked mechanically,
+ * but users expect a visible, grabbable scrollbar mirroring the left
+ * TaskTable — and if the wheel listener ever misses (cursor on the horizontal
+ * ScrollShim, trackpad inertia, etc.) the pane appears "stuck" while the left
+ * side still scrolls.
+ *
+ * Same store-sync pattern as the horizontal ScrollShim: a real
+ * overflow-y-auto div sized so its native thumb spans the same
+ * [0, totalRows*ROW_HEIGHT - viewportHeight] range the canvas clamps to, with
+ * a userScrolling ref breaking the store→DOM↔DOM→store feedback loop.
+ */
+function VerticalScrollShim({
+  viewportHeight,
+  searchQuery,
+  taskFilter,
+}: {
+  viewportHeight: number;
+  searchQuery: string;
+  taskFilter: TaskFilter;
+}) {
+  // Subscribe at fine granularity so the component re-renders on pure vertical
+  // scroll (scrollTop changes → new file object) but the totalRows memo does
+  // NOT recompute — tasks and collapsedTaskIds are referentially stable across
+  // a scroll, so buildTree + flattenVisible are skipped on the hot path.
+  const tasks = useProjectStore((s) => s.file.tasks);
+  const collapsedTaskIds = useProjectStore((s) => s.file.viewState.collapsedTaskIds);
+  const scrollTop = useProjectStore((s) => s.file.viewState.scrollTop);
+  const shimRef = useRef<HTMLDivElement>(null);
+  const userScrolling = useRef(false);
+
+  // Compute the visible row count with the SAME logic as assembleScene + the
+  // left TaskTable (flattenVisible vs computeFilteredRows). Doing it here (not
+  // reading sceneRef) avoids a one-frame lag: sceneRef is updated inside an
+  // effect that runs AFTER render, so reading it during render would give the
+  // previous frame's totalRows and let the scrollbar momentarily clamp short.
+  const totalRows = useMemo(() => {
+    const query = searchQuery ?? '';
+    const filter = taskFilter ?? 'none';
+    const file = useProjectStore.getState().file;
+    const visible = isAnyFilterActive(query, filter)
+      ? computeFilteredRows(file, query, filter).rows
+      : flattenVisible(buildTree(tasks), new Set(collapsedTaskIds));
+    return visible.length;
+  }, [tasks, collapsedTaskIds, searchQuery, taskFilter]);
+
+  // Content height must match the left TaskTable's inner spacer
+  // (rows.length * ROW_HEIGHT) so both native scrollbars clamp scrollTop to the
+  // same range and the canvas never desyncs from the table.
+  const contentHeight = Math.max(totalRows * ROW_HEIGHT, 0);
+
+  // Reflect store-driven scrollTop changes (canvas wheel-pan, Today button,
+  // left TaskTable scroll) onto this bar's thumb.
+  useEffect(() => {
+    const el = shimRef.current;
+    if (!el || userScrolling.current) return;
+    if (Math.abs(el.scrollTop - scrollTop) > 1) el.scrollTop = scrollTop;
+  }, [scrollTop]);
+
+  return (
+    <div
+      ref={shimRef}
+      // Sit along the right edge, leaving the bottom 12px for the horizontal
+      // ScrollShim so the two bars never overlap at the corner. Start below the
+      // HEADER_HEIGHT band (the header is not scroll content).
+      className="absolute right-0 overflow-y-auto overflow-x-hidden"
+      style={{ height: Math.max(viewportHeight, 0), top: HEADER_HEIGHT }}
+      onScroll={(e) => {
+        const top = e.currentTarget.scrollTop;
+        userScrolling.current = true;
+        if (top !== useProjectStore.getState().file.viewState.scrollTop) {
+          // Direct setState, not dispatch — scrolling is ephemeral and must
+          // not pollute the undo stack (consistent with wheel + ScrollShim).
+          const f = useProjectStore.getState().file;
+          useProjectStore.setState({
+            file: { ...f, viewState: { ...f.viewState, scrollTop: top } },
+          });
+        }
+        requestAnimationFrame(() => {
+          userScrolling.current = false;
+        });
+      }}
+    >
+      <div style={{ width: 1, height: contentHeight }} />
     </div>
   );
 }
