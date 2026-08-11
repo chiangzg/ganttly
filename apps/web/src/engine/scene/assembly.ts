@@ -14,7 +14,14 @@ import type { GanttlyFile, Holiday, Task, Baseline, BaselineTask, Resource } fro
 import type { Scene, TaskRow, ArrowSpec } from '../render/types';
 import { MILESTONE_RADIUS } from '../render/geometry';
 import type { TaskBaselineVariance } from '@/lib/baseline';
-import { HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dayDiff, pixelsPerDay } from '../layout';
+import {
+  HEADER_HEIGHT,
+  ROW_HEIGHT,
+  dateToPixel,
+  dayDiff,
+  milestoneCenterX,
+  pixelsPerDay,
+} from '../layout';
 import { buildTree, flattenVisible } from './tree';
 import { computeCriticalPath } from '@/lib/cpm';
 import { computeAllRollups } from '@/lib/summary';
@@ -383,11 +390,11 @@ function endpointX(
   const useEnd =
     (role === 'from' && (depType === 'FS' || depType === 'FF')) ||
     (role === 'to' && (depType === 'FF' || depType === 'SF'));
-  // A milestone is rendered as a diamond centred on its start date, not as a
-  // one-day bar. Connect to the diamond edge so arrows do not terminate under
-  // the marker when several dependencies converge on it.
+  // A milestone is rendered as a diamond centred on its day's END line (right
+  // boundary), not as a one-day bar. Connect to the diamond edge so arrows do
+  // not terminate under the marker when several dependencies converge on it.
   if (task.isMilestone) {
-    const center = dateToPixel(task.start, originDate, zoom);
+    const center = milestoneCenterX(task.start, originDate, zoom);
     const side = endpointSide(depType, role);
     return center + side * MILESTONE_RADIUS - scrollLeft;
   }

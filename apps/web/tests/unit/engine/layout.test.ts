@@ -9,6 +9,7 @@ import {
   dateToPixel,
   dayDiff,
   iterateDates,
+  milestoneCenterX,
   pixelToDate,
   pixelsPerDay,
   visibleDateRange,
@@ -80,6 +81,21 @@ describe('dateRangeWidth', () => {
   it('width is inclusive of both endpoints in day view', () => {
     // Jan 5 to Jan 9 = 5 days * 32 px = 160 px
     expect(dateRangeWidth('2026-01-05', '2026-01-09', 'day')).toBe(160);
+  });
+});
+
+describe('milestoneCenterX', () => {
+  it('is one pixelsPerDay to the right of dateToPixel (the day END line)', () => {
+    const day = calAddDays(ORIGIN, 3);
+    expect(milestoneCenterX(day, ORIGIN, 'day')).toBe(
+      dateToPixel(day, ORIGIN, 'day') + pixelsPerDay('day'),
+    );
+  });
+  it('equals dateToPixel of the next day (END line = next day START line)', () => {
+    const day = calAddDays(ORIGIN, 5);
+    expect(milestoneCenterX(day, ORIGIN, 'week')).toBe(
+      dateToPixel(calAddDays(day, 1), ORIGIN, 'week'),
+    );
   });
 });
 

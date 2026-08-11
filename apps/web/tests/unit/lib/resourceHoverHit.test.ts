@@ -176,8 +176,8 @@ describe('hitResource', () => {
       isMilestone: true,
     });
     const scene = makeScene([row]);
-    // Milestone diamond centres at start-day column + half a day.
-    const cx = dateToPixel('2026-02-04', ORIGIN, ZOOM) + PX_PER_DAY / 2;
+    // Milestone diamond centres on its day's END line (start + one full day).
+    const cx = dateToPixel('2026-02-04', ORIGIN, ZOOM) + PX_PER_DAY;
     const hit = hitResource(scene, cx, rowCenterY(1));
     expect(hit).toEqual({ kind: 'task-lane', resourceId: 'r1', taskId: 'm1' });
   });

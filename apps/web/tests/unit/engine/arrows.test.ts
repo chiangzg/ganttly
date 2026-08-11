@@ -288,7 +288,7 @@ describe('orthogonal dependency routing', () => {
     const scene = assembleScene(file, OPTS);
     const targetYs = scene.arrows.map((arrow) => arrow.toY);
     const targetXs = scene.arrows.map((arrow) => arrow.toX);
-    const milestoneCenterX = 14 * 20;
+    const milestoneCenterX = 15 * 20;
 
     expect(new Set(targetYs).size).toBe(3);
     expect(targetYs).toEqual([...targetYs].sort((a, b) => a - b));

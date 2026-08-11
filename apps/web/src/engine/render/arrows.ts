@@ -8,7 +8,14 @@
  * the visible task rows so lines do not cut through bars or milestones.
  */
 import type { Scene, ThemeColors } from './types';
-import { COLUMN_WIDTH, HEADER_HEIGHT, ROW_HEIGHT, dateRangeWidth, dateToPixel } from '../layout';
+import {
+  COLUMN_WIDTH,
+  HEADER_HEIGHT,
+  ROW_HEIGHT,
+  dateRangeWidth,
+  dateToPixel,
+  milestoneCenterX,
+} from '../layout';
 import { MILESTONE_RADIUS } from './geometry';
 
 const ARROW_HEAD_SIZE = 6;
@@ -107,21 +114,23 @@ export function computeArrowRoute(arrow: Scene['arrows'][number], scene: Scene):
   };
   const toEntry = { x: arrow.toX + (toSide === 'right' ? ROUTE_GAP : -ROUTE_GAP), y: arrow.toY };
   const obstacles = scene.rows.map((row) => {
+    const y = HEADER_HEIGHT + row.yIndex * ROW_HEIGHT - scene.scrollTop;
+    if (row.isMilestone) {
+      // Diamond is centred on its day's END line — see `milestoneCenterX`.
+      const cx = milestoneCenterX(row.start, scene.originDate, scene.zoom) - scene.scrollLeft;
+      return {
+        id: row.id,
+        left: cx - MILESTONE_RADIUS,
+        right: cx + MILESTONE_RADIUS,
+        top: y + ROW_HEIGHT / 2 - MILESTONE_RADIUS,
+        bottom: y + ROW_HEIGHT / 2 + MILESTONE_RADIUS,
+      };
+    }
     const x = dateToPixel(row.start, scene.originDate, scene.zoom) - scene.scrollLeft;
     const width = Math.max(
       dateRangeWidth(row.start, row.end, scene.zoom),
       COLUMN_WIDTH[scene.zoom] / 2,
     );
-    const y = HEADER_HEIGHT + row.yIndex * ROW_HEIGHT - scene.scrollTop;
-    if (row.isMilestone) {
-      return {
-        id: row.id,
-        left: x - MILESTONE_RADIUS,
-        right: x + MILESTONE_RADIUS,
-        top: y + ROW_HEIGHT / 2 - MILESTONE_RADIUS,
-        bottom: y + ROW_HEIGHT / 2 + MILESTONE_RADIUS,
-      };
-    }
     return { id: row.id, left: x, right: x + width, top: y + 5, bottom: y + ROW_HEIGHT - 5 };
   });
   const expanded = obstacles.map((o) => ({

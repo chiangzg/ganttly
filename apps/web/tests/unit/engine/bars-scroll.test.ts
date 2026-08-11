@@ -189,7 +189,8 @@ describe('renderBars — baseline milestone geometry', () => {
 
     renderBars(ctx, scene, THEME);
 
-    // week zoom = 20 px/day: captured 02-02 is x=0, current 02-09 is x=140.
-    expect(translations.map((point) => point.x)).toEqual([0, 140]);
+    // week zoom = 20 px/day: diamonds centre on each day's END line, so
+    // captured 02-02 is x=20 (0 + 20) and current 02-09 is x=160 (140 + 20).
+    expect(translations.map((point) => point.x)).toEqual([20, 160]);
   });
 });
