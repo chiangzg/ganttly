@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBatchDeleteImpact } from '@/lib/deleteImpact';
+import { computeBatchDeleteImpact } from '../src/deleteImpact';
 import type { Task } from '@ganttly/schema';
 
 function makeTask(id: string, overrides: Partial<Task> = {}): Task {

@@ -6,11 +6,11 @@ import {
   summarizeBaselineVariance,
   findActiveBaseline,
   buildEffectiveValues,
-} from '@/lib/baseline';
+} from '../src/baseline';
 import type { GanttlyFile, Task, Baseline, BaselineTask } from '@ganttly/schema';
 import { createEmptyFile } from '@ganttly/schema';
 import { getCalendar } from '@ganttly/calendar-data';
-import { resolveCalendar } from '@/lib/calendar';
+import { resolveCalendar } from '../src/calendar';
 
 const zhCN = getCalendar('zh-CN');
 const cal = resolveCalendar(zhCN);

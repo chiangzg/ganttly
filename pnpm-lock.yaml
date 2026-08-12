@@ -56,6 +56,9 @@ importers:
       '@ganttly/calendar-data':
         specifier: workspace:*
         version: link:../../packages/calendar-data
+      '@ganttly/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@ganttly/gan-parser':
         specifier: workspace:*
         version: link:../../packages/gan-parser
@@ -166,6 +169,28 @@ importers:
       ajv-formats:
         specifier: ^3.0.1
         version: 3.0.1(ajv@8.20.0)
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@22.20.1)(jsdom@24.1.3)
+
+  packages/domain:
+    dependencies:
+      '@ganttly/calendar-data':
+        specifier: workspace:*
+        version: link:../calendar-data
+      '@ganttly/gan-parser':
+        specifier: workspace:*
+        version: link:../gan-parser
+      '@ganttly/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
+      '@ganttly/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       typescript:
         specifier: ^5.5.0
         version: 5.9.3

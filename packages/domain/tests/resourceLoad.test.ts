@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeResourceLoad, loadOn, peakLoad } from '@/lib/resourceLoad';
+import { computeResourceLoad, loadOn, peakLoad } from '../src/resourceLoad';
 import type { Task, Resource } from '@ganttly/schema';
-import { resolveCalendar } from '@/lib/calendar';
+import { resolveCalendar } from '../src/calendar';
 
 const cal = resolveCalendar({
   id: 'test',

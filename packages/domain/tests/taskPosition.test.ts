@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTaskPosition } from '@/lib/taskPosition';
+import { computeTaskPosition } from '../src/taskPosition';
 import { createDefaultTask, type Task } from '@ganttly/schema';
 
 function makeTask(id: string, overrides: Partial<Task> = {}): Task {
