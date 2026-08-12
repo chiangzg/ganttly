@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@ganttly/calendar-data": "workspace:*",
+    "@ganttly/domain": "workspace:*",
     "@ganttly/gan-parser": "workspace:*",
     "@ganttly/schema": "workspace:*",
     "@radix-ui/react-dialog": "^1.1.21",

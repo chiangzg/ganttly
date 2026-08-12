@@ -11,7 +11,7 @@ import {
   prevWorkingDay,
   resolveCalendar,
   toISODate,
-} from '@/lib/calendar';
+} from '../src/calendar';
 import { getCalendar } from '@ganttly/calendar-data';
 import type { Calendar } from '@ganttly/schema';
 

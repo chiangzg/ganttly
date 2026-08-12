@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeCriticalPath } from '@/lib/cpm';
+import { computeCriticalPath } from '../src/cpm';
 import { getCalendar } from '@ganttly/calendar-data';
 import type { Task, Dependency } from '@ganttly/schema';
 

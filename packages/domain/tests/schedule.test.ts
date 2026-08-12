@@ -11,7 +11,7 @@ import {
   snapConstraintDate,
   checkConstraintConflicts,
   countDependencyViolations,
-} from '@/lib/schedule';
+} from '../src/schedule';
 import { getCalendar } from '@ganttly/calendar-data';
 import type { Dependency, Task } from '@ganttly/schema';
 

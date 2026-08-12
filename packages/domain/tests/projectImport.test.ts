@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyFile } from '@ganttly/schema';
-import { parseProjectImport, ProjectImportError } from '@/lib/projectImport';
+import { parseProjectImport, ProjectImportError } from '../src/projectImport';
 
 describe('parseProjectImport', () => {
   it('normalizes older ganttly JSON and preserves explicit overtime dates', () => {

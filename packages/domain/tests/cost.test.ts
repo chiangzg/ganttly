@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeTaskPersonDays, computeAssignmentPersonDays, totalPersonDays } from '@/lib/cost';
-import { computeAllRollups, computeRollup } from '@/lib/summary';
-import { resolveCalendar } from '@/lib/calendar';
+import { computeTaskPersonDays, computeAssignmentPersonDays, totalPersonDays } from '../src/cost';
+import { computeAllRollups, computeRollup } from '../src/summary';
+import { resolveCalendar } from '../src/calendar';
 import type { Task, Resource, Calendar } from '@ganttly/schema';
 
 const cal = resolveCalendar({

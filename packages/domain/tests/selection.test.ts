@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeSelectionOnPointerDown } from '@/lib/selection';
+import { computeSelectionOnPointerDown } from '../src/selection';
 
 const VISIBLE = ['a', 'b', 'c', 'd', 'e'];
 const none = { ctrl: false, meta: false, shift: false };

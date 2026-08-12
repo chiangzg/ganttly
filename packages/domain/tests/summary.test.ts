@@ -4,7 +4,7 @@ import {
   computeCascadeRollup,
   isSummaryTask,
   computeAllRollups,
-} from '@/lib/summary';
+} from '../src/summary';
 import type { Task } from '@ganttly/schema';
 
 function makeTask(overrides: Partial<Task> & { id: string }): Task {

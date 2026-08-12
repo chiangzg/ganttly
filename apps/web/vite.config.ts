@@ -14,7 +14,7 @@ export default defineConfig({
   },
   // Pre-bundle workspace deps so they reload cleanly on change.
   optimizeDeps: {
-    include: ['@ganttly/schema', '@ganttly/calendar-data'],
+    include: ['@ganttly/schema', '@ganttly/calendar-data', '@ganttly/domain'],
   },
   server: {
     port: 5173,

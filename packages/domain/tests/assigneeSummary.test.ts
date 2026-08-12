@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeAssigneeSummary, resolveAssignees } from '@/lib/assigneeSummary';
+import { computeAssigneeSummary, resolveAssignees } from '../src/assigneeSummary';
 import type { Resource, TaskAssignment } from '@ganttly/schema';
 
 function mkResource(id: string, name: string): Resource {
