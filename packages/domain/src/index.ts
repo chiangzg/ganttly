@@ -7,8 +7,8 @@
  * `ProjectApplicationService` must call these functions so that排期语义 stays
  * single-source.
  *
- * Re-exports the migrated `apps/web/src/lib` modules. The command model
- * (`applyProjectCommand`) lands in a follow-up commit within this PR.
+ * Re-exports the migrated `apps/web/src/lib` modules plus the pure command
+ * model (`applyProjectCommand`).
  */
 export * from './calendar';
 export * from './schedule';
@@ -24,3 +24,4 @@ export * from './taskPosition';
 export * from './deleteImpact';
 export * from './clipboard';
 export * from './selection';
+export * from './commands';
