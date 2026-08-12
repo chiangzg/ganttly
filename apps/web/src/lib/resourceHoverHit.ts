@@ -21,6 +21,7 @@ import {
   ROW_HEIGHT,
   dateToPixel,
   dateRangeWidth,
+  milestoneCenterX,
   pixelsPerDay,
 } from '@/engine/layout';
 
@@ -70,9 +71,8 @@ export function hitResource(scene: ResourceScene, x: number, y: number): Resourc
   if (row.kind === 'task') {
     const chartX = x + scene.scrollLeft;
     if (row.isMilestone) {
-      // Milestone renders as a diamond centred at the start day's column.
-      const cx =
-        dateToPixel(row.start, scene.originDate, scene.zoom) + pixelsPerDay(scene.zoom) / 2;
+      // Milestone renders as a diamond centred on its day's END line.
+      const cx = milestoneCenterX(row.start, scene.originDate, scene.zoom);
       const half = 5;
       // Diamond hit: use a slightly generous bounding box (the diamond's visual
       // half-extent plus 2px tolerance) so the small glyph is reachable.

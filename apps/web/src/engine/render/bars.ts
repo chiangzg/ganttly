@@ -13,11 +13,17 @@
  * (mirrors resourceLoad.ts so bars track the left TaskTable during scroll).
  */
 import type { Scene, ThemeColors, TaskRow } from './types';
-import { COLUMN_WIDTH, HEADER_HEIGHT, ROW_HEIGHT, dateToPixel, dateRangeWidth } from '../layout';
+import {
+  COLUMN_WIDTH,
+  HEADER_HEIGHT,
+  ROW_HEIGHT,
+  dateToPixel,
+  dateRangeWidth,
+  milestoneCenterX,
+} from '../layout';
+import { BAR_INSET_Y, MILESTONE_HALF } from './geometry';
 
-const BAR_INSET_Y = 5; // px padding inside row, top/bottom
 const BAR_RADIUS = 4;
-const MILESTONE_HALF = 9; // half-width of the diamond
 
 export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: ThemeColors): void {
   const {
@@ -104,11 +110,18 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
     // changed since capture must retain the baseline's original shape.
     if (compare && row.baseline) drawBaselineReference(ctx, row.baseline, yTop, env);
     const cy = compare ? yTop + ROW_HEIGHT / 2 - 3 : yTop + ROW_HEIGHT / 2;
-    drawMilestone(ctx, xStart, cy, barColor, env.theme, compare ? 8 : MILESTONE_HALF);
+    // Anchor the diamond to its day's END line (right boundary) — see
+    // `milestoneCenterX`. `xStart` is the start line; the centre is one
+    // `pixelsPerDay` to its right.
+    const cx = milestoneCenterX(row.start, env.originDate, env.zoom) - env.scrollLeft;
+    const half = compare ? 8 : MILESTONE_HALF;
+    drawMilestone(ctx, cx, cy, barColor, env.theme, half);
     if (row.id === env.selectedTaskId) {
-      drawSelectionRing(ctx, xStart, cy, (compare ? 8 : MILESTONE_HALF) + 4, env.theme);
+      drawSelectionRing(ctx, cx, cy, half + 4, env.theme);
     }
-    drawRowLabel(ctx, row, xStart, width, yTop, env);
+    // Label starts at the diamond's right edge instead of `xStart + width`,
+    // since width is one-day-wide and would push the label too far right.
+    drawRowLabel(ctx, row, cx + half, 0, yTop, env);
     return;
   }
 
@@ -193,7 +206,7 @@ function drawBaselineReference(
 ): void {
   if (!baseline) return;
   if (baseline.duration === 0) {
-    const baselineX = dateToPixel(baseline.start, env.originDate, env.zoom) - env.scrollLeft;
+    const baselineX = milestoneCenterX(baseline.start, env.originDate, env.zoom) - env.scrollLeft;
     drawBaselineMilestone(ctx, baselineX, yTop + ROW_HEIGHT - 8, env.theme.baseline);
     return;
   }

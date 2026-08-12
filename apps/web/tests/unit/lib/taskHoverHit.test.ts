@@ -94,7 +94,9 @@ describe('hitTaskBar', () => {
       end: '2026-02-04',
     });
     const scene = makeScene([row]);
-    expect(hitTaskBar(scene, dateX('2026-02-04'), rowCenterY(0))?.id).toBe('m0');
+    // Milestone diamond centres on the day's END line (start + one day).
+    const cx = dateX('2026-02-05');
+    expect(hitTaskBar(scene, cx, rowCenterY(0))?.id).toBe('m0');
   });
 
   it('respects scrollTop when mapping Y to a row', () => {

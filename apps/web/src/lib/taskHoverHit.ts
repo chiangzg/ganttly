@@ -13,8 +13,9 @@ import {
   ROW_HEIGHT,
   dateToPixel,
   dateRangeWidth,
-  pixelsPerDay,
+  milestoneCenterX,
 } from '@/engine/layout';
+import { MILESTONE_RADIUS } from '@/engine/render/geometry';
 
 /**
  * Returns the task row whose bar is under the viewport-local point (x, y), or
@@ -29,16 +30,19 @@ export function hitTaskBar(scene: Scene, x: number, y: number): TaskRow | null {
   const row = scene.rows.find((r) => r.yIndex === rowIdx);
   if (!row) return null;
   const chartX = x + scene.scrollLeft;
-  const barX = dateToPixel(row.start, scene.originDate, scene.zoom);
-  const barW = Math.max(
-    dateRangeWidth(row.start, row.end, scene.zoom),
-    // Milestones render as a diamond ~1 day wide; give a small min so the hit
-    // area matches the visual glyph.
-    row.isMilestone ? pixelsPerDay(scene.zoom) / 2 : 16,
-  );
   const rowTop = HEADER_HEIGHT + row.yIndex * ROW_HEIGHT - scene.scrollTop;
   const inY = y >= rowTop + 2 && y <= rowTop + ROW_HEIGHT - 2;
   if (!inY) return null;
+  if (row.isMilestone) {
+    // Milestone renders as a diamond centred on its day's END line. The hit
+    // box mirrors the visual glyph: ±MILESTONE_RADIUS around the centre, plus
+    // a 2px tolerance so the small marker is easy to hover.
+    const cx = milestoneCenterX(row.start, scene.originDate, scene.zoom);
+    if (chartX >= cx - MILESTONE_RADIUS - 2 && chartX <= cx + MILESTONE_RADIUS + 2) return row;
+    return null;
+  }
+  const barX = dateToPixel(row.start, scene.originDate, scene.zoom);
+  const barW = Math.max(dateRangeWidth(row.start, row.end, scene.zoom), 16);
   if (chartX >= barX - 2 && chartX <= barX + barW + 2) return row;
   return null;
 }

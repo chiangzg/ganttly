@@ -71,6 +71,19 @@ export function pixelToDate(pixelX: number, originDate: string, zoom: ZoomLevel)
   return addCalendarDays(originDate, dayDelta);
 }
 
+/**
+ * Centre X (chart-local) of a milestone diamond.
+ *
+ * A milestone is a zero-duration event on a single day (`start === end`). It is
+ * anchored to that day's END line (right boundary = next day's start) rather
+ * than its start line, because semantically a milestone marks completion of the
+ * day and visually it gives dependency arrows more room. `dateToPixel` returns a
+ * day's left edge, so we add one `pixelsPerDay` to reach the right edge.
+ */
+export function milestoneCenterX(isoDate: string, originDate: string, zoom: ZoomLevel): number {
+  return dateToPixel(isoDate, originDate, zoom) + pixelsPerDay(zoom);
+}
+
 /** Pixel width spanned by `[startISO, endISO]` inclusive at this zoom. */
 export function dateRangeWidth(startISO: string, endISO: string, zoom: ZoomLevel): number {
   const days = dayDiff(startISO, endISO) + 1; // inclusive
