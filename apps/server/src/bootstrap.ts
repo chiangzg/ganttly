@@ -18,6 +18,7 @@ import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { identityRoutes } from './routes/identity';
 import { instanceRoutes } from './routes/instance';
+import { projectsRoutes } from './routes/projects';
 
 export interface BuildServerOptions {
   /**
@@ -95,6 +96,7 @@ export async function buildServer(
     githubDeps: options.githubDeps,
   });
   await app.register(identityRoutes, { prefix: API_PREFIX });
+  await app.register(projectsRoutes, { prefix: API_PREFIX, config });
 
   return app;
 }

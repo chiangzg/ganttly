@@ -46,6 +46,12 @@ export interface CreateProjectParams {
   workspaceId: string;
   /** Untyped document body; validated inside the transaction. */
   file: unknown;
+  /**
+   * Optional project name override (import flow sends a user-edited name that
+   * may differ from `file.project.name`). When set, it becomes both the stored
+   * `projects.name` and `file.project.name`.
+   */
+  name?: string;
   sourceType?: string;
   sourceClientId?: string;
   idempotencyKey?: string;
@@ -102,6 +108,9 @@ export class ProjectApplicationService {
 
       const file = this.canonicalizeAndValidate(params.file);
       this.checkLimits(file);
+      if (params.name !== undefined) {
+        file.project = { ...file.project, name: params.name };
+      }
 
       const now = new Date();
       const createdAt = now.toISOString();
