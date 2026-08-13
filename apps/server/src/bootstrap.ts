@@ -5,16 +5,18 @@
  * discovery. Returning the unbuilt-then-built instance lets tests use Fastify
  * `inject()` without binding a port.
  */
-import { API_PREFIX } from '@ganttly/api-contract';
+import { API_PREFIX, buildApiError, errorCodeToStatus } from '@ganttly/api-contract';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import type { AppConfig } from './config';
 import type { GitHubOAuthDeps } from './auth/github';
+import { HttpError } from './modules/errors';
 import authPlugin from './plugins/auth';
 import databasePlugin from './plugins/database';
 import { observabilityPlugin } from './plugins/observability';
 import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
+import { identityRoutes } from './routes/identity';
 import { instanceRoutes } from './routes/instance';
 
 export interface BuildServerOptions {
@@ -48,6 +50,21 @@ export async function buildServer(
     bodyLimit: config.maxProjectBytes,
   });
 
+  // Map domain HttpErrors onto the shared ApiErrorResponse body; anything else
+  // is an unexpected failure logged as a 500 with a plain body (the contract
+  // defines no code for internal errors).
+  app.setErrorHandler(async (err, request, reply) => {
+    if (err instanceof HttpError) {
+      return reply
+        .code(errorCodeToStatus[err.code])
+        .send(buildApiError(err.code, err.message, request.id, err.details));
+    }
+    request.log.error({ err }, 'unhandled error');
+    return reply
+      .code(500)
+      .send({ status: 'error', message: 'Internal server error', requestId: request.id });
+  });
+
   await app.register(cors, {
     // No credentialed cross-origin traffic is allowed when no origins are
     // configured; the web app's origin must be whitelisted explicitly.
@@ -77,6 +94,7 @@ export async function buildServer(
     config,
     githubDeps: options.githubDeps,
   });
+  await app.register(identityRoutes, { prefix: API_PREFIX });
 
   return app;
 }
