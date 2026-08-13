@@ -11,6 +11,13 @@ import * as schema from './schema';
 
 export type Db = ReturnType<typeof createDb>;
 
+/**
+ * The in-flight transaction type returned by `db.transaction(fn)`. Shares the
+ * query surface with {@link Db}, so helpers can accept either and run against
+ * the pool or inside a transaction uniformly.
+ */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
 export interface CreateDbOptions {
   /** Max pool connections. Default 10 for the API; use 1 for migrations. */
   max?: number;
