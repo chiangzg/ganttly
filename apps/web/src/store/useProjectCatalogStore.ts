@@ -5,11 +5,16 @@ import {
   EMPTY_PROJECT_NAVIGATION,
   type DataRepository,
   type ProjectNavigationState,
+  type ProjectRepository,
   type ProjectSummary,
 } from '@/data/repository';
-import { refEqual, type ProjectRef } from '@/data/projectRef';
+import { isLocalRef, refEqual, type ProjectRef } from '@/data/projectRef';
+import { resolveProjectRepository } from '@/data/resolveRepository';
 import { useProjectStore } from './useProjectStore';
 import { useViewStore } from './useViewStore';
+import { useScopeStore } from './useScopeStore';
+import { useInstanceStore } from './useInstanceStore';
+import { useAuthStore } from './useAuthStore';
 
 type CatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -70,15 +75,27 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
   },
 
   async refresh() {
-    const { repo } = get();
-    if (!repo) return;
+    const scope = useScopeStore.getState().activeScope;
+    const isLocal = scope.instanceId === 'local';
+    const repo = isLocal ? get().repo : resolveScopeRepo();
+    if (!repo) {
+      set({ status: 'error', error: '工作区未登录或不可用' });
+      return;
+    }
     try {
       const summaries = await repo.listProjects({ includeDeleted: true });
       const projects = summaries.filter((project) => !project.deletedAt);
       const trash = summaries.filter((project) => Boolean(project.deletedAt));
-      const navigation = sanitizeNavigation(get().navigation, projects);
-      set({ projects, trash, navigation, status: 'ready', error: null });
-      await persistNavigation(repo, navigation, set);
+      // Only re-sanitize navigation for the local scope — remote project lists
+      // are scope-local and should not prune the global navigation state.
+      if (isLocal) {
+        const navRepo = get().repo;
+        const navigation = sanitizeNavigation(get().navigation, projects);
+        set({ projects, trash, navigation, status: 'ready', error: null });
+        if (navRepo) await persistNavigation(navRepo, navigation, set);
+      } else {
+        set({ projects, trash, status: 'ready', error: null });
+      }
     } catch (error) {
       set({ status: 'error', error: (error as Error).message });
     }
@@ -86,18 +103,23 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
 
   async activateProject(ref) {
     const { repo, projects } = get();
-    if (!repo || !projects.some((project) => project.id === ref.projectId)) return false;
+    // For local refs, verify the project exists in the list before activating.
+    // Remote projects may be accessed by direct URL before the list is loaded.
+    if (isLocalRef(ref) && repo && !projects.some((project) => project.id === ref.projectId))
+      return false;
     const loaded = await useProjectStore.getState().loadProject(ref);
     if (!loaded) return false;
     useViewStore.getState().resetForProjectSwitch();
     const navigation = touchProject(get().navigation, ref);
     set({ navigation });
-    await persistNavigation(repo, navigation, set);
+    if (repo) await persistNavigation(repo, navigation, set);
     return true;
   },
 
   async createProject(name, source) {
-    const repo = requireRepository(get().repo);
+    const scope = useScopeStore.getState().activeScope;
+    const repo = scope.instanceId === 'local' ? requireRepository(get().repo) : resolveScopeRepo();
+    if (!repo) throw new Error('工作区未登录或不可用');
     const projectName = normalizeProjectName(name);
     const base = source ? structuredClone(source) : createEmptyFile({ name: projectName });
     const now = new Date().toISOString();
@@ -112,14 +134,16 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
     );
     const snapshot = await repo.createProject({ file });
     const ref: ProjectRef = {
-      instanceId: 'local',
-      workspaceId: 'local',
+      instanceId: scope.instanceId,
+      workspaceId: scope.workspaceId,
       projectId: snapshot.summary.id,
     };
     set((state) => ({ projects: [snapshot.summary, ...state.projects] }));
+    // Navigation is always local-persisted regardless of the active scope.
+    const navRepo = get().repo;
     const navigation = touchProject(get().navigation, ref);
     set({ navigation });
-    await persistNavigation(repo, navigation, set);
+    if (navRepo) await persistNavigation(navRepo, navigation, set);
     return ref;
   },
 
@@ -268,6 +292,24 @@ function normalizeProjectName(name: string): string {
 function requireRepository(repo: DataRepository | null): DataRepository {
   if (!repo) throw new Error('项目存储尚未初始化');
   return repo;
+}
+
+/**
+ * Resolve the {@link ProjectRepository} for the currently active scope.
+ * Local scope → the injected local DataRepository. Remote scope → a cached
+ * RemoteRepository built from the instance config + authenticated user.
+ * Returns null when the remote instance is not yet authenticated.
+ */
+function resolveScopeRepo(): ProjectRepository | null {
+  const scope = useScopeStore.getState().activeScope;
+  if (scope.instanceId === 'local') return useProjectCatalogStore.getState().repo;
+  const instance = useInstanceStore.getState().findInstance(scope.instanceId);
+  const profile = useAuthStore.getState().getProfile(scope.instanceId);
+  if (!instance || !profile) return null;
+  return resolveProjectRepository(
+    { instanceId: scope.instanceId, workspaceId: scope.workspaceId, projectId: '' },
+    { instance, userId: profile.userId },
+  );
 }
 
 /** True when the given ref matches the project store's active ref. */

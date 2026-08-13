@@ -20,6 +20,10 @@ import { localRef } from '@/data/projectRef';
 import { buildProjectPath, buildScopePath, buildTrashPath, LOCAL_SCOPE } from '@/lib/routing';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
+import { useScopeStore } from '@/store/useScopeStore';
+import { useAuthStore } from '@/store/useAuthStore';
+import { WorkspaceSwitcher } from '@/components/workspace/WorkspaceSwitcher';
+import { LoginGate } from '@/components/workspace/LoginGate';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 import { ProjectDot } from './ProjectHeader';
 
@@ -35,6 +39,8 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const refresh = useProjectCatalogStore((state) => state.refresh);
   const createProject = useProjectCatalogStore((state) => state.createProject);
   const renameProject = useProjectCatalogStore((state) => state.renameProject);
+  const activeScope = useScopeStore((state) => state.activeScope);
+  const authByInstance = useAuthStore((state) => state.authByInstance);
   const duplicateProject = useProjectCatalogStore((state) => state.duplicateProject);
   const moveToTrash = useProjectCatalogStore((state) => state.moveToTrash);
   const restoreProject = useProjectCatalogStore((state) => state.restoreProject);
@@ -48,9 +54,14 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const [trashTarget, setTrashTarget] = useState<ProjectSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
 
+  // Refresh when the component mounts or the active scope changes.
+  const scopeKey = `${activeScope.instanceId}/${activeScope.workspaceId}`;
+  const isRemote = activeScope.instanceId !== 'local';
+  const remoteAuthed = !isRemote || Boolean(authByInstance[activeScope.instanceId]);
+
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (remoteAuthed) void refresh();
+  }, [scopeKey, remoteAuthed]);
 
   // Pre-compute local-scope lookup sets from the ref-based navigation state.
   const recentRank = useMemo(() => {
@@ -104,6 +115,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
               {trashMode ? '恢复项目或永久删除' : '集中管理和快速切换所有项目'}
             </p>
           </div>
+          {!trashMode ? <WorkspaceSwitcher /> : null}
           <div className="ml-auto flex items-center gap-2">
             {trashMode ? (
               <button
@@ -136,7 +148,9 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8">
-        {!trashMode ? (
+        {isRemote && !remoteAuthed ? (
+          <LoginGate />
+        ) : !trashMode ? (
           <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center">
             <div className="relative min-w-0 flex-1 lg:max-w-md">
               <Search

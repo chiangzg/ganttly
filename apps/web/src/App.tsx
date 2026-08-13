@@ -1,6 +1,14 @@
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { useEffect, useRef, useState } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import { AlertTriangle, LoaderCircle } from 'lucide-react';
 import { GanttView } from './components/GanttView';
 import { ProjectCenter } from './components/projects/ProjectCenter';
@@ -14,6 +22,9 @@ import {
 } from './lib/routing';
 import { useProjectCatalogStore } from './store/useProjectCatalogStore';
 import { useProjectStore } from './store/useProjectStore';
+import { useInstanceStore } from './store/useInstanceStore';
+import { useAuthStore, consumePostLoginRedirect } from './store/useAuthStore';
+import { useScopeStore } from './store/useScopeStore';
 
 export function App() {
   const init = useProjectCatalogStore((state) => state.init);
@@ -70,7 +81,64 @@ function LegacyProjectRedirect() {
   return <Navigate to={buildProjectPath(localProjectRef(projectId))} replace />;
 }
 
+/**
+ * Handles the redirect back from GitHub OAuth. The server sends the user to
+ * the web root after setting the session cookie; this component verifies the
+ * login succeeded, loads the remote workspaces, and navigates to the first
+ * one's project center.
+ */
+function PostLoginRedirect({ info }: { info: { instanceId: string; path: string } }) {
+  const navigate = useNavigate();
+  const [phase, setPhase] = useState<'checking' | 'failed'>('checking');
+
+  useEffect(() => {
+    const instance = useInstanceStore.getState().findInstance(info.instanceId);
+    if (!instance) {
+      setPhase('failed');
+      return;
+    }
+    void (async () => {
+      const profile = await useAuthStore.getState().checkAuth(instance);
+      if (!profile) {
+        setPhase('failed');
+        return;
+      }
+      const workspaces = await useScopeStore.getState().loadWorkspaces(instance);
+      const first = workspaces[0];
+      navigate(
+        first
+          ? buildScopePath({ instanceId: info.instanceId, workspaceId: first.id })
+          : buildScopePath(LOCAL_SCOPE),
+        { replace: true },
+      );
+    })();
+  }, [info.instanceId, info.path, navigate]);
+
+  if (phase === 'failed') {
+    return (
+      <MessagePage
+        title="登录失败"
+        message="GitHub 授权未成功，请重试。"
+        action={
+          <button
+            type="button"
+            onClick={() => navigate(buildScopePath(LOCAL_SCOPE), { replace: true })}
+            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white"
+          >
+            返回项目中心
+          </button>
+        }
+      />
+    );
+  }
+  return <FullPageLoading />;
+}
+
 function RootRedirect() {
+  // Post-OAuth redirect takes priority over the normal initial-route logic.
+  const loginRedirect = useRef(consumePostLoginRedirect());
+  if (loginRedirect.current) return <PostLoginRedirect info={loginRedirect.current} />;
+
   const status = useProjectCatalogStore((state) => state.status);
   const projects = useProjectCatalogStore((state) => state.projects);
   const createProject = useProjectCatalogStore((state) => state.createProject);
