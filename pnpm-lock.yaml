@@ -99,6 +99,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+      light-my-request:
+        specifier: ^6
+        version: 6.6.0
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
