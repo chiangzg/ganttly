@@ -205,6 +205,9 @@ importers:
 
   packages/api-contract:
     dependencies:
+      '@ganttly/schema':
+        specifier: workspace:*
+        version: link:../schema
       zod:
         specifier: ^3.23.0
         version: 3.25.76

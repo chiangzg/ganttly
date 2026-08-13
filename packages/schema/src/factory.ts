@@ -12,9 +12,26 @@ import {
   type Locale,
   type CalendarId,
   type Task,
+  type ViewState,
 } from './types.js';
 
 const APP_VERSION = '0.1.0';
+
+/**
+ * The canonical neutral view state stored server-side (spec §5.2
+ * `DEFAULT_REMOTE_VIEW_STATE`). The server ignores the client-submitted
+ * `viewState` on import/PUT and substitutes this value, so a project's
+ * revision never moves on scroll/selection changes. The web client overlays
+ * its own per-device view state on top after loading.
+ */
+export const DEFAULT_VIEW_STATE: ViewState = {
+  zoom: 'week',
+  scrollLeft: 0,
+  scrollTop: 0,
+  selectedTaskId: null,
+  showCriticalPath: false,
+  collapsedTaskIds: [],
+};
 
 export interface CreateEmptyFileOptions {
   name?: string;
@@ -45,13 +62,11 @@ export function createEmptyFile(options: CreateEmptyFileOptions = {}): GanttlyFi
     tasks: [],
     resources: [],
     baselines: [],
+    // Fresh copy so callers can mutate the returned file without touching the
+    // shared {@link DEFAULT_VIEW_STATE} template.
     viewState: {
-      zoom: 'week',
-      scrollLeft: 0,
-      scrollTop: 0,
-      selectedTaskId: null,
-      showCriticalPath: false,
-      collapsedTaskIds: [],
+      ...DEFAULT_VIEW_STATE,
+      collapsedTaskIds: [...DEFAULT_VIEW_STATE.collapsedTaskIds],
     },
     meta: {
       createdAt: now,

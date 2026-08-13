@@ -15,6 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ganttly/schema": "workspace:*",
     "zod": "^3.23.0"
   },
   "devDependencies": {
