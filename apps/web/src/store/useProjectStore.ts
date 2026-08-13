@@ -34,6 +34,7 @@ import {
 } from '@/data/repository';
 import { isLocalRef, localRef, refEqual, type ProjectRef } from '@/data/projectRef';
 import { resolveProjectRepository } from '@/data/resolveRepository';
+import { saveViewState } from '@/data/viewStateStore';
 import { cascadeSchedule, countDependencyViolations } from '@/lib/schedule';
 import { resolveCalendar } from '@/lib/calendar';
 import { useInstanceStore } from './useInstanceStore';
@@ -53,6 +54,14 @@ export interface Command<T = GanttlyFile> {
   apply(state: T): T;
   /** Apply reverse mutation. */
   invert(state: T): T;
+  /**
+   * When true, this command only affects the per-device view state (zoom,
+   * scroll, selection, collapsed tasks). For REMOTE projects the store skips
+   * the dirty/save cycle entirely and persists the view state locally instead
+   * (spec §5.2). Local projects still save normally (viewState is part of the
+   * local file).
+   */
+  readonly viewStateOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,8 +277,18 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   dispatch(command) {
-    const { file } = get();
+    const { file, activeProjectRef } = get();
     const next = command.apply(file);
+    // For remote projects, viewState-only commands (zoom/scroll/selection/
+    // collapse) persist to the per-device cache, not to the server — the
+    // server ignores viewState anyway and we don't want to bump the revision
+    // (spec §5.2 "可测契约").
+    if (command.viewStateOnly && activeProjectRef && !isLocalRef(activeProjectRef)) {
+      const profile = useAuthStore.getState().getProfile(activeProjectRef.instanceId);
+      if (profile) saveViewState(profile.userId, activeProjectRef, next.viewState);
+      set({ file: next, undoStack: [...get().undoStack, command], redoStack: [] });
+      return;
+    }
     set({
       file: next,
       undoStack: [...get().undoStack, command],
@@ -489,7 +508,8 @@ export function moveTaskCommand(
 }
 
 export function setViewStateCommand(patch: Partial<ViewState>): Command {
-  return toUndoable({ kind: 'setViewState', patch }, '视图变更');
+  const cmd = toUndoable({ kind: 'setViewState', patch }, '视图变更');
+  return { ...cmd, viewStateOnly: true };
 }
 
 export function swapSiblingOrderCommand(aId: string, bId: string): Command {

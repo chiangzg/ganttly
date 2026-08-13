@@ -12,9 +12,11 @@ import {
   Search,
   Star,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { GanttlyFile } from '@ganttly/schema';
 import type { ProjectSummary } from '@/data/repository';
 import { localRef } from '@/data/projectRef';
 import { buildProjectPath, buildScopePath, buildTrashPath, LOCAL_SCOPE } from '@/lib/routing';
@@ -24,6 +26,7 @@ import { useScopeStore } from '@/store/useScopeStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { WorkspaceSwitcher } from '@/components/workspace/WorkspaceSwitcher';
 import { LoginGate } from '@/components/workspace/LoginGate';
+import { CopyToRemoteDialog } from '@/components/workspace/CopyToRemoteDialog';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 import { ProjectDot } from './ProjectHeader';
 
@@ -53,6 +56,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null);
   const [trashTarget, setTrashTarget] = useState<ProjectSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
+  const [copyTarget, setCopyTarget] = useState<ProjectSummary | null>(null);
 
   // Refresh when the component mounts or the active scope changes.
   const scopeKey = `${activeScope.instanceId}/${activeScope.workspaceId}`;
@@ -246,6 +250,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
                 onTrash={() => setTrashTarget(project)}
                 onRestore={() => void restoreProject(localRef(project.id))}
                 onDelete={() => setDeleteTarget(project)}
+                onCopyToRemote={!isRemote ? () => setCopyTarget(project) : undefined}
               />
             ))}
           </div>
@@ -292,7 +297,48 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
           if (deleteTarget) await deletePermanently(localRef(deleteTarget.id));
         }}
       />
+      {copyTarget ? (
+        <ProjectCopyRemoteDialog
+          open={Boolean(copyTarget)}
+          onOpenChange={(open) => !open && setCopyTarget(null)}
+          projectId={copyTarget.id}
+          projectName={copyTarget.name}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Loads the source file from the local repo, then renders the copy dialog. */
+function ProjectCopyRemoteDialog({
+  open,
+  onOpenChange,
+  projectId,
+  projectName,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectId: string;
+  projectName: string;
+}) {
+  const [file, setFile] = useState<GanttlyFile | null>(null);
+  const repo = useProjectCatalogStore((s) => s.repo);
+
+  useEffect(() => {
+    if (!open || !repo) return;
+    void repo.loadProject(projectId).then((snapshot) => {
+      if (snapshot) setFile(snapshot.file);
+    });
+  }, [open, projectId, repo]);
+
+  if (!file) return null;
+  return (
+    <CopyToRemoteDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      sourceFile={file}
+      sourceName={projectName}
+    />
   );
 }
 
@@ -307,6 +353,7 @@ function ProjectCard({
   onTrash,
   onRestore,
   onDelete,
+  onCopyToRemote,
 }: {
   project: ProjectSummary;
   trashMode: boolean;
@@ -318,6 +365,7 @@ function ProjectCard({
   onTrash(): void;
   onRestore(): void;
   onDelete(): void;
+  onCopyToRemote?: () => void;
 }) {
   return (
     <article className="group relative flex min-h-52 flex-col rounded-2xl border border-border bg-bg-elevated p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-xl">
@@ -375,6 +423,11 @@ function ProjectCard({
                   <CardMenuItem icon={<Copy size={15} />} onSelect={onDuplicate}>
                     复制项目
                   </CardMenuItem>
+                  {onCopyToRemote ? (
+                    <CardMenuItem icon={<Upload size={15} />} onSelect={onCopyToRemote}>
+                      复制到远端
+                    </CardMenuItem>
+                  ) : null}
                   <CardMenuItem danger icon={<Trash2 size={15} />} onSelect={onTrash}>
                     移入回收站
                   </CardMenuItem>
