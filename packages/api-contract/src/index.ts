@@ -8,3 +8,4 @@
 export * from './errors';
 export * from './instance';
 export * from './limits';
+export * from './project';

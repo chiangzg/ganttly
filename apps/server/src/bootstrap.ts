@@ -5,13 +5,20 @@
  * discovery. Returning the unbuilt-then-built instance lets tests use Fastify
  * `inject()` without binding a port.
  */
+import { API_PREFIX, buildApiError, errorCodeToStatus } from '@ganttly/api-contract';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import type { AppConfig } from './config';
+import type { GitHubOAuthDeps } from './auth/github';
+import { HttpError } from './modules/errors';
+import authPlugin from './plugins/auth';
 import databasePlugin from './plugins/database';
 import { observabilityPlugin } from './plugins/observability';
+import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
+import { identityRoutes } from './routes/identity';
 import { instanceRoutes } from './routes/instance';
+import { projectsRoutes } from './routes/projects';
 
 export interface BuildServerOptions {
   /**
@@ -19,6 +26,12 @@ export interface BuildServerOptions {
    * (e.g. /health/live, discovery) pass `false` to avoid opening a connection.
    */
   registerDatabase?: boolean;
+  /**
+   * Override the GitHub OAuth network layer (tests inject fakes so the callback
+   * can be exercised without hitting GitHub). Defaults to the global-`fetch`
+   * implementation configured from `GITHUB_OAUTH_CLIENT_*`.
+   */
+  githubDeps?: GitHubOAuthDeps;
 }
 
 export async function buildServer(
@@ -38,6 +51,21 @@ export async function buildServer(
     bodyLimit: config.maxProjectBytes,
   });
 
+  // Map domain HttpErrors onto the shared ApiErrorResponse body; anything else
+  // is an unexpected failure logged as a 500 with a plain body (the contract
+  // defines no code for internal errors).
+  app.setErrorHandler(async (err, request, reply) => {
+    if (err instanceof HttpError) {
+      return reply
+        .code(errorCodeToStatus[err.code])
+        .send(buildApiError(err.code, err.message, request.id, err.details));
+    }
+    request.log.error({ err }, 'unhandled error');
+    return reply
+      .code(500)
+      .send({ status: 'error', message: 'Internal server error', requestId: request.id });
+  });
+
   await app.register(cors, {
     // No credentialed cross-origin traffic is allowed when no origins are
     // configured; the web app's origin must be whitelisted explicitly.
@@ -47,12 +75,28 @@ export async function buildServer(
 
   await app.register(observabilityPlugin, { instanceId: config.instanceId });
 
+  // Stateless session cookie + principal resolution. Registered before routes
+  // so `request.principal` is available to every handler.
+  await app.register(authPlugin, {
+    sessionSecret: config.sessionSecret,
+    secureCookies: config.isProduction,
+  });
+
   if (options.registerDatabase !== false) {
     await app.register(databasePlugin, { databaseUrl: config.databaseUrl });
   }
 
   await app.register(healthRoutes);
   await app.register(instanceRoutes, { config });
+
+  // API surface lives under /api/v1 (matches the advertised apiBaseUrl).
+  await app.register(authRoutes, {
+    prefix: API_PREFIX,
+    config,
+    githubDeps: options.githubDeps,
+  });
+  await app.register(identityRoutes, { prefix: API_PREFIX });
+  await app.register(projectsRoutes, { prefix: API_PREFIX, config });
 
   return app;
 }

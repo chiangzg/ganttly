@@ -15,8 +15,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fastify/cookie": "^11",
     "@fastify/cors": "^11.3.0",
+    "@fastify/secure-session": "^8",
     "@ganttly/api-contract": "workspace:*",
+    "@ganttly/domain": "workspace:^",
     "@ganttly/schema": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.11.3",
@@ -29,6 +32,7 @@
     "@ganttly/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.31.10",
+    "light-my-request": "^6",
     "tsx": "^4.23.12",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
