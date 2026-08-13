@@ -1,0 +1,36 @@
+{
+  "name": "@ganttly/server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "db:generate": "drizzle-kit generate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@ganttly/api-contract": "workspace:*",
+    "@ganttly/schema": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.11.3",
+    "fastify-plugin": "^6.0.0",
+    "nanoid": "^5.0.7",
+    "postgres": "^3.4.9",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@ganttly/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.12",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
