@@ -114,6 +114,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@ganttly/api-contract':
+        specifier: workspace:*
+        version: link:../../packages/api-contract
       '@ganttly/calendar-data':
         specifier: workspace:*
         version: link:../../packages/calendar-data

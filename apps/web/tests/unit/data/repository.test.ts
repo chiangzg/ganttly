@@ -120,10 +120,17 @@ describe.each([
   it('persists navigation preferences separately from project files', async () => {
     await repo.createProject({ id: 'multi-b', file: makeFile('B') });
     const navigation = {
-      lastActiveProjectId: 'multi-b',
-      openTabs: [{ projectId: 'multi-b', pinned: true }],
-      favoriteProjectIds: ['multi-b'],
-      recentProjects: [{ projectId: 'multi-b', lastOpenedAt: '2026-07-24T00:00:00.000Z' }],
+      lastActiveRef: { instanceId: 'local', workspaceId: 'local', projectId: 'multi-b' },
+      openTabs: [
+        { ref: { instanceId: 'local', workspaceId: 'local', projectId: 'multi-b' }, pinned: true },
+      ],
+      favoriteRefs: [{ instanceId: 'local', workspaceId: 'local', projectId: 'multi-b' }],
+      recentProjects: [
+        {
+          ref: { instanceId: 'local', workspaceId: 'local', projectId: 'multi-b' },
+          lastOpenedAt: '2026-07-24T00:00:00.000Z',
+        },
+      ],
     };
     await repo.saveNavigationState(navigation);
     expect(await repo.loadNavigationState()).toEqual(navigation);

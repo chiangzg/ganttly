@@ -24,12 +24,14 @@ import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { useProjectStore } from '@/store/useProjectStore';
 import type { ProjectSummary } from '@/data/repository';
+import { localRef, refEqual, type ProjectRef } from '@/data/projectRef';
+import { buildProjectPath, buildScopePath, LOCAL_SCOPE } from '@/lib/routing';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 
 export function ProjectHeader() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeProjectId = useProjectStore((state) => state.activeProjectId);
+  const activeProjectRef = useProjectStore((state) => state.activeProjectRef);
   const activeName = useProjectStore((state) => state.file.project.name);
   const projects = useProjectCatalogStore((state) => state.projects);
   const navigation = useProjectCatalogStore((state) => state.navigation);
@@ -46,29 +48,35 @@ export function ProjectHeader() {
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
-  const [draggedTab, setDraggedTab] = useState<string | null>(null);
+  const [draggedTab, setDraggedTab] = useState<ProjectRef | null>(null);
 
+  const activeProjectId = activeProjectRef?.projectId ?? null;
   const activeSummary = projects.find((project) => project.id === activeProjectId);
   const tabs = navigation.openTabs
-    .map((tab) => ({ ...tab, project: projects.find((project) => project.id === tab.projectId) }))
+    .map((tab) => ({
+      ...tab,
+      project: projects.find((project) => project.id === tab.ref.projectId),
+    }))
     .filter((tab): tab is typeof tab & { project: ProjectSummary } => Boolean(tab.project));
   const visibleTabs = tabs.slice(0, 6);
   const overflowTabs = tabs.slice(6);
-  const isFavorite = activeProjectId
-    ? navigation.favoriteProjectIds.includes(activeProjectId)
+  const isFavorite = activeProjectRef
+    ? navigation.favoriteRefs.some((r) => refEqual(r, activeProjectRef))
     : false;
-  const isPinned = activeProjectId
-    ? navigation.openTabs.some((tab) => tab.projectId === activeProjectId && tab.pinned)
+  const isPinned = activeProjectRef
+    ? navigation.openTabs.some((tab) => refEqual(tab.ref, activeProjectRef) && tab.pinned)
     : false;
 
   const goToProject = (id: string) => {
     setSwitcherOpen(false);
-    navigate(`/projects/${id}`);
+    navigate(buildProjectPath(localRef(id)));
   };
 
-  const handleCloseTab = (id: string) => {
-    const nextId = closeTab(id);
-    if (id === activeProjectId) navigate(nextId ? `/projects/${nextId}` : '/projects');
+  const handleCloseTab = (ref: ProjectRef) => {
+    const nextRef = closeTab(ref);
+    if (activeProjectRef && refEqual(activeProjectRef, ref)) {
+      navigate(nextRef ? buildProjectPath(nextRef) : buildScopePath(LOCAL_SCOPE));
+    }
   };
 
   return (
@@ -79,7 +87,7 @@ export function ProjectHeader() {
       >
         <button
           type="button"
-          onClick={() => navigate('/projects')}
+          onClick={() => navigate(buildScopePath(LOCAL_SCOPE))}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary outline-none transition hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary/35"
           title={t('project.homeTitle')}
         >
@@ -113,8 +121,12 @@ export function ProjectHeader() {
               <ProjectSwitcher
                 projects={projects}
                 activeProjectId={activeProjectId}
-                favorites={navigation.favoriteProjectIds}
-                recentIds={navigation.recentProjects.map((recent) => recent.projectId)}
+                favorites={navigation.favoriteRefs
+                  .filter((r) => r.instanceId === 'local')
+                  .map((r) => r.projectId)}
+                recentIds={navigation.recentProjects
+                  .filter((r) => r.ref.instanceId === 'local')
+                  .map((r) => r.ref.projectId)}
                 onOpenProject={goToProject}
                 onCreate={() => {
                   setSwitcherOpen(false);
@@ -122,7 +134,7 @@ export function ProjectHeader() {
                 }}
                 onShowAll={() => {
                   setSwitcherOpen(false);
-                  navigate('/projects');
+                  navigate(buildScopePath(LOCAL_SCOPE));
                 }}
               />
               <Popover.Arrow className="fill-bg-elevated" />
@@ -133,28 +145,28 @@ export function ProjectHeader() {
         <div className="hidden min-w-0 flex-1 items-center gap-0.5 overflow-hidden pl-1 md:flex">
           {visibleTabs.map((tab) => (
             <div
-              key={tab.projectId}
+              key={tab.ref.projectId}
               draggable
-              onDragStart={() => setDraggedTab(tab.projectId)}
+              onDragStart={() => setDraggedTab(tab.ref)}
               onDragEnd={() => setDraggedTab(null)}
               onDragOver={(event) => event.preventDefault()}
               onDrop={() => {
-                if (draggedTab) reorderTab(draggedTab, tab.projectId);
+                if (draggedTab) reorderTab(draggedTab, tab.ref);
                 setDraggedTab(null);
               }}
               className={cn(
                 'group relative flex h-8 max-w-[180px] shrink-0 items-center gap-1 rounded-lg px-2 transition',
-                tab.projectId === activeProjectId
+                tab.ref.projectId === activeProjectId
                   ? 'bg-primary/10 text-fg after:absolute after:-bottom-2 after:inset-x-2 after:h-0.5 after:rounded-full after:bg-primary'
                   : 'text-fg-muted hover:bg-bg hover:text-fg',
-                draggedTab === tab.projectId && 'opacity-50',
+                draggedTab && refEqual(draggedTab, tab.ref) && 'opacity-50',
               )}
             >
               {tab.pinned ? <Pin size={12} className="shrink-0" /> : null}
               <button
                 type="button"
                 className="min-w-0 flex-1 truncate rounded text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                onClick={() => goToProject(tab.projectId)}
+                onClick={() => goToProject(tab.ref.projectId)}
                 title={tab.project.name}
               >
                 {tab.project.name}
@@ -162,10 +174,10 @@ export function ProjectHeader() {
               {!tab.pinned ? (
                 <button
                   type="button"
-                  onClick={() => handleCloseTab(tab.projectId)}
+                  onClick={() => handleCloseTab(tab.ref)}
                   className={cn(
                     'rounded p-0.5 outline-none transition hover:bg-border/60 focus-visible:ring-2 focus-visible:ring-primary/35',
-                    tab.projectId === activeProjectId
+                    tab.ref.projectId === activeProjectId
                       ? 'opacity-60 hover:opacity-100'
                       : 'opacity-0 group-hover:opacity-60 group-focus-within:opacity-60 hover:opacity-100',
                   )}
@@ -187,8 +199,8 @@ export function ProjectHeader() {
                 <DropdownMenu.Content className="z-40 min-w-48 rounded-xl border border-border bg-bg-elevated p-1 shadow-xl">
                   {overflowTabs.map((tab) => (
                     <DropdownMenu.Item
-                      key={tab.projectId}
-                      onSelect={() => goToProject(tab.projectId)}
+                      key={tab.ref.projectId}
+                      onSelect={() => goToProject(tab.ref.projectId)}
                       className="cursor-pointer rounded-lg px-3 py-2 text-sm text-fg outline-none hover:bg-bg focus:bg-bg"
                     >
                       {tab.project.name}
@@ -236,9 +248,9 @@ export function ProjectHeader() {
               <MenuItem
                 icon={<Copy size={15} />}
                 onSelect={() => {
-                  if (activeProjectId) {
-                    void duplicateProject(activeProjectId).then((id) =>
-                      navigate(`/projects/${id}`),
+                  if (activeProjectRef) {
+                    void duplicateProject(activeProjectRef).then((ref) =>
+                      navigate(buildProjectPath(ref)),
                     );
                   }
                 }}
@@ -247,13 +259,13 @@ export function ProjectHeader() {
               </MenuItem>
               <MenuItem
                 icon={<Star size={15} fill={isFavorite ? 'currentColor' : 'none'} />}
-                onSelect={() => activeProjectId && toggleFavorite(activeProjectId)}
+                onSelect={() => activeProjectRef && toggleFavorite(activeProjectRef)}
               >
                 {isFavorite ? t('project.unfavorite') : t('project.favorite')}
               </MenuItem>
               <MenuItem
                 icon={isPinned ? <PinOff size={15} /> : <Pin size={15} />}
-                onSelect={() => activeProjectId && togglePinned(activeProjectId)}
+                onSelect={() => activeProjectRef && togglePinned(activeProjectRef)}
               >
                 {isPinned ? t('project.unpin') : t('project.pin')}
               </MenuItem>
@@ -270,8 +282,8 @@ export function ProjectHeader() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreate={async (name, source) => {
-          const id = await createProject(name, source);
-          navigate(`/projects/${id}`);
+          const ref = await createProject(name, source);
+          navigate(buildProjectPath(ref));
         }}
       />
       <ProjectNameDialog
@@ -281,7 +293,7 @@ export function ProjectHeader() {
         initialValue={activeName}
         submitLabel={t('common.save')}
         onSubmit={async (name) => {
-          if (activeProjectId) await renameProject(activeProjectId, name);
+          if (activeProjectRef) await renameProject(activeProjectRef, name);
         }}
       />
       <ConfirmDialog
@@ -292,9 +304,9 @@ export function ProjectHeader() {
         confirmLabel={t('project.moveToTrash')}
         danger
         onConfirm={async () => {
-          if (!activeProjectId) return;
-          const nextId = await moveToTrash(activeProjectId);
-          navigate(nextId ? `/projects/${nextId}` : '/projects');
+          if (!activeProjectRef) return;
+          const nextRef = await moveToTrash(activeProjectRef);
+          navigate(nextRef ? buildProjectPath(nextRef) : buildScopePath(LOCAL_SCOPE));
         }}
       />
     </>

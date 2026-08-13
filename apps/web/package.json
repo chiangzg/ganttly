@@ -16,6 +16,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@ganttly/api-contract": "workspace:*",
     "@ganttly/calendar-data": "workspace:*",
     "@ganttly/domain": "workspace:*",
     "@ganttly/gan-parser": "workspace:*",

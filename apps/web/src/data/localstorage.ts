@@ -2,6 +2,7 @@ import type { GanttlyFile } from '@ganttly/schema';
 import { nanoid } from 'nanoid';
 import {
   EMPTY_PROJECT_NAVIGATION,
+  migrateNavigation,
   ProjectNotFoundError,
   RevisionConflictError,
   summarizeProject,
@@ -77,13 +78,7 @@ export class LocalStorageRepository implements DataRepository {
     const raw = localStorage.getItem(NAVIGATION_KEY);
     if (!raw) return structuredClone(EMPTY_PROJECT_NAVIGATION);
     try {
-      const state = JSON.parse(raw) as ProjectNavigationState;
-      return {
-        lastActiveProjectId: state.lastActiveProjectId ?? null,
-        openTabs: Array.isArray(state.openTabs) ? state.openTabs : [],
-        favoriteProjectIds: Array.isArray(state.favoriteProjectIds) ? state.favoriteProjectIds : [],
-        recentProjects: Array.isArray(state.recentProjects) ? state.recentProjects : [],
-      };
+      return migrateNavigation(JSON.parse(raw));
     } catch {
       return structuredClone(EMPTY_PROJECT_NAVIGATION);
     }

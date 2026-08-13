@@ -12,12 +12,21 @@ import {
   Search,
   Star,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { GanttlyFile } from '@ganttly/schema';
 import type { ProjectSummary } from '@/data/repository';
+import { localRef } from '@/data/projectRef';
+import { buildProjectPath, buildScopePath, buildTrashPath, LOCAL_SCOPE } from '@/lib/routing';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
+import { useScopeStore } from '@/store/useScopeStore';
+import { useAuthStore } from '@/store/useAuthStore';
+import { WorkspaceSwitcher } from '@/components/workspace/WorkspaceSwitcher';
+import { LoginGate } from '@/components/workspace/LoginGate';
+import { CopyToRemoteDialog } from '@/components/workspace/CopyToRemoteDialog';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 import { ProjectDot } from './ProjectHeader';
 
@@ -33,6 +42,8 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const refresh = useProjectCatalogStore((state) => state.refresh);
   const createProject = useProjectCatalogStore((state) => state.createProject);
   const renameProject = useProjectCatalogStore((state) => state.renameProject);
+  const activeScope = useScopeStore((state) => state.activeScope);
+  const authByInstance = useAuthStore((state) => state.authByInstance);
   const duplicateProject = useProjectCatalogStore((state) => state.duplicateProject);
   const moveToTrash = useProjectCatalogStore((state) => state.moveToTrash);
   const restoreProject = useProjectCatalogStore((state) => state.restoreProject);
@@ -45,13 +56,31 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const [renameTarget, setRenameTarget] = useState<ProjectSummary | null>(null);
   const [trashTarget, setTrashTarget] = useState<ProjectSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
+  const [copyTarget, setCopyTarget] = useState<ProjectSummary | null>(null);
+
+  // Refresh when the component mounts or the active scope changes.
+  const scopeKey = `${activeScope.instanceId}/${activeScope.workspaceId}`;
+  const isRemote = activeScope.instanceId !== 'local';
+  const remoteAuthed = !isRemote || Boolean(authByInstance[activeScope.instanceId]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (remoteAuthed) void refresh();
+  }, [scopeKey, remoteAuthed]);
 
-  const recentRank = new Map(
-    navigation.recentProjects.map((recent, index) => [recent.projectId, index]),
+  // Pre-compute local-scope lookup sets from the ref-based navigation state.
+  const recentRank = useMemo(() => {
+    const map = new Map<string, number>();
+    navigation.recentProjects.forEach((recent, index) => {
+      if (recent.ref.instanceId === 'local') map.set(recent.ref.projectId, index);
+    });
+    return map;
+  }, [navigation.recentProjects]);
+  const favoriteLocalIds = useMemo(
+    () =>
+      new Set(
+        navigation.favoriteRefs.filter((r) => r.instanceId === 'local').map((r) => r.projectId),
+      ),
+    [navigation.favoriteRefs],
   );
   const shown = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -59,7 +88,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
       .filter((project) => !normalized || project.name.toLocaleLowerCase().includes(normalized))
       .filter((project) =>
         filter === 'favorites'
-          ? navigation.favoriteProjectIds.includes(project.id)
+          ? favoriteLocalIds.has(project.id)
           : filter === 'recent'
             ? recentRank.has(project.id)
             : true,
@@ -69,7 +98,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
         return (recentRank.get(a.id) ?? 9999) - (recentRank.get(b.id) ?? 9999);
       });
-  }, [filter, navigation.favoriteProjectIds, projects, query, recentRank, sort]);
+  }, [filter, favoriteLocalIds, projects, query, recentRank, sort]);
 
   return (
     <div className="min-h-full bg-bg">
@@ -90,11 +119,12 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
               {trashMode ? '恢复项目或永久删除' : '集中管理和快速切换所有项目'}
             </p>
           </div>
+          {!trashMode ? <WorkspaceSwitcher /> : null}
           <div className="ml-auto flex items-center gap-2">
             {trashMode ? (
               <button
                 type="button"
-                onClick={() => navigate('/projects')}
+                onClick={() => navigate(buildScopePath(LOCAL_SCOPE))}
                 className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-medium text-fg hover:bg-bg"
               >
                 <ArrowLeft size={16} /> 返回项目中心
@@ -103,7 +133,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
               <>
                 <button
                   type="button"
-                  onClick={() => navigate('/projects/trash')}
+                  onClick={() => navigate(buildTrashPath(LOCAL_SCOPE))}
                   className="hidden items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-fg-muted hover:bg-bg hover:text-fg sm:flex"
                 >
                   <Trash2 size={16} /> 回收站
@@ -122,7 +152,9 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8">
-        {!trashMode ? (
+        {isRemote && !remoteAuthed ? (
+          <LoginGate />
+        ) : !trashMode ? (
           <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center">
             <div className="relative min-w-0 flex-1 lg:max-w-md">
               <Search
@@ -206,16 +238,19 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
                 key={project.id}
                 project={project}
                 trashMode={trashMode}
-                favorite={navigation.favoriteProjectIds.includes(project.id)}
-                onOpen={() => navigate(`/projects/${project.id}`)}
-                onFavorite={() => toggleFavorite(project.id)}
+                favorite={favoriteLocalIds.has(project.id)}
+                onOpen={() => navigate(buildProjectPath(localRef(project.id)))}
+                onFavorite={() => toggleFavorite(localRef(project.id))}
                 onRename={() => setRenameTarget(project)}
                 onDuplicate={() =>
-                  void duplicateProject(project.id).then((id) => navigate(`/projects/${id}`))
+                  void duplicateProject(localRef(project.id)).then((ref) =>
+                    navigate(buildProjectPath(ref)),
+                  )
                 }
                 onTrash={() => setTrashTarget(project)}
-                onRestore={() => void restoreProject(project.id)}
+                onRestore={() => void restoreProject(localRef(project.id))}
                 onDelete={() => setDeleteTarget(project)}
+                onCopyToRemote={!isRemote ? () => setCopyTarget(project) : undefined}
               />
             ))}
           </div>
@@ -226,8 +261,8 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreate={async (name, source) => {
-          const id = await createProject(name, source);
-          navigate(`/projects/${id}`);
+          const ref = await createProject(name, source);
+          navigate(buildProjectPath(ref));
         }}
       />
       <ProjectNameDialog
@@ -237,7 +272,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         initialValue={renameTarget?.name ?? ''}
         submitLabel="保存"
         onSubmit={async (name) => {
-          if (renameTarget) await renameProject(renameTarget.id, name);
+          if (renameTarget) await renameProject(localRef(renameTarget.id), name);
         }}
       />
       <ConfirmDialog
@@ -248,7 +283,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         confirmLabel="移入回收站"
         danger
         onConfirm={async () => {
-          if (trashTarget) await moveToTrash(trashTarget.id);
+          if (trashTarget) await moveToTrash(localRef(trashTarget.id));
         }}
       />
       <ConfirmDialog
@@ -259,10 +294,51 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         confirmLabel="永久删除"
         danger
         onConfirm={async () => {
-          if (deleteTarget) await deletePermanently(deleteTarget.id);
+          if (deleteTarget) await deletePermanently(localRef(deleteTarget.id));
         }}
       />
+      {copyTarget ? (
+        <ProjectCopyRemoteDialog
+          open={Boolean(copyTarget)}
+          onOpenChange={(open) => !open && setCopyTarget(null)}
+          projectId={copyTarget.id}
+          projectName={copyTarget.name}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Loads the source file from the local repo, then renders the copy dialog. */
+function ProjectCopyRemoteDialog({
+  open,
+  onOpenChange,
+  projectId,
+  projectName,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectId: string;
+  projectName: string;
+}) {
+  const [file, setFile] = useState<GanttlyFile | null>(null);
+  const repo = useProjectCatalogStore((s) => s.repo);
+
+  useEffect(() => {
+    if (!open || !repo) return;
+    void repo.loadProject(projectId).then((snapshot) => {
+      if (snapshot) setFile(snapshot.file);
+    });
+  }, [open, projectId, repo]);
+
+  if (!file) return null;
+  return (
+    <CopyToRemoteDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      sourceFile={file}
+      sourceName={projectName}
+    />
   );
 }
 
@@ -277,6 +353,7 @@ function ProjectCard({
   onTrash,
   onRestore,
   onDelete,
+  onCopyToRemote,
 }: {
   project: ProjectSummary;
   trashMode: boolean;
@@ -288,6 +365,7 @@ function ProjectCard({
   onTrash(): void;
   onRestore(): void;
   onDelete(): void;
+  onCopyToRemote?: () => void;
 }) {
   return (
     <article className="group relative flex min-h-52 flex-col rounded-2xl border border-border bg-bg-elevated p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-xl">
@@ -345,6 +423,11 @@ function ProjectCard({
                   <CardMenuItem icon={<Copy size={15} />} onSelect={onDuplicate}>
                     复制项目
                   </CardMenuItem>
+                  {onCopyToRemote ? (
+                    <CardMenuItem icon={<Upload size={15} />} onSelect={onCopyToRemote}>
+                      复制到远端
+                    </CardMenuItem>
+                  ) : null}
                   <CardMenuItem danger icon={<Trash2 size={15} />} onSelect={onTrash}>
                     移入回收站
                   </CardMenuItem>

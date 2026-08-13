@@ -58,29 +58,29 @@ describe('project catalog lifecycle', () => {
 
     await useProjectCatalogStore.getState().moveToTrash(duplicate);
     expect(useProjectCatalogStore.getState().trash.map((project) => project.id)).toContain(
-      duplicate,
+      duplicate.projectId,
     );
     expect(useProjectCatalogStore.getState().projects.map((project) => project.id)).not.toContain(
-      duplicate,
+      duplicate.projectId,
     );
 
     await useProjectCatalogStore.getState().restoreProject(duplicate);
     expect(useProjectCatalogStore.getState().projects.map((project) => project.id)).toContain(
-      duplicate,
+      duplicate.projectId,
     );
   });
 
   it('persists favorites, open tabs and pin state', async () => {
-    const id = await useProjectCatalogStore.getState().createProject('Pinned');
-    await useProjectCatalogStore.getState().activateProject(id);
-    useProjectCatalogStore.getState().toggleFavorite(id);
-    useProjectCatalogStore.getState().togglePinned(id);
+    const ref = await useProjectCatalogStore.getState().createProject('Pinned');
+    await useProjectCatalogStore.getState().activateProject(ref);
+    useProjectCatalogStore.getState().toggleFavorite(ref);
+    useProjectCatalogStore.getState().togglePinned(ref);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const saved = await repo.loadNavigationState();
-    expect(saved.favoriteProjectIds).toContain(id);
-    expect(saved.openTabs).toContainEqual({ projectId: id, pinned: true });
-    expect(saved.lastActiveProjectId).toBe(id);
+    expect(saved.favoriteRefs).toContainEqual(ref);
+    expect(saved.openTabs).toContainEqual({ ref, pinned: true });
+    expect(saved.lastActiveRef).toEqual(ref);
   });
 });
 
