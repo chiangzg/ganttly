@@ -5,6 +5,13 @@ import { AlertTriangle, LoaderCircle } from 'lucide-react';
 import { GanttView } from './components/GanttView';
 import { ProjectCenter } from './components/projects/ProjectCenter';
 import { getRepository } from './data/createRepository';
+import {
+  buildProjectPath,
+  buildScopePath,
+  LOCAL_SCOPE,
+  localProjectRef,
+  refFromParams,
+} from './lib/routing';
 import { useProjectCatalogStore } from './store/useProjectCatalogStore';
 import { useProjectStore } from './store/useProjectStore';
 
@@ -31,23 +38,43 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<RootRedirect />} />
-          <Route path="/projects" element={<ProjectCenter />} />
-          <Route path="/projects/trash" element={<ProjectCenter trashMode />} />
-          <Route path="/projects/:projectId" element={<ProjectEditorRoute />} />
-          <Route path="*" element={<Navigate to="/projects" replace />} />
+
+          {/* Multi-instance routes (canonical). */}
+          <Route path={`${buildScopePath(LOCAL_SCOPE)}`} element={<ProjectCenter />} />
+          <Route
+            path={`${buildScopePath({ instanceId: ':instanceId', workspaceId: ':workspaceId' })}`}
+          >
+            <Route index element={<ProjectCenter />} />
+            <Route path="trash" element={<ProjectCenter trashMode />} />
+            <Route path=":projectId" element={<ProjectEditorRoute />} />
+          </Route>
+
+          {/* Legacy redirects (old bookmarks). */}
+          <Route path="/projects" element={<Navigate to={buildScopePath(LOCAL_SCOPE)} replace />} />
+          <Route
+            path="/projects/trash"
+            element={<Navigate to={`${buildScopePath(LOCAL_SCOPE)}/trash`} replace />}
+          />
+          <Route path="/projects/:projectId" element={<LegacyProjectRedirect />} />
+
+          <Route path="*" element={<Navigate to={buildScopePath(LOCAL_SCOPE)} replace />} />
         </Routes>
       </BrowserRouter>
     </Tooltip.Provider>
   );
 }
 
+function LegacyProjectRedirect() {
+  const { projectId } = useParams();
+  if (!projectId) return <Navigate to={buildScopePath(LOCAL_SCOPE)} replace />;
+  return <Navigate to={buildProjectPath(localProjectRef(projectId))} replace />;
+}
+
 function RootRedirect() {
   const status = useProjectCatalogStore((state) => state.status);
   const projects = useProjectCatalogStore((state) => state.projects);
   const createProject = useProjectCatalogStore((state) => state.createProject);
-  const lastActiveProjectId = useProjectCatalogStore(
-    (state) => state.navigation.lastActiveProjectId,
-  );
+  const lastActiveRef = useProjectCatalogStore((state) => state.navigation.lastActiveRef);
   const [creatingTestProject, setCreatingTestProject] = useState(false);
   const creatingTestProjectRef = useRef(false);
 
@@ -75,40 +102,47 @@ function RootRedirect() {
   ) {
     return <FullPageLoading />;
   }
-  const target =
-    (lastActiveProjectId && projects.some((project) => project.id === lastActiveProjectId)
-      ? lastActiveProjectId
-      : projects[0]?.id) ?? null;
-  return <Navigate to={target ? `/projects/${target}` : '/projects'} replace />;
+  // Prefer the last active local project; fall back to the first project.
+  const lastLocal =
+    lastActiveRef &&
+    lastActiveRef.instanceId === 'local' &&
+    projects.some((project) => project.id === lastActiveRef.projectId)
+      ? lastActiveRef
+      : null;
+  const target = lastLocal ?? (projects[0] ? localProjectRef(projects[0].id) : null);
+  return <Navigate to={target ? buildProjectPath(target) : buildScopePath(LOCAL_SCOPE)} replace />;
 }
 
 function ProjectEditorRoute() {
-  const { projectId } = useParams();
+  const params = useParams();
+  const ref = refFromParams(params);
   const status = useProjectCatalogStore((state) => state.status);
   const projects = useProjectCatalogStore((state) => state.projects);
   const trash = useProjectCatalogStore((state) => state.trash);
   const activateProject = useProjectCatalogStore((state) => state.activateProject);
   const restoreProject = useProjectCatalogStore((state) => state.restoreProject);
-  const activeProjectId = useProjectStore((state) => state.activeProjectId);
+  const activeProjectRef = useProjectStore((state) => state.activeProjectRef);
   const loadState = useProjectStore((state) => state.loadState);
   const saveError = useProjectStore((state) => state.lastSaveError);
-  const [attemptedId, setAttemptedId] = useState<string | null>(null);
+  const [attemptedRef, setAttemptedRef] = useState<string | null>(null);
+  const refKey = ref ? `${ref.instanceId}/${ref.workspaceId}/${ref.projectId}` : null;
 
   useEffect(() => {
-    if (!projectId || status !== 'ready') return;
+    if (!ref || status !== 'ready') return;
     let cancelled = false;
-    void activateProject(projectId).finally(() => {
-      if (!cancelled) setAttemptedId(projectId);
+    void activateProject(ref).finally(() => {
+      if (!cancelled && refKey) setAttemptedRef(refKey);
     });
     return () => {
       cancelled = true;
     };
-  }, [activateProject, projectId, status]);
+  }, [activateProject, refKey, status]);
 
   if (status === 'idle' || status === 'loading' || loadState === 'loading') {
     return <FullPageLoading />;
   }
-  if (!projectId) return <Navigate to="/projects" replace />;
+  if (!ref) return <Navigate to={buildScopePath(LOCAL_SCOPE)} replace />;
+  const projectId = ref.projectId;
   const trashedProject = trash.find((project) => project.id === projectId);
   if (trashedProject) {
     return (
@@ -118,7 +152,7 @@ function ProjectEditorRoute() {
         action={
           <button
             type="button"
-            onClick={() => void restoreProject(projectId)}
+            onClick={() => void restoreProject(ref)}
             className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white"
           >
             恢复项目
@@ -128,13 +162,19 @@ function ProjectEditorRoute() {
     );
   }
   const exists = projects.some((project) => project.id === projectId);
-  if (attemptedId === projectId && (!exists || loadState === 'missing')) {
+  if (attemptedRef === refKey && (!exists || loadState === 'missing')) {
     return <MessagePage title="项目不存在" message="该项目可能已经被删除或链接无效。" />;
   }
-  if (attemptedId === projectId && loadState === 'error') {
+  if (attemptedRef === refKey && loadState === 'error') {
     return <MessagePage title="无法打开项目" message={saveError ?? '加载项目失败'} />;
   }
-  if (activeProjectId !== projectId || loadState !== 'ready') return <FullPageLoading />;
+  if (
+    !activeProjectRef ||
+    refKey !==
+      `${activeProjectRef.instanceId}/${activeProjectRef.workspaceId}/${activeProjectRef.projectId}` ||
+    loadState !== 'ready'
+  )
+    return <FullPageLoading />;
   return <GanttView />;
 }
 
@@ -168,7 +208,7 @@ function MessagePage({
         <div className="mt-6 flex justify-center gap-2">
           {action}
           <Link
-            to="/projects"
+            to={buildScopePath(LOCAL_SCOPE)}
             className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-fg hover:bg-bg"
           >
             返回项目中心

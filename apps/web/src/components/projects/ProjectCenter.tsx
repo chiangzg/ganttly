@@ -16,6 +16,8 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectSummary } from '@/data/repository';
+import { localRef } from '@/data/projectRef';
+import { buildProjectPath, buildScopePath, buildTrashPath, LOCAL_SCOPE } from '@/lib/routing';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
@@ -50,8 +52,20 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
     void refresh();
   }, [refresh]);
 
-  const recentRank = new Map(
-    navigation.recentProjects.map((recent, index) => [recent.projectId, index]),
+  // Pre-compute local-scope lookup sets from the ref-based navigation state.
+  const recentRank = useMemo(() => {
+    const map = new Map<string, number>();
+    navigation.recentProjects.forEach((recent, index) => {
+      if (recent.ref.instanceId === 'local') map.set(recent.ref.projectId, index);
+    });
+    return map;
+  }, [navigation.recentProjects]);
+  const favoriteLocalIds = useMemo(
+    () =>
+      new Set(
+        navigation.favoriteRefs.filter((r) => r.instanceId === 'local').map((r) => r.projectId),
+      ),
+    [navigation.favoriteRefs],
   );
   const shown = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -59,7 +73,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
       .filter((project) => !normalized || project.name.toLocaleLowerCase().includes(normalized))
       .filter((project) =>
         filter === 'favorites'
-          ? navigation.favoriteProjectIds.includes(project.id)
+          ? favoriteLocalIds.has(project.id)
           : filter === 'recent'
             ? recentRank.has(project.id)
             : true,
@@ -69,7 +83,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
         return (recentRank.get(a.id) ?? 9999) - (recentRank.get(b.id) ?? 9999);
       });
-  }, [filter, navigation.favoriteProjectIds, projects, query, recentRank, sort]);
+  }, [filter, favoriteLocalIds, projects, query, recentRank, sort]);
 
   return (
     <div className="min-h-full bg-bg">
@@ -94,7 +108,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
             {trashMode ? (
               <button
                 type="button"
-                onClick={() => navigate('/projects')}
+                onClick={() => navigate(buildScopePath(LOCAL_SCOPE))}
                 className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-medium text-fg hover:bg-bg"
               >
                 <ArrowLeft size={16} /> 返回项目中心
@@ -103,7 +117,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
               <>
                 <button
                   type="button"
-                  onClick={() => navigate('/projects/trash')}
+                  onClick={() => navigate(buildTrashPath(LOCAL_SCOPE))}
                   className="hidden items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-fg-muted hover:bg-bg hover:text-fg sm:flex"
                 >
                   <Trash2 size={16} /> 回收站
@@ -206,15 +220,17 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
                 key={project.id}
                 project={project}
                 trashMode={trashMode}
-                favorite={navigation.favoriteProjectIds.includes(project.id)}
-                onOpen={() => navigate(`/projects/${project.id}`)}
-                onFavorite={() => toggleFavorite(project.id)}
+                favorite={favoriteLocalIds.has(project.id)}
+                onOpen={() => navigate(buildProjectPath(localRef(project.id)))}
+                onFavorite={() => toggleFavorite(localRef(project.id))}
                 onRename={() => setRenameTarget(project)}
                 onDuplicate={() =>
-                  void duplicateProject(project.id).then((id) => navigate(`/projects/${id}`))
+                  void duplicateProject(localRef(project.id)).then((ref) =>
+                    navigate(buildProjectPath(ref)),
+                  )
                 }
                 onTrash={() => setTrashTarget(project)}
-                onRestore={() => void restoreProject(project.id)}
+                onRestore={() => void restoreProject(localRef(project.id))}
                 onDelete={() => setDeleteTarget(project)}
               />
             ))}
@@ -226,8 +242,8 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreate={async (name, source) => {
-          const id = await createProject(name, source);
-          navigate(`/projects/${id}`);
+          const ref = await createProject(name, source);
+          navigate(buildProjectPath(ref));
         }}
       />
       <ProjectNameDialog
@@ -237,7 +253,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         initialValue={renameTarget?.name ?? ''}
         submitLabel="保存"
         onSubmit={async (name) => {
-          if (renameTarget) await renameProject(renameTarget.id, name);
+          if (renameTarget) await renameProject(localRef(renameTarget.id), name);
         }}
       />
       <ConfirmDialog
@@ -248,7 +264,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         confirmLabel="移入回收站"
         danger
         onConfirm={async () => {
-          if (trashTarget) await moveToTrash(trashTarget.id);
+          if (trashTarget) await moveToTrash(localRef(trashTarget.id));
         }}
       />
       <ConfirmDialog
@@ -259,7 +275,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         confirmLabel="永久删除"
         danger
         onConfirm={async () => {
-          if (deleteTarget) await deletePermanently(deleteTarget.id);
+          if (deleteTarget) await deletePermanently(localRef(deleteTarget.id));
         }}
       />
     </div>

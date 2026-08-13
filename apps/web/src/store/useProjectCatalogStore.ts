@@ -4,10 +4,10 @@ import { getCalendar } from '@ganttly/calendar-data';
 import {
   EMPTY_PROJECT_NAVIGATION,
   type DataRepository,
-  type ProjectId,
   type ProjectNavigationState,
   type ProjectSummary,
 } from '@/data/repository';
+import { refEqual, type ProjectRef } from '@/data/projectRef';
 import { useProjectStore } from './useProjectStore';
 import { useViewStore } from './useViewStore';
 
@@ -24,18 +24,18 @@ interface ProjectCatalogState {
 
   init(repo: DataRepository): Promise<void>;
   refresh(): Promise<void>;
-  activateProject(id: ProjectId): Promise<boolean>;
-  createProject(name: string, source?: GanttlyFile): Promise<ProjectId>;
-  renameProject(id: ProjectId, name: string): Promise<void>;
-  duplicateProject(id: ProjectId): Promise<ProjectId>;
-  moveToTrash(id: ProjectId): Promise<ProjectId | null>;
-  restoreProject(id: ProjectId): Promise<void>;
-  deleteProjectPermanently(id: ProjectId): Promise<void>;
-  toggleFavorite(id: ProjectId): void;
-  togglePinned(id: ProjectId): void;
-  closeTab(id: ProjectId): ProjectId | null;
-  moveTab(id: ProjectId, direction: -1 | 1): void;
-  reorderTab(sourceId: ProjectId, targetId: ProjectId): void;
+  activateProject(ref: ProjectRef): Promise<boolean>;
+  createProject(name: string, source?: GanttlyFile): Promise<ProjectRef>;
+  renameProject(ref: ProjectRef, name: string): Promise<void>;
+  duplicateProject(ref: ProjectRef): Promise<ProjectRef>;
+  moveToTrash(ref: ProjectRef): Promise<ProjectRef | null>;
+  restoreProject(ref: ProjectRef): Promise<void>;
+  deleteProjectPermanently(ref: ProjectRef): Promise<void>;
+  toggleFavorite(ref: ProjectRef): void;
+  togglePinned(ref: ProjectRef): void;
+  closeTab(ref: ProjectRef): ProjectRef | null;
+  moveTab(ref: ProjectRef, direction: -1 | 1): void;
+  reorderTab(sourceRef: ProjectRef, targetRef: ProjectRef): void;
 }
 
 const getHolidays = (region: string): Holiday[] => getCalendar(region).holidays;
@@ -84,13 +84,13 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
     }
   },
 
-  async activateProject(id) {
+  async activateProject(ref) {
     const { repo, projects } = get();
-    if (!repo || !projects.some((project) => project.id === id)) return false;
-    const loaded = await useProjectStore.getState().loadProject(id);
+    if (!repo || !projects.some((project) => project.id === ref.projectId)) return false;
+    const loaded = await useProjectStore.getState().loadProject(ref);
     if (!loaded) return false;
     useViewStore.getState().resetForProjectSwitch();
-    const navigation = touchProject(get().navigation, id);
+    const navigation = touchProject(get().navigation, ref);
     set({ navigation });
     await persistNavigation(repo, navigation, set);
     return true;
@@ -111,118 +111,125 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
       { getHolidays },
     );
     const snapshot = await repo.createProject({ file });
+    const ref: ProjectRef = {
+      instanceId: 'local',
+      workspaceId: 'local',
+      projectId: snapshot.summary.id,
+    };
     set((state) => ({ projects: [snapshot.summary, ...state.projects] }));
-    const navigation = touchProject(get().navigation, snapshot.summary.id);
+    const navigation = touchProject(get().navigation, ref);
     set({ navigation });
     await persistNavigation(repo, navigation, set);
-    return snapshot.summary.id;
+    return ref;
   },
 
-  async renameProject(id, name) {
+  async renameProject(ref, name) {
     const repo = requireRepository(get().repo);
     const projectName = normalizeProjectName(name);
     const active = useProjectStore.getState();
-    if (active.activeProjectId === id) {
+    if (active.activeProjectRef && refEqual(active.activeProjectRef, ref)) {
       active.setFile({ ...active.file, project: { ...active.file.project, name: projectName } });
       await useProjectStore.getState().flushPendingSave();
     } else {
-      const snapshot = await repo.loadProject(id);
+      const snapshot = await repo.loadProject(ref.projectId);
       if (!snapshot) throw new Error('项目不存在');
       const file = {
         ...snapshot.file,
         project: { ...snapshot.file.project, name: projectName },
         meta: { ...snapshot.file.meta, updatedAt: new Date().toISOString() },
       };
-      await repo.saveProject(id, file, { expectedRevision: snapshot.revision });
+      await repo.saveProject(ref.projectId, file, { expectedRevision: snapshot.revision });
     }
     await get().refresh();
   },
 
-  async duplicateProject(id) {
+  async duplicateProject(ref) {
     const repo = requireRepository(get().repo);
-    if (useProjectStore.getState().activeProjectId === id) {
+    if (activeRefEquals(ref)) {
       await useProjectStore.getState().flushPendingSave();
     }
-    const snapshot = await repo.loadProject(id);
+    const snapshot = await repo.loadProject(ref.projectId);
     if (!snapshot) throw new Error('项目不存在');
     return get().createProject(`${snapshot.file.project.name} 副本`, snapshot.file);
   },
 
-  async moveToTrash(id) {
+  async moveToTrash(ref) {
     const repo = requireRepository(get().repo);
     const activeStore = useProjectStore.getState();
-    if (activeStore.activeProjectId === id) await activeStore.flushPendingSave();
-    await repo.moveToTrash(id);
-    const navigation = removeProjectFromNavigation(get().navigation, id);
-    const remaining = get().projects.filter((project) => project.id !== id);
-    const nextProjectId = navigation.openTabs.at(-1)?.projectId ?? remaining[0]?.id ?? null;
-    if (activeStore.activeProjectId === id) activeStore.unloadProject();
+    if (activeRefEquals(ref)) await activeStore.flushPendingSave();
+    await repo.moveToTrash(ref.projectId);
+    const navigation = removeProjectFromNavigation(get().navigation, ref);
+    const remaining = get().projects.filter((project) => project.id !== ref.projectId);
+    const nextRef = navigation.openTabs.at(-1)?.ref ?? localRefFromSummary(remaining[0]) ?? null;
+    if (activeRefEquals(ref)) activeStore.unloadProject();
     set({ navigation });
     await Promise.all([persistNavigation(repo, navigation, set), get().refresh()]);
-    return nextProjectId;
+    return nextRef;
   },
 
-  async restoreProject(id) {
+  async restoreProject(ref) {
     const repo = requireRepository(get().repo);
-    await repo.restoreProject(id);
+    await repo.restoreProject(ref.projectId);
     await get().refresh();
   },
 
-  async deleteProjectPermanently(id) {
+  async deleteProjectPermanently(ref) {
     const repo = requireRepository(get().repo);
-    await repo.deleteProjectPermanently(id);
-    const navigation = removeProjectFromNavigation(get().navigation, id);
+    await repo.deleteProjectPermanently(ref.projectId);
+    const navigation = removeProjectFromNavigation(get().navigation, ref);
     set({ navigation });
     await Promise.all([persistNavigation(repo, navigation, set), get().refresh()]);
   },
 
-  toggleFavorite(id) {
+  toggleFavorite(ref) {
     const current = get().navigation;
-    const favorite = current.favoriteProjectIds.includes(id);
+    const favorite = current.favoriteRefs.some((r) => refEqual(r, ref));
     const navigation = {
       ...current,
-      favoriteProjectIds: favorite
-        ? current.favoriteProjectIds.filter((projectId) => projectId !== id)
-        : [...current.favoriteProjectIds, id],
+      favoriteRefs: favorite
+        ? current.favoriteRefs.filter((r) => !refEqual(r, ref))
+        : [...current.favoriteRefs, ref],
     };
     set({ navigation });
     const repo = get().repo;
     if (repo) void persistNavigation(repo, navigation, set);
   },
 
-  togglePinned(id) {
+  togglePinned(ref) {
     const current = get().navigation;
-    const existing = current.openTabs.find((tab) => tab.projectId === id);
+    const existing = current.openTabs.find((tab) => refEqual(tab.ref, ref));
     const tabs = existing
       ? current.openTabs.map((tab) =>
-          tab.projectId === id ? { ...tab, pinned: !tab.pinned } : tab,
+          refEqual(tab.ref, ref) ? { ...tab, pinned: !tab.pinned } : tab,
         )
-      : [...current.openTabs, { projectId: id, pinned: true }];
+      : [...current.openTabs, { ref, pinned: true }];
     const navigation = { ...current, openTabs: sortTabs(tabs) };
     set({ navigation });
     const repo = get().repo;
     if (repo) void persistNavigation(repo, navigation, set);
   },
 
-  closeTab(id) {
+  closeTab(ref) {
     const current = get().navigation;
-    const tabs = current.openTabs.filter((tab) => tab.projectId !== id);
+    const tabs = current.openTabs.filter((tab) => !refEqual(tab.ref, ref));
     const navigation = { ...current, openTabs: tabs };
-    const activeId = useProjectStore.getState().activeProjectId;
-    const nextProjectId =
-      activeId === id
-        ? (tabs.at(-1)?.projectId ?? get().projects.find((p) => p.id !== id)?.id ?? null)
-        : activeId;
+    const activeRef = useProjectStore.getState().activeProjectRef;
+    const nextRef =
+      activeRef && refEqual(activeRef, ref)
+        ? (tabs.at(-1)?.ref ??
+          localRefFromSummary(get().projects.find((p) => p.id !== ref.projectId)) ??
+          null)
+        : activeRef;
     set({ navigation });
     const repo = get().repo;
     if (repo) void persistNavigation(repo, navigation, set);
-    return nextProjectId;
+    return nextRef;
   },
 
-  moveTab(id, direction) {
+  moveTab(ref, direction) {
     const current = get().navigation;
     const tabs = [...current.openTabs];
-    const index = tabs.findIndex((tab) => tab.projectId === id);
+    const index = tabs.findIndex((tab) => refEqual(tab.ref, ref));
     const nextIndex = index + direction;
     if (index < 0 || nextIndex < 0 || nextIndex >= tabs.length) return;
     const [tab] = tabs.splice(index, 1);
@@ -233,12 +240,12 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
     if (repo) void persistNavigation(repo, navigation, set);
   },
 
-  reorderTab(sourceId, targetId) {
-    if (sourceId === targetId) return;
+  reorderTab(sourceRef, targetRef) {
+    if (refEqual(sourceRef, targetRef)) return;
     const current = get().navigation;
     const tabs = [...current.openTabs];
-    const sourceIndex = tabs.findIndex((tab) => tab.projectId === sourceId);
-    const targetIndex = tabs.findIndex((tab) => tab.projectId === targetId);
+    const sourceIndex = tabs.findIndex((tab) => refEqual(tab.ref, sourceRef));
+    const targetIndex = tabs.findIndex((tab) => refEqual(tab.ref, targetRef));
     if (sourceIndex < 0 || targetIndex < 0) return;
     const [source] = tabs.splice(sourceIndex, 1);
     tabs.splice(targetIndex, 0, source!);
@@ -248,6 +255,8 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
     if (repo) void persistNavigation(repo, navigation, set);
   },
 }));
+
+// --- Helpers ----------------------------------------------------------------
 
 function normalizeProjectName(name: string): string {
   const normalized = name.trim();
@@ -261,17 +270,29 @@ function requireRepository(repo: DataRepository | null): DataRepository {
   return repo;
 }
 
-function touchProject(state: ProjectNavigationState, projectId: ProjectId): ProjectNavigationState {
+/** True when the given ref matches the project store's active ref. */
+function activeRefEquals(ref: ProjectRef): boolean {
+  const active = useProjectStore.getState().activeProjectRef;
+  return active !== null && active !== undefined && refEqual(active, ref);
+}
+
+/** Build a local ProjectRef from a summary's project id (null-safe). */
+function localRefFromSummary(summary: ProjectSummary | undefined): ProjectRef | null {
+  if (!summary) return null;
+  return { instanceId: 'local', workspaceId: 'local', projectId: summary.id };
+}
+
+function touchProject(state: ProjectNavigationState, ref: ProjectRef): ProjectNavigationState {
   const now = new Date().toISOString();
-  const existingTab = state.openTabs.find((tab) => tab.projectId === projectId);
-  const openTabs = existingTab ? state.openTabs : [...state.openTabs, { projectId, pinned: false }];
+  const existingTab = state.openTabs.find((tab) => refEqual(tab.ref, ref));
+  const openTabs = existingTab ? state.openTabs : [...state.openTabs, { ref, pinned: false }];
   return {
     ...state,
-    lastActiveProjectId: projectId,
+    lastActiveRef: ref,
     openTabs: sortTabs(openTabs),
     recentProjects: [
-      { projectId, lastOpenedAt: now },
-      ...state.recentProjects.filter((recent) => recent.projectId !== projectId),
+      { ref, lastOpenedAt: now },
+      ...state.recentProjects.filter((recent) => !refEqual(recent.ref, ref)),
     ].slice(0, 20),
   };
 }
@@ -282,13 +303,14 @@ function sortTabs(tabs: ProjectNavigationState['openTabs']): ProjectNavigationSt
 
 function removeProjectFromNavigation(
   state: ProjectNavigationState,
-  projectId: ProjectId,
+  ref: ProjectRef,
 ): ProjectNavigationState {
   return {
-    lastActiveProjectId: state.lastActiveProjectId === projectId ? null : state.lastActiveProjectId,
-    openTabs: state.openTabs.filter((tab) => tab.projectId !== projectId),
-    favoriteProjectIds: state.favoriteProjectIds.filter((id) => id !== projectId),
-    recentProjects: state.recentProjects.filter((recent) => recent.projectId !== projectId),
+    lastActiveRef:
+      state.lastActiveRef && refEqual(state.lastActiveRef, ref) ? null : state.lastActiveRef,
+    openTabs: state.openTabs.filter((tab) => !refEqual(tab.ref, ref)),
+    favoriteRefs: state.favoriteRefs.filter((r) => !refEqual(r, ref)),
+    recentProjects: state.recentProjects.filter((recent) => !refEqual(recent.ref, ref)),
   };
 }
 
@@ -296,16 +318,21 @@ function sanitizeNavigation(
   state: ProjectNavigationState,
   projects: ProjectSummary[],
 ): ProjectNavigationState {
-  const validIds = new Set(projects.map((project) => project.id));
-  const lastActiveProjectId =
-    state.lastActiveProjectId && validIds.has(state.lastActiveProjectId)
-      ? state.lastActiveProjectId
-      : (projects[0]?.id ?? null);
+  // Local project ids known to exist. Remote refs are kept as-is (they may
+  // not appear in the local list — the remote scope is loaded separately).
+  const validLocalIds = new Set(projects.map((project) => project.id));
+  const isValid = (ref: ProjectRef): boolean =>
+    ref.instanceId !== 'local' || validLocalIds.has(ref.projectId);
+
+  const lastValid =
+    state.lastActiveRef && isValid(state.lastActiveRef) ? state.lastActiveRef : null;
+  const lastActiveRef = lastValid ?? localRefFromSummary(projects[0]);
+
   return {
-    lastActiveProjectId,
-    openTabs: state.openTabs.filter((tab) => validIds.has(tab.projectId)),
-    favoriteProjectIds: state.favoriteProjectIds.filter((id) => validIds.has(id)),
-    recentProjects: state.recentProjects.filter((recent) => validIds.has(recent.projectId)),
+    lastActiveRef,
+    openTabs: state.openTabs.filter((tab) => isValid(tab.ref)),
+    favoriteRefs: state.favoriteRefs.filter(isValid),
+    recentProjects: state.recentProjects.filter((recent) => isValid(recent.ref)),
   };
 }
 

@@ -29,12 +29,15 @@ import {
 } from '@ganttly/domain';
 import {
   DEFAULT_PROJECT_ID,
-  type ProjectId,
   type ProjectRepository,
   type ProjectRevision,
 } from '@/data/repository';
+import { isLocalRef, localRef, refEqual, type ProjectRef } from '@/data/projectRef';
+import { resolveProjectRepository } from '@/data/resolveRepository';
 import { cascadeSchedule, countDependencyViolations } from '@/lib/schedule';
 import { resolveCalendar } from '@/lib/calendar';
+import { useInstanceStore } from './useInstanceStore';
+import { useAuthStore } from './useAuthStore';
 
 /** Holiday provider injected into normalizeFile (keeps schema pkg dependency-free). */
 const getHolidays = (region: string): Holiday[] => getCalendar(region).holidays;
@@ -64,7 +67,7 @@ export interface SaveState {
 interface ProjectStoreState {
   file: GanttlyFile;
   repo: ProjectRepository | null;
-  activeProjectId: ProjectId | null;
+  activeProjectRef: ProjectRef | null;
   revision: ProjectRevision | null;
   dirty: boolean;
   loadState: 'idle' | 'loading' | 'ready' | 'missing' | 'error';
@@ -73,7 +76,7 @@ interface ProjectStoreState {
   // Lifecycle
   setRepository(repo: ProjectRepository): void;
   init(repo: ProjectRepository): Promise<void>;
-  loadProject(id: ProjectId): Promise<boolean>;
+  loadProject(ref: ProjectRef): Promise<boolean>;
   unloadProject(): void;
   flushPendingSave(): Promise<void>;
   setFile(file: GanttlyFile): void;
@@ -122,13 +125,31 @@ function clearSaveTimer(): void {
   saveTimer = null;
 }
 
-function scheduleSave(projectId: ProjectId | null): void {
+function scheduleSave(ref: ProjectRef | null): void {
   clearSaveTimer();
-  if (!projectId) return;
+  if (!ref) return;
   saveTimer = setTimeout(() => {
     const state = useProjectStore.getState();
-    if (state.activeProjectId === projectId) void state.save();
+    if (state.activeProjectRef && refEqual(state.activeProjectRef, ref)) void state.save();
   }, 500);
+}
+
+/**
+ * Resolve the {@link ProjectRepository} for a given ref. Local refs use the
+ * injected local repository; remote refs resolve an HTTP-backed
+ * {@link RemoteRepository} via the instance/auth stores. Returns null when a
+ * remote ref's instance is not yet authenticated — callers treat that as
+ * "not loadable".
+ */
+function resolveRepoForRef(
+  ref: ProjectRef,
+  localRepo: ProjectRepository | null,
+): ProjectRepository | null {
+  if (isLocalRef(ref)) return localRepo;
+  const instance = useInstanceStore.getState().findInstance(ref.instanceId);
+  const profile = useAuthStore.getState().getProfile(ref.instanceId);
+  if (!instance || !profile) return null;
+  return resolveProjectRepository(ref, { instance, userId: profile.userId });
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +159,7 @@ function scheduleSave(projectId: ProjectId | null): void {
 export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   file: withCalendar(createEmptyFile()),
   repo: null,
-  activeProjectId: null,
+  activeProjectRef: null,
   revision: null,
   dirty: false,
   loadState: 'idle',
@@ -156,7 +177,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     clearSaveTimer();
     set({
       repo,
-      activeProjectId: null,
+      activeProjectRef: null,
       revision: null,
       dirty: false,
       loadState: 'idle',
@@ -170,20 +191,26 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         file: withCalendar(createEmptyFile({ name: '我的项目' })),
       });
     }
-    await get().loadProject(snapshot.summary.id);
+    await get().loadProject(localRef(snapshot.summary.id));
   },
 
-  async loadProject(id) {
-    const { repo, activeProjectId, dirty } = get();
+  async loadProject(ref) {
+    const localRepo = get().repo;
+    const repo = resolveRepoForRef(ref, localRepo);
     if (!repo) return false;
-    if (activeProjectId === id && get().loadState === 'ready') return true;
-    if (activeProjectId && dirty) await get().flushPendingSave();
+    if (
+      get().activeProjectRef &&
+      refEqual(get().activeProjectRef!, ref) &&
+      get().loadState === 'ready'
+    )
+      return true;
+    if (get().activeProjectRef && get().dirty) await get().flushPendingSave();
 
     const generation = ++loadGeneration;
     clearSaveTimer();
     set({ loadState: 'loading', lastSaveError: null });
     try {
-      const snapshot = await repo.loadProject(id);
+      const snapshot = await repo.loadProject(ref.projectId);
       if (generation !== loadGeneration) return false;
       if (!snapshot || snapshot.summary.deletedAt) {
         set({ loadState: 'missing' });
@@ -191,7 +218,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       }
       const normalized = withCalendar(snapshot.file);
       set({
-        activeProjectId: id,
+        activeProjectRef: ref,
         revision: snapshot.revision,
         file: normalized,
         dirty: false,
@@ -215,7 +242,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     ++loadGeneration;
     clearSaveTimer();
     set({
-      activeProjectId: null,
+      activeProjectRef: null,
       revision: null,
       dirty: false,
       loadState: 'idle',
@@ -237,7 +264,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
   setFile(file) {
     set({ file, dirty: true, saveState: { status: 'saving' } });
-    scheduleSave(get().activeProjectId);
+    scheduleSave(get().activeProjectRef);
   },
 
   dispatch(command) {
@@ -250,7 +277,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       dirty: true,
       saveState: { status: 'saving' },
     });
-    scheduleSave(get().activeProjectId);
+    scheduleSave(get().activeProjectRef);
   },
 
   undo() {
@@ -265,7 +292,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       dirty: true,
       saveState: { status: 'saving' },
     });
-    scheduleSave(get().activeProjectId);
+    scheduleSave(get().activeProjectRef);
   },
 
   undoCommand(command) {
@@ -287,7 +314,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       dirty: true,
       saveState: { status: 'saving' },
     });
-    scheduleSave(get().activeProjectId);
+    scheduleSave(get().activeProjectRef);
   },
 
   canUndo() {
@@ -327,8 +354,10 @@ async function performSave(
   get: () => ProjectStoreState,
   set: (partial: Partial<ProjectStoreState>) => void,
 ): Promise<void> {
-  const { repo, file, activeProjectId, revision } = get();
-  if (!repo || !activeProjectId || revision === null) return;
+  const { file, activeProjectRef, revision } = get();
+  if (!activeProjectRef || revision === null) return;
+  const repo = resolveRepoForRef(activeProjectRef, get().repo);
+  if (!repo) return;
   clearSaveTimer();
   set({ saveState: { status: 'saving' } });
   try {
@@ -336,11 +365,11 @@ async function performSave(
       ...file,
       meta: { ...file.meta, updatedAt: new Date().toISOString() },
     };
-    const snapshot = await repo.saveProject(activeProjectId, stamped, {
+    const snapshot = await repo.saveProject(activeProjectRef.projectId, stamped, {
       expectedRevision: revision,
     });
     const current = get();
-    if (current.activeProjectId !== activeProjectId) return;
+    if (!current.activeProjectRef || !refEqual(current.activeProjectRef, activeProjectRef)) return;
     const changedWhileSaving = current.file !== file;
     set({
       file: changedWhileSaving ? current.file : snapshot.file,
@@ -349,7 +378,7 @@ async function performSave(
       saveState: { status: changedWhileSaving ? 'saving' : 'saved' },
       lastSaveError: null,
     });
-    if (changedWhileSaving) scheduleSave(activeProjectId);
+    if (changedWhileSaving) scheduleSave(activeProjectRef);
   } catch (err) {
     const msg = (err as Error).message;
     set({ saveState: { status: 'error', error: msg }, lastSaveError: msg });

@@ -2,6 +2,7 @@ import type { GanttlyFile } from '@ganttly/schema';
 import { nanoid } from 'nanoid';
 import {
   EMPTY_PROJECT_NAVIGATION,
+  migrateNavigation,
   ProjectNotFoundError,
   RevisionConflictError,
   summarizeProject,
@@ -195,13 +196,8 @@ function snapshotOf(record: ProjectRecord): ProjectSnapshot {
   return { file: record.file, revision: record.revision, summary: record.summary };
 }
 
-function sanitizeNavigation(state: ProjectNavigationState): ProjectNavigationState {
-  return {
-    lastActiveProjectId: state.lastActiveProjectId ?? null,
-    openTabs: Array.isArray(state.openTabs) ? state.openTabs : [],
-    favoriteProjectIds: Array.isArray(state.favoriteProjectIds) ? state.favoriteProjectIds : [],
-    recentProjects: Array.isArray(state.recentProjects) ? state.recentProjects : [],
-  };
+function sanitizeNavigation(state: unknown): ProjectNavigationState {
+  return migrateNavigation(state);
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
