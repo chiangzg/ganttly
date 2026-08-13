@@ -19,6 +19,12 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      // Proxy API + discovery to the server so the browser sees same-origin
+      // requests — session cookies flow without CORS/SameSite friction.
+      '/api': 'http://localhost:3000',
+      '/.well-known': 'http://localhost:3000',
+    },
   },
   preview: {
     port: 4173,
