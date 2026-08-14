@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../src/bootstrap';
 import { buildTestConfig } from '../helpers';
@@ -64,5 +67,44 @@ describe('/health/ready migration check', () => {
     const res = await app.inject({ method: 'GET', url: '/health/ready' });
     expect(res.statusCode).toBe(503);
     expect(res.json().checks).toEqual({ database: 'ok', migrations: 'missing' });
+  });
+});
+
+describe('MIGRATIONS_FOLDER override (Docker image layout)', () => {
+  let app: FastifyInstance;
+  const dir = mkdtempSync(join(tmpdir(), 'ganttly-migrations-'));
+  // Four shipped SQL files + a non-SQL file that must not be counted.
+  for (let i = 0; i < 4; i++) writeFileSync(join(dir, `000${i}_x.sql`), '');
+  writeFileSync(join(dir, 'meta.json'), '{}');
+
+  let call = 0;
+  const db = {
+    execute: async () => {
+      call++;
+      if (call === 1) return []; // liveness probe
+      return [{ n: 3 }]; // DB has 3 applied, folder ships 4 → behind
+    },
+  } as unknown as Db;
+
+  beforeAll(async () => {
+    process.env.MIGRATIONS_FOLDER = dir;
+    app = await buildServer(buildTestConfig(), { registerDatabase: false });
+    app.decorate('db', db);
+  });
+
+  afterAll(async () => {
+    await app.close();
+    delete process.env.MIGRATIONS_FOLDER;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('counts the SQL files from MIGRATIONS_FOLDER and reports behind', async () => {
+    call = 0;
+    const res = await app.inject({ method: 'GET', url: '/health/ready' });
+    expect(res.statusCode).toBe(503);
+    const body = res.json();
+    expect(body.checks).toMatchObject({ database: 'ok', migrations: 'behind' });
+    expect(body.checks.expected).toBe(4);
+    expect(body.checks.applied).toBe(3);
   });
 });

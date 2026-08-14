@@ -33,10 +33,15 @@ playwright-report
 **/*.test.ts
 **/*.test.tsx
 
-# Local env — NEVER bake secrets into images
+# Local env — NEVER bake secrets into images. Bare patterns only match the
+# context root (filepath.Match semantics: `*` does not cross `/`), so the `**/`
+# forms are required to catch nested files such as `apps/server/.env`.
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 # Docs and repo meta not needed to build
 docs

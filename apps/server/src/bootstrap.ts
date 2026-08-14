@@ -10,6 +10,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { existsSync, readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AppConfig } from './config';
 import type { GitHubOAuthDeps } from './auth/github';
@@ -39,16 +40,24 @@ declare module 'fastify' {
 }
 
 /**
- * Count the `*.sql` files shipped under `apps/server/drizzle`. Resolved relative
- * to this module so it holds for both the tsx-run source (`src/bootstrap.ts`)
- * and the esbuild bundle (single `dist/server.js`, same parent dir → same
- * `../drizzle`). Decorated onto the instance for the `/health/ready` check.
+ * Count the migration SQL files shipped with this build (spec §14.2 health
+ * check). In the Docker image the SQL lives at `/app/drizzle` (`MIGRATIONS_FOLDER`,
+ * the same override `db/migrate.ts` uses); elsewhere it sits next to the source
+ * (dev/tsx) or the bundle (`../drizzle` relative to `dist/server.js`). A read
+ * failure degrades the readiness check to "no migrations required" but is
+ * logged so a broken image layout is visible in the container logs.
  */
-function countShippedMigrations(): number {
-  const drizzleDir = fileURLToPath(new URL('../drizzle', import.meta.url));
+function countShippedMigrations(log?: FastifyInstance['log']): number {
+  const folder = process.env.MIGRATIONS_FOLDER
+    ? resolve(process.env.MIGRATIONS_FOLDER)
+    : fileURLToPath(new URL('../drizzle', import.meta.url));
   try {
-    return readdirSync(drizzleDir).filter((f) => f.endsWith('.sql')).length;
-  } catch {
+    return readdirSync(folder).filter((f) => f.endsWith('.sql')).length;
+  } catch (err) {
+    log?.error(
+      { err, folder },
+      'cannot read migrations folder; /health/ready migration check degraded',
+    );
     return 0;
   }
 }
@@ -210,7 +219,7 @@ export async function buildServer(
 
   // Expose the shipped migration count so /health/ready can detect a DB that
   // has not yet been migrated up to the image's version.
-  app.decorate('expectedMigrationCount', countShippedMigrations());
+  app.decorate('expectedMigrationCount', countShippedMigrations(app.log));
 
   // Same-origin Web hosting (spec §14.2). Registered LAST so the API/MCP/health/
   // discovery/metrics routes win over its wildcard; the plugin's not-found
