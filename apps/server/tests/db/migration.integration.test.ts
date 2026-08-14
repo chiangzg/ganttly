@@ -20,6 +20,8 @@ const EXPECTED_TABLES = [
   'projects',
   'project_operations',
   'outbox_events',
+  'personal_access_tokens',
+  'external_references',
 ] as const;
 
 describe.skipIf(!url)('drizzle migration (integration)', () => {
@@ -47,7 +49,7 @@ describe.skipIf(!url)('drizzle migration (integration)', () => {
     }
   }
 
-  it('creates all six core tables', async () => {
+  it('creates all eight tables', async () => {
     const rows = await withClient((db) =>
       db.execute<{ table_name: string }>(
         sql`select table_name from information_schema.tables where table_schema = 'public'`,
@@ -68,7 +70,16 @@ describe.skipIf(!url)('drizzle migration (integration)', () => {
     expect(rows.length).toBe(1);
   });
 
-  it('creates the three check constraints (spec §6.1)', async () => {
+  it('creates the PAT token-prefix index (spec §6.2)', async () => {
+    const rows = await withClient((db) =>
+      db.execute<{ indexname: string }>(
+        sql`select indexname from pg_indexes where schemaname = 'public' and indexname = ${'personal_access_tokens_token_prefix_idx'}`,
+      ),
+    );
+    expect(rows.length).toBe(1);
+  });
+
+  it('creates the four check constraints (spec §6.1)', async () => {
     const rows = await withClient((db) =>
       db.execute<{ conname: string }>(
         sql`select conname from pg_constraint where contype = 'c' and connamespace = 'public'::regnamespace`,
@@ -78,6 +89,7 @@ describe.skipIf(!url)('drizzle migration (integration)', () => {
     expect(names.has('workspaces_kind_check')).toBe(true);
     expect(names.has('workspace_members_role_check')).toBe(true);
     expect(names.has('project_operations_actor_type_check')).toBe(true);
+    expect(names.has('external_references_entity_type_check')).toBe(true);
   });
 
   it('is idempotent — re-running migrate is a no-op', async () => {

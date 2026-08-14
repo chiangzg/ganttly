@@ -195,6 +195,78 @@ export const outboxEvents = pgTable(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// personal_access_tokens — MCP bearer credentials (spec §8.3 / §6.1). PR5.
+//
+// Only the short `token_prefix` (for recognition in lists) and
+// `token_hash = SHA-256(token + server pepper)` are stored. The plaintext is
+// shown exactly once at creation and never persisted or logged. A token's real
+// authority is its `scopes` intersected with the holder's workspace role.
+// ---------------------------------------------------------------------------
+export const personalAccessTokens = pgTable(
+  'personal_access_tokens',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    name: text('name').notNull(),
+    /** Short, non-secret prefix shown in lists, e.g. `pat_7Kp9`. */
+    tokenPrefix: text('token_prefix').notNull(),
+    /** Hex SHA-256(token + ':' + pepper). */
+    tokenHash: text('token_hash').notNull(),
+    scopes: text('scopes').array().notNull(),
+    /** Optional narrowing to a single workspace/project. */
+    workspaceId: text('workspace_id'),
+    projectId: text('project_id'),
+    expiresAt: tstz('expires_at'),
+    lastUsedAt: tstz('last_used_at'),
+    revokedAt: tstz('revoked_at'),
+    createdAt: tstz('created_at').notNull(),
+  },
+  (t) => ({
+    // §6.2: lookup by display prefix.
+    tokenPrefixIdx: index('personal_access_tokens_token_prefix_idx').on(t.tokenPrefix),
+    // Owner-scoped listing.
+    userCreatedIdx: index('personal_access_tokens_user_created_idx').on(
+      t.userId,
+      t.createdAt.desc(),
+    ),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// external_references — deduplication map for MCP create_task / create_tasks
+// (spec §6.1 / §6.4 / §10.3 `source`). Lets an external Agent re-submit the
+// same external id without creating duplicate tasks: the server returns the
+// already-linked entity with `created=false`. The server stores only the URL;
+// it never fetches its contents.
+// ---------------------------------------------------------------------------
+export const externalReferences = pgTable(
+  'external_references',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    projectId: text('project_id').notNull(),
+    provider: text('provider').notNull(),
+    externalId: text('external_id').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    url: text('url'),
+    createdAt: tstz('created_at').notNull(),
+  },
+  (t) => ({
+    entityTypeCheck: check(
+      'external_references_entity_type_check',
+      sql`${t.entityType} in ('project', 'task')`,
+    ),
+    // Natural dedup key: one entity per (workspace, provider, externalId, kind).
+    pk: primaryKey({
+      name: 'external_references_pkey',
+      columns: [t.workspaceId, t.provider, t.externalId, t.entityType],
+    }),
+  }),
+);
+
 /** All tables, for the Drizzle client `schema` map and tests. */
 export const schema = {
   users,
@@ -203,4 +275,6 @@ export const schema = {
   projects,
   projectOperations,
   outboxEvents,
+  personalAccessTokens,
+  externalReferences,
 };
