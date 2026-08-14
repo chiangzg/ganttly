@@ -61,9 +61,20 @@ export const mcpRoutes: FastifyPluginAsync<McpRoutesOptions> = async (
 
     // --- Delegate to the stateless transport --------------------------------
     // Pass the already-parsed body so the transport does not re-read the
-    // consumed Fastify stream.
+    // consumed Fastify stream. The transport writes straight to `reply.raw`, so
+    // a throw after headers are sent must not propagate to the shared error
+    // handler (that would attempt a second response and raise
+    // ERR_HTTP_HEADERS_SENT).
     if (app.hasDecorator('metrics')) app.metrics.mcpToolCallsTotal.inc();
-    await handle.handleRequest(request.raw, reply.raw, request.body);
+    try {
+      await handle.handleRequest(request.raw, reply.raw, request.body);
+    } catch (err) {
+      if (reply.raw.headersSent || reply.raw.writableEnded) {
+        request.log.error({ err }, 'mcp transport failed after response started');
+        return;
+      }
+      throw err;
+    }
   });
 };
 

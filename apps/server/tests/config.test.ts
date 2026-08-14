@@ -199,4 +199,16 @@ describe('loadConfig — self-hosted deployment knobs', () => {
       false,
     );
   });
+
+  it('defaults metricsEnabled to true', () => {
+    expect(loadConfig(validDevEnv()).metricsEnabled).toBe(true);
+  });
+
+  it('parses METRICS_ENABLED="false"/"0" as disabled', () => {
+    // z.coerce.boolean() would wrongly coerce the string "false" to true.
+    expect(loadConfig({ ...validDevEnv(), METRICS_ENABLED: 'false' }).metricsEnabled).toBe(false);
+    expect(loadConfig({ ...validDevEnv(), METRICS_ENABLED: '0' }).metricsEnabled).toBe(false);
+    expect(loadConfig({ ...validDevEnv(), METRICS_ENABLED: 'true' }).metricsEnabled).toBe(true);
+    expect(loadConfig({ ...validDevEnv(), METRICS_ENABLED: '1' }).metricsEnabled).toBe(true);
+  });
 });

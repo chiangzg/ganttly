@@ -60,8 +60,12 @@ const rawConfigSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   /** Rate-limit time window in seconds. */
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
-  /** Expose the /metrics Prometheus endpoint. */
-  METRICS_ENABLED: z.coerce.boolean().default(true),
+  /**
+   * Expose the /metrics Prometheus endpoint. Accepts `1`/`true` or `0`/`false`
+   * (parsed manually because `z.coerce.boolean()` treats the string `"false"`
+   * as truthy). Unset = enabled.
+   */
+  METRICS_ENABLED: z.string().optional(),
 
   // --- Self-hosted deployment (spec §14.2) -----------------------------------
   /**
@@ -236,7 +240,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     outboxMaintenanceIntervalMs: r.OUTBOX_MAINTENANCE_INTERVAL_MS,
     rateLimitMax: r.RATE_LIMIT_MAX,
     rateLimitWindowSeconds: r.RATE_LIMIT_WINDOW_SECONDS,
-    metricsEnabled: r.METRICS_ENABLED,
+    metricsEnabled: parseBoolEnv(env.METRICS_ENABLED, true),
     webDistDir: r.WEB_DIST_DIR,
     sessionCookieSecure,
     isProduction,

@@ -85,24 +85,36 @@ export async function buildServer(
   });
 
   // Map domain HttpErrors onto the shared ApiErrorResponse body; the rate
-  // limiter throws a 429 (Retry-After already set by the plugin); anything else
-  // is an unexpected failure logged as a 500 with a plain body.
+  // limiter throws a 429 (Retry-After already set by the plugin); Fastify-level
+  // client errors (malformed JSON 400, body over the limit 413, unsupported
+  // content type 415) keep their 4xx class and map onto the contract instead
+  // of collapsing into a 500; anything else is an unexpected failure logged as
+  // a 500 with the contract envelope.
   app.setErrorHandler(async (err, request, reply) => {
     if (err instanceof HttpError) {
       return reply
         .code(errorCodeToStatus[err.code])
         .send(buildApiError(err.code, err.message, request.id, err.details));
     }
-    if (err instanceof Error && (err as { statusCode?: number }).statusCode === 429) {
+    const statusCode =
+      err instanceof Error ? (err as { statusCode?: number }).statusCode : undefined;
+    if (statusCode === 429) {
       metrics.rateLimitedTotal.inc();
       return reply
         .code(429)
         .send(buildApiError(ApiErrorCode.RATE_LIMITED, 'Rate limit exceeded', request.id));
     }
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+      const code =
+        statusCode === 413 ? ApiErrorCode.LIMIT_EXCEEDED : ApiErrorCode.VALIDATION_FAILED;
+      const status = statusCode === 400 || statusCode === 415 ? 422 : statusCode;
+      const message = err instanceof Error ? err.message : 'Invalid request';
+      return reply.code(status).send(buildApiError(code, message, request.id));
+    }
     request.log.error({ err }, 'unhandled error');
     return reply
       .code(500)
-      .send({ status: 'error', message: 'Internal server error', requestId: request.id });
+      .send(buildApiError(ApiErrorCode.INTERNAL_ERROR, 'Internal server error', request.id));
   });
 
   await app.register(cors, {
