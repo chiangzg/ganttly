@@ -64,6 +64,8 @@ export interface AppConfig {
   tokenPepper: string;
   /** Parsed, de-duplicated CORS origin list (empty = no origins allowed). */
   allowedWebOrigins: string[];
+  /** Hostnames accepted by the /mcp endpoint (DNS-rebinding defence). */
+  allowedMcpHosts: ReadonlySet<string>;
 
   maxProjectBytes: number;
   maxProjectTasks: number;
@@ -141,6 +143,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
+  // Hostnames the /mcp endpoint will accept (DNS-rebinding defence, spec §13).
+  // Derived from PUBLIC_BASE_URL; dev also allows localhost variants.
+  const publicHost = hostOf(r.PUBLIC_BASE_URL);
+  const allowedMcpHosts = new Set<string>(publicHost ? [publicHost] : []);
+  if (!isProduction) {
+    allowedMcpHosts.add('localhost');
+    allowedMcpHosts.add('127.0.0.1');
+  }
+
   return {
     nodeEnv: r.NODE_ENV,
     port: r.PORT,
@@ -156,6 +167,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionSecret,
     tokenPepper,
     allowedWebOrigins,
+    allowedMcpHosts,
     maxProjectBytes: r.MAX_PROJECT_BYTES,
     maxProjectTasks: r.MAX_PROJECT_TASKS,
     patDefaultTtlDays: r.PAT_DEFAULT_TTL_DAYS,
@@ -174,4 +186,13 @@ export function getConfig(): AppConfig {
 /** Test-only: reset the memoised singleton between cases. */
 export function resetConfigCacheForTests(): void {
   cached = null;
+}
+
+/** Extract the host (without port) from a URL; undefined for invalid input. */
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
 }
