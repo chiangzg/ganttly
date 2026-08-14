@@ -238,6 +238,54 @@ describe('applyProjectCommand — result types', () => {
     expect(res.result).toMatchObject({ kind: 'dependency', added: [DEP] });
   });
 
+  it('addDependency is a no-op for a missing successor (no crash)', () => {
+    const file = makeFile(SNAPSHOTTABLE_TASKS);
+    const res = applyProjectCommand(
+      file,
+      { kind: 'addDependency', successorId: 'does_not_exist', dependency: DEP },
+      CTX,
+    );
+    expect(res.result).toEqual({ kind: 'dependency', added: [] });
+    expect(res.file).toBe(file); // untouched
+  });
+
+  it('addDependency is a no-op when the edge would create a cycle', () => {
+    // a → b already exists; adding b → a closes the loop.
+    const a = makeTask({
+      id: 'a',
+      name: 'A',
+      dependencies: [{ targetId: 'b', type: 'FS', lag: 0 }],
+    });
+    const b = makeTask({ id: 'b', name: 'B' });
+    const file = makeFile([a, b]);
+    const res = applyProjectCommand(
+      file,
+      {
+        kind: 'addDependency',
+        successorId: 'b',
+        dependency: { targetId: 'a', type: 'FS', lag: 0 },
+      },
+      CTX,
+    );
+    expect(res.result).toEqual({ kind: 'dependency', added: [] });
+    expect(res.file).toBe(file);
+  });
+
+  it('addDependency is a no-op for a self-loop', () => {
+    const file = makeFile(SNAPSHOTTABLE_TASKS);
+    const res = applyProjectCommand(
+      file,
+      {
+        kind: 'addDependency',
+        successorId: 'standalone',
+        dependency: { targetId: 'standalone', type: 'FS', lag: 0 },
+      },
+      CTX,
+    );
+    expect(res.result).toEqual({ kind: 'dependency', added: [] });
+    expect(res.file).toBe(file);
+  });
+
   it('deleteDependency returns dependency result with removed edge', () => {
     const file = makeFile([
       ...SNAPSHOTTABLE_TASKS,

@@ -133,6 +133,24 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
     expect(outcome.results.map((r) => r.task.name)).toEqual(['Batch A', 'Batch B']);
   });
 
+  it('createTasks replays an idempotent batch without duplicating', async () => {
+    const input = {
+      workspaceId: session.workspaceId,
+      projectId,
+      idempotencyKey: 'ct-batch-replay',
+      tasks: [{ name: 'Replay A' }, { name: 'Replay B' }],
+    };
+    const first = await service.createTasks({ ...base(), input });
+    const second = await service.createTasks({ ...base(), input });
+    expect(second.results.map((r) => r.task.name)).toEqual(['Replay A', 'Replay B']);
+    // Replay must return the original snapshot, not create duplicates.
+    const counts = second.snapshot.file.tasks.filter(
+      (t) => t.name === 'Replay A' || t.name === 'Replay B',
+    );
+    expect(counts).toHaveLength(2);
+    expect(second.revision).toBe(first.revision);
+  });
+
   it('updateTask changes a whitelisted field', async () => {
     const created = await service.createTask({
       ...base(),
@@ -266,6 +284,82 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
     });
     const withoutDep = removed.file.tasks.find((t) => t.id === succ.task.id)!;
     expect(withoutDep.dependencies.some((d) => d.targetId === pred.task.id)).toBe(false);
+  });
+
+  it('addDependency rejects a self-loop', async () => {
+    const task = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'SelfLoop',
+        idempotencyKey: 'ct-selfloop',
+      },
+    });
+    await expect(
+      service.addDependency({
+        ...base(),
+        input: {
+          workspaceId: session.workspaceId,
+          projectId,
+          successorTaskId: task.task.id,
+          predecessorTaskId: task.task.id,
+          idempotencyKey: 'ad-selfloop',
+        },
+      }),
+    ).rejects.toThrow(/cycle/i);
+  });
+
+  it('addDependency rejects a cycle across tasks', async () => {
+    const a = await service.createTask({
+      ...base(),
+      input: { workspaceId: session.workspaceId, projectId, name: 'A', idempotencyKey: 'cyc-a' },
+    });
+    const b = await service.createTask({
+      ...base(),
+      input: { workspaceId: session.workspaceId, projectId, name: 'B', idempotencyKey: 'cyc-b' },
+    });
+    await service.addDependency({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        successorTaskId: b.task.id,
+        predecessorTaskId: a.task.id,
+        idempotencyKey: 'cyc-ab',
+      },
+    });
+    await expect(
+      service.addDependency({
+        ...base(),
+        input: {
+          workspaceId: session.workspaceId,
+          projectId,
+          successorTaskId: a.task.id,
+          predecessorTaskId: b.task.id,
+          idempotencyKey: 'cyc-ba',
+        },
+      }),
+    ).rejects.toThrow(/cycle/i);
+  });
+
+  it('addDependency rejects a missing task (NOT_FOUND)', async () => {
+    const task = await service.createTask({
+      ...base(),
+      input: { workspaceId: session.workspaceId, projectId, name: 'X', idempotencyKey: 'cyc-x' },
+    });
+    await expect(
+      service.addDependency({
+        ...base(),
+        input: {
+          workspaceId: session.workspaceId,
+          projectId,
+          successorTaskId: task.task.id,
+          predecessorTaskId: 'task_does_not_exist',
+          idempotencyKey: 'cyc-missing',
+        },
+      }),
+    ).rejects.toThrow(/not found/i);
   });
 
   it('rejects writes from a read-only scope (FORBIDDEN)', async () => {
