@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { GanttlyFile } from '@ganttly/schema';
 import type { ProjectSummary } from '@/data/repository';
-import { localRef } from '@/data/projectRef';
+import type { ProjectRef } from '@/data/projectRef';
 import { buildProjectPath, buildScopePath, buildTrashPath, LOCAL_SCOPE } from '@/lib/routing';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
@@ -63,24 +63,42 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const isRemote = activeScope.instanceId !== 'local';
   const remoteAuthed = !isRemote || Boolean(authByInstance[activeScope.instanceId]);
 
+  // The card grid reflects the active scope, so every ref derived from a
+  // summary must carry that scope — never assume local.
+  const refOf = (projectId: string): ProjectRef => ({
+    instanceId: activeScope.instanceId,
+    workspaceId: activeScope.workspaceId,
+    projectId,
+  });
+
   useEffect(() => {
     if (remoteAuthed) void refresh();
   }, [scopeKey, remoteAuthed]);
 
-  // Pre-compute local-scope lookup sets from the ref-based navigation state.
+  // Pre-compute active-scope lookup sets from the ref-based navigation state.
   const recentRank = useMemo(() => {
     const map = new Map<string, number>();
     navigation.recentProjects.forEach((recent, index) => {
-      if (recent.ref.instanceId === 'local') map.set(recent.ref.projectId, index);
+      if (
+        recent.ref.instanceId === activeScope.instanceId &&
+        recent.ref.workspaceId === activeScope.workspaceId
+      ) {
+        map.set(recent.ref.projectId, index);
+      }
     });
     return map;
-  }, [navigation.recentProjects]);
-  const favoriteLocalIds = useMemo(
+  }, [navigation.recentProjects, activeScope]);
+  const favoriteIds = useMemo(
     () =>
       new Set(
-        navigation.favoriteRefs.filter((r) => r.instanceId === 'local').map((r) => r.projectId),
+        navigation.favoriteRefs
+          .filter(
+            (r) =>
+              r.instanceId === activeScope.instanceId && r.workspaceId === activeScope.workspaceId,
+          )
+          .map((r) => r.projectId),
       ),
-    [navigation.favoriteRefs],
+    [navigation.favoriteRefs, activeScope],
   );
   const shown = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -88,7 +106,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
       .filter((project) => !normalized || project.name.toLocaleLowerCase().includes(normalized))
       .filter((project) =>
         filter === 'favorites'
-          ? favoriteLocalIds.has(project.id)
+          ? favoriteIds.has(project.id)
           : filter === 'recent'
             ? recentRank.has(project.id)
             : true,
@@ -98,7 +116,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
         return (recentRank.get(a.id) ?? 9999) - (recentRank.get(b.id) ?? 9999);
       });
-  }, [filter, favoriteLocalIds, projects, query, recentRank, sort]);
+  }, [filter, favoriteIds, projects, query, recentRank, sort]);
 
   return (
     <div className="min-h-full bg-bg">
@@ -238,17 +256,17 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
                 key={project.id}
                 project={project}
                 trashMode={trashMode}
-                favorite={favoriteLocalIds.has(project.id)}
-                onOpen={() => navigate(buildProjectPath(localRef(project.id)))}
-                onFavorite={() => toggleFavorite(localRef(project.id))}
+                favorite={favoriteIds.has(project.id)}
+                onOpen={() => navigate(buildProjectPath(refOf(project.id)))}
+                onFavorite={() => toggleFavorite(refOf(project.id))}
                 onRename={() => setRenameTarget(project)}
                 onDuplicate={() =>
-                  void duplicateProject(localRef(project.id)).then((ref) =>
+                  void duplicateProject(refOf(project.id)).then((ref) =>
                     navigate(buildProjectPath(ref)),
                   )
                 }
                 onTrash={() => setTrashTarget(project)}
-                onRestore={() => void restoreProject(localRef(project.id))}
+                onRestore={() => void restoreProject(refOf(project.id))}
                 onDelete={() => setDeleteTarget(project)}
                 onCopyToRemote={!isRemote ? () => setCopyTarget(project) : undefined}
               />
@@ -272,7 +290,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         initialValue={renameTarget?.name ?? ''}
         submitLabel="保存"
         onSubmit={async (name) => {
-          if (renameTarget) await renameProject(localRef(renameTarget.id), name);
+          if (renameTarget) await renameProject(refOf(renameTarget.id), name);
         }}
       />
       <ConfirmDialog
@@ -283,7 +301,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         confirmLabel="移入回收站"
         danger
         onConfirm={async () => {
-          if (trashTarget) await moveToTrash(localRef(trashTarget.id));
+          if (trashTarget) await moveToTrash(refOf(trashTarget.id));
         }}
       />
       <ConfirmDialog
@@ -294,7 +312,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
         confirmLabel="永久删除"
         danger
         onConfirm={async () => {
-          if (deleteTarget) await deletePermanently(localRef(deleteTarget.id));
+          if (deleteTarget) await deletePermanently(refOf(deleteTarget.id));
         }}
       />
       {copyTarget ? (

@@ -23,8 +23,9 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { useProjectStore } from '@/store/useProjectStore';
+import { useScopeStore } from '@/store/useScopeStore';
 import type { ProjectSummary } from '@/data/repository';
-import { localRef, refEqual, type ProjectRef } from '@/data/projectRef';
+import { refEqual, refKey, type ProjectRef } from '@/data/projectRef';
 import { buildProjectPath, buildScopePath, LOCAL_SCOPE } from '@/lib/routing';
 import { ConfirmDialog, CreateProjectDialog, ProjectNameDialog } from './ProjectDialogs';
 
@@ -51,6 +52,7 @@ export function ProjectHeader() {
   const [draggedTab, setDraggedTab] = useState<ProjectRef | null>(null);
 
   const activeProjectId = activeProjectRef?.projectId ?? null;
+  const activeScope = useScopeStore((state) => state.activeScope);
   const activeSummary = projects.find((project) => project.id === activeProjectId);
   const tabs = navigation.openTabs
     .map((tab) => ({
@@ -67,9 +69,19 @@ export function ProjectHeader() {
     ? navigation.openTabs.some((tab) => refEqual(tab.ref, activeProjectRef) && tab.pinned)
     : false;
 
-  const goToProject = (id: string) => {
+  // Tabs can point at any instance (navigation is global); navigating must
+  // carry the full ref, never assume the local scope.
+  const goToProject = (ref: ProjectRef) => {
     setSwitcherOpen(false);
-    navigate(buildProjectPath(localRef(id)));
+    navigate(buildProjectPath(ref));
+  };
+  // Switcher lists the active catalog; resolve its ids against the active scope.
+  const goToCatalogProject = (id: string) => {
+    goToProject({
+      instanceId: activeScope.instanceId,
+      workspaceId: activeScope.workspaceId,
+      projectId: id,
+    });
   };
 
   const handleCloseTab = (ref: ProjectRef) => {
@@ -122,12 +134,20 @@ export function ProjectHeader() {
                 projects={projects}
                 activeProjectId={activeProjectId}
                 favorites={navigation.favoriteRefs
-                  .filter((r) => r.instanceId === 'local')
+                  .filter(
+                    (r) =>
+                      r.instanceId === activeScope.instanceId &&
+                      r.workspaceId === activeScope.workspaceId,
+                  )
                   .map((r) => r.projectId)}
                 recentIds={navigation.recentProjects
-                  .filter((r) => r.ref.instanceId === 'local')
+                  .filter(
+                    (r) =>
+                      r.ref.instanceId === activeScope.instanceId &&
+                      r.ref.workspaceId === activeScope.workspaceId,
+                  )
                   .map((r) => r.ref.projectId)}
-                onOpenProject={goToProject}
+                onOpenProject={goToCatalogProject}
                 onCreate={() => {
                   setSwitcherOpen(false);
                   setCreateOpen(true);
@@ -145,7 +165,7 @@ export function ProjectHeader() {
         <div className="hidden min-w-0 flex-1 items-center gap-0.5 overflow-hidden pl-1 md:flex">
           {visibleTabs.map((tab) => (
             <div
-              key={tab.ref.projectId}
+              key={refKey(tab.ref)}
               draggable
               onDragStart={() => setDraggedTab(tab.ref)}
               onDragEnd={() => setDraggedTab(null)}
@@ -156,7 +176,7 @@ export function ProjectHeader() {
               }}
               className={cn(
                 'group relative flex h-8 max-w-[180px] shrink-0 items-center gap-1 rounded-lg px-2 transition',
-                tab.ref.projectId === activeProjectId
+                activeProjectRef && refEqual(tab.ref, activeProjectRef)
                   ? 'bg-primary/10 text-fg after:absolute after:-bottom-2 after:inset-x-2 after:h-0.5 after:rounded-full after:bg-primary'
                   : 'text-fg-muted hover:bg-bg hover:text-fg',
                 draggedTab && refEqual(draggedTab, tab.ref) && 'opacity-50',
@@ -166,7 +186,7 @@ export function ProjectHeader() {
               <button
                 type="button"
                 className="min-w-0 flex-1 truncate rounded text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                onClick={() => goToProject(tab.ref.projectId)}
+                onClick={() => goToProject(tab.ref)}
                 title={tab.project.name}
               >
                 {tab.project.name}
@@ -177,7 +197,7 @@ export function ProjectHeader() {
                   onClick={() => handleCloseTab(tab.ref)}
                   className={cn(
                     'rounded p-0.5 outline-none transition hover:bg-border/60 focus-visible:ring-2 focus-visible:ring-primary/35',
-                    tab.ref.projectId === activeProjectId
+                    activeProjectRef && refEqual(tab.ref, activeProjectRef)
                       ? 'opacity-60 hover:opacity-100'
                       : 'opacity-0 group-hover:opacity-60 group-focus-within:opacity-60 hover:opacity-100',
                   )}
@@ -199,8 +219,8 @@ export function ProjectHeader() {
                 <DropdownMenu.Content className="z-40 min-w-48 rounded-xl border border-border bg-bg-elevated p-1 shadow-xl">
                   {overflowTabs.map((tab) => (
                     <DropdownMenu.Item
-                      key={tab.ref.projectId}
-                      onSelect={() => goToProject(tab.ref.projectId)}
+                      key={refKey(tab.ref)}
+                      onSelect={() => goToProject(tab.ref)}
                       className="cursor-pointer rounded-lg px-3 py-2 text-sm text-fg outline-none hover:bg-bg focus:bg-bg"
                     >
                       {tab.project.name}

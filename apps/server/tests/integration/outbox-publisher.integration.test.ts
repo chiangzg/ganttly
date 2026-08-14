@@ -132,7 +132,10 @@ describe.skipIf(!dbUrl)('Outbox publisher integration', () => {
 
     const stats = await publisher.collectBacklog();
     expect(stats.unpublished).toBeGreaterThanOrEqual(2);
-    expect(stats.oldestAgeSeconds).toBeGreaterThanOrEqual(0);
+    // Freshly-emitted rows must have a near-zero age. `now()` is the Postgres
+    // clock while `createdAt` is written from the app server clock, so allow a
+    // small skew instead of asserting a strict non-negative value.
+    expect(Math.abs(stats.oldestAgeSeconds)).toBeLessThan(60);
 
     publisher.stop();
     bus.close();

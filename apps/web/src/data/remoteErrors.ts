@@ -129,6 +129,7 @@ const ERROR_CLASSES: Record<ApiErrorCode, typeof RemoteError> = {
   LIMIT_EXCEEDED: LimitExceededError,
   RATE_LIMITED: RemoteError,
   UNSUPPORTED_CLIENT: UnsupportedClientError,
+  INTERNAL_ERROR: RemoteError,
 };
 
 /**

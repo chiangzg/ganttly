@@ -48,9 +48,17 @@ export interface DevSession {
   workspaceId: string;
 }
 
-/** Authenticate via the dev-session endpoint and return the session cookie. */
-export async function devLogin(app: FastifyInstance): Promise<DevSession> {
-  const res = await app.inject({ method: 'POST', url: '/api/v1/auth/dev-session' });
+/**
+ * Authenticate via the dev-session endpoint and return the session cookie.
+ * Pass a distinct `subject` to provision a *different* dev user (the default
+ * subject is fixed, so repeated calls with no argument return the same user).
+ */
+export async function devLogin(app: FastifyInstance, subject = 'dev-user'): Promise<DevSession> {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/dev-session',
+    payload: { subject },
+  });
   if (res.statusCode !== 200) {
     throw new Error(`dev-session failed (${res.statusCode}): ${res.body}`);
   }

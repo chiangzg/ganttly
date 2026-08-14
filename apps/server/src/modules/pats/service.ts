@@ -10,9 +10,11 @@ import { and, desc, eq } from 'drizzle-orm';
 import { type CreatePatRequest, type PatSummary } from '@ganttly/api-contract';
 import { newPersonalAccessTokenId } from '../../id';
 import type { Db } from '../../db/client';
-import { personalAccessTokens } from '../../db/schema';
+import { personalAccessTokens, projects } from '../../db/schema';
 import { generatePatToken, hashToken } from '../../auth/pat';
+import { webPrincipal } from '../../auth/principal';
 import { ApiErrorCode } from '@ganttly/api-contract';
+import { requireMembership } from '../access';
 import { HttpError } from '../errors';
 
 /** Row shape read back from the table, projected onto {@link PatSummary}. */
@@ -54,12 +56,37 @@ export class PatApplicationService {
   /**
    * Mint a new PAT. The plaintext token is returned in the result and is the
    * only time it is available; the stored row carries only its prefix + hash.
+   *
+   * Narrowing fields are validated against the caller's own memberships (spec
+   * §8.3): a token may only be narrowed to a workspace/project the caller can
+   * already access. Violations throw NOT_FOUND — same response a non-member
+   * gets — so foreign workspaces/projects are not leaked (spec §16.2).
    */
   async createPat(
     userId: string,
     params: CreatePatRequest,
     defaultTtlDays: number,
   ): Promise<{ token: string; pat: PatSummary }> {
+    if (params.projectId !== undefined) {
+      const rows = await this.db
+        .select({ workspaceId: projects.workspaceId, deletedAt: projects.deletedAt })
+        .from(projects)
+        .where(eq(projects.id, params.projectId))
+        .limit(1);
+      const project = rows[0];
+      if (!project || project.deletedAt !== null) {
+        throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
+      }
+      if (params.workspaceId !== undefined && project.workspaceId !== params.workspaceId) {
+        throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
+      }
+      // Membership against the project's real workspace (covers the
+      // projectId-without-workspaceId form too).
+      await requireMembership(this.db, webPrincipal(userId), project.workspaceId);
+    } else if (params.workspaceId !== undefined) {
+      await requireMembership(this.db, webPrincipal(userId), params.workspaceId);
+    }
+
     const { token, prefix } = generatePatToken();
     const tokenHash = hashToken(token, this.pepper);
     const now = new Date();

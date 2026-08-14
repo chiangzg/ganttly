@@ -148,7 +148,8 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
   },
 
   async renameProject(ref, name) {
-    const repo = requireRepository(get().repo);
+    const repo = resolveRepoForRef(ref);
+    if (!repo) throw new Error('工作区未登录或不可用');
     const projectName = normalizeProjectName(name);
     const active = useProjectStore.getState();
     if (active.activeProjectRef && refEqual(active.activeProjectRef, ref)) {
@@ -168,7 +169,8 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
   },
 
   async duplicateProject(ref) {
-    const repo = requireRepository(get().repo);
+    const repo = resolveRepoForRef(ref);
+    if (!repo) throw new Error('工作区未登录或不可用');
     if (activeRefEquals(ref)) {
       await useProjectStore.getState().flushPendingSave();
     }
@@ -178,31 +180,43 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
   },
 
   async moveToTrash(ref) {
-    const repo = requireRepository(get().repo);
+    const repo = resolveRepoForRef(ref);
+    if (!repo) throw new Error('工作区未登录或不可用');
     const activeStore = useProjectStore.getState();
     if (activeRefEquals(ref)) await activeStore.flushPendingSave();
     await repo.moveToTrash(ref.projectId);
     const navigation = removeProjectFromNavigation(get().navigation, ref);
     const remaining = get().projects.filter((project) => project.id !== ref.projectId);
-    const nextRef = navigation.openTabs.at(-1)?.ref ?? localRefFromSummary(remaining[0]) ?? null;
+    const nextRef = navigation.openTabs.at(-1)?.ref ?? summaryRef(remaining[0]) ?? null;
     if (activeRefEquals(ref)) activeStore.unloadProject();
     set({ navigation });
-    await Promise.all([persistNavigation(repo, navigation, set), get().refresh()]);
+    // Navigation state always persists to the local repo, whatever the scope.
+    const navRepo = get().repo;
+    await Promise.all([
+      navRepo ? persistNavigation(navRepo, navigation, set) : Promise.resolve(),
+      get().refresh(),
+    ]);
     return nextRef;
   },
 
   async restoreProject(ref) {
-    const repo = requireRepository(get().repo);
+    const repo = resolveRepoForRef(ref);
+    if (!repo) throw new Error('工作区未登录或不可用');
     await repo.restoreProject(ref.projectId);
     await get().refresh();
   },
 
   async deleteProjectPermanently(ref) {
-    const repo = requireRepository(get().repo);
+    const repo = resolveRepoForRef(ref);
+    if (!repo) throw new Error('工作区未登录或不可用');
     await repo.deleteProjectPermanently(ref.projectId);
     const navigation = removeProjectFromNavigation(get().navigation, ref);
     set({ navigation });
-    await Promise.all([persistNavigation(repo, navigation, set), get().refresh()]);
+    const navRepo = get().repo;
+    await Promise.all([
+      navRepo ? persistNavigation(navRepo, navigation, set) : Promise.resolve(),
+      get().refresh(),
+    ]);
   },
 
   toggleFavorite(ref) {
@@ -241,7 +255,7 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
     const nextRef =
       activeRef && refEqual(activeRef, ref)
         ? (tabs.at(-1)?.ref ??
-          localRefFromSummary(get().projects.find((p) => p.id !== ref.projectId)) ??
+          summaryRef(get().projects.find((p) => p.id !== ref.projectId)) ??
           null)
         : activeRef;
     set({ navigation });
@@ -295,6 +309,20 @@ function requireRepository(repo: DataRepository | null): DataRepository {
 }
 
 /**
+ * Resolve the {@link ProjectRepository} for an arbitrary ref: the injected
+ * local DataRepository for local refs, or a cached RemoteRepository for the
+ * ref's instance + authenticated user. Returns null when the remote instance
+ * is not yet authenticated.
+ */
+function resolveRepoForRef(ref: ProjectRef): ProjectRepository | null {
+  if (isLocalRef(ref)) return useProjectCatalogStore.getState().repo;
+  const instance = useInstanceStore.getState().findInstance(ref.instanceId);
+  const profile = useAuthStore.getState().getProfile(ref.instanceId);
+  if (!instance || !profile) return null;
+  return resolveProjectRepository(ref, { instance, userId: profile.userId });
+}
+
+/**
  * Resolve the {@link ProjectRepository} for the currently active scope.
  * Local scope → the injected local DataRepository. Remote scope → a cached
  * RemoteRepository built from the instance config + authenticated user.
@@ -302,14 +330,11 @@ function requireRepository(repo: DataRepository | null): DataRepository {
  */
 function resolveScopeRepo(): ProjectRepository | null {
   const scope = useScopeStore.getState().activeScope;
-  if (scope.instanceId === 'local') return useProjectCatalogStore.getState().repo;
-  const instance = useInstanceStore.getState().findInstance(scope.instanceId);
-  const profile = useAuthStore.getState().getProfile(scope.instanceId);
-  if (!instance || !profile) return null;
-  return resolveProjectRepository(
-    { instanceId: scope.instanceId, workspaceId: scope.workspaceId, projectId: '' },
-    { instance, userId: profile.userId },
-  );
+  return resolveRepoForRef({
+    instanceId: scope.instanceId,
+    workspaceId: scope.workspaceId,
+    projectId: '',
+  });
 }
 
 /** True when the given ref matches the project store's active ref. */
@@ -322,6 +347,13 @@ function activeRefEquals(ref: ProjectRef): boolean {
 function localRefFromSummary(summary: ProjectSummary | undefined): ProjectRef | null {
   if (!summary) return null;
   return { instanceId: 'local', workspaceId: 'local', projectId: summary.id };
+}
+
+/** Build a ProjectRef for a summary in the *active* scope (null-safe). */
+function summaryRef(summary: ProjectSummary | undefined): ProjectRef | null {
+  if (!summary) return null;
+  const scope = useScopeStore.getState().activeScope;
+  return { instanceId: scope.instanceId, workspaceId: scope.workspaceId, projectId: summary.id };
 }
 
 function touchProject(state: ProjectNavigationState, ref: ProjectRef): ProjectNavigationState {

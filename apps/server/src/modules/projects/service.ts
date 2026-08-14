@@ -34,7 +34,7 @@ import {
   normalizeFile,
   validateGanttlyFile,
 } from '@ganttly/schema';
-import { applyProjectCommand, type ProjectCommand } from '@ganttly/domain';
+import { applyProjectCommand, wouldCreateCycle, type ProjectCommand } from '@ganttly/domain';
 import { type AuthPrincipal, operationActorType } from '../../auth/principal';
 import type { Db, Tx } from '../../db/client';
 import { outboxEvents, projectOperations, projects } from '../../db/schema';
@@ -172,7 +172,7 @@ export class ProjectApplicationService {
   async saveDocument(params: SaveProjectParams): Promise<ProjectSnapshotResponse> {
     const requestHash = canonicalRequestHash(params.file);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'editor');
+      await requireMembership(tx, params.principal, params.workspaceId, 'editor', params.projectId);
       const replayed = await this.tryReplay(
         tx,
         params.principal,
@@ -266,7 +266,7 @@ export class ProjectApplicationService {
     requireScope(principal, 'task:write');
     const requestHash = canonicalRequestHash(input);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, principal, workspaceId, 'editor');
+      await requireMembership(tx, principal, workspaceId, 'editor', projectId);
       const replayed = await this.tryReplay(
         tx,
         principal,
@@ -376,8 +376,16 @@ export class ProjectApplicationService {
     return this.db.transaction(async (tx) => {
       const { principal, workspaceId, projectId, input, requestId } = params;
       requireScope(principal, 'task:write');
-      await requireMembership(tx, principal, workspaceId, 'editor');
+      await requireMembership(tx, principal, workspaceId, 'editor', projectId);
       const requestHash = canonicalRequestHash(input);
+      const replayed = await this.tryReplay(
+        tx,
+        principal,
+        workspaceId,
+        input.idempotencyKey,
+        requestHash,
+      );
+      if (replayed) return replayed as CreateTasksOutcome;
 
       const row = await lockProject(tx, workspaceId, projectId);
       const ctx = commandContext(principal);
@@ -554,6 +562,19 @@ export class ProjectApplicationService {
       action: 'add_dependency',
       requestHash: canonicalRequestHash(input),
       apply: (current, ctx) => {
+        const successor = current.tasks.find((t) => t.id === input.successorTaskId);
+        if (!successor) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Task not found');
+        if (!current.tasks.some((t) => t.id === input.predecessorTaskId)) {
+          throw new HttpError(ApiErrorCode.NOT_FOUND, 'Task not found');
+        }
+        if (
+          wouldCreateCycle(current.tasks, {
+            successorId: input.successorTaskId,
+            predecessorId: input.predecessorTaskId,
+          })
+        ) {
+          throw new HttpError(ApiErrorCode.VALIDATION_FAILED, 'Dependency would create a cycle');
+        }
         const dependency: Dependency = {
           targetId: input.predecessorTaskId,
           type: (input.type ?? 'FS') as DependencyType,
@@ -629,7 +650,7 @@ export class ProjectApplicationService {
     };
   }): Promise<ApplyCommandResponse> {
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, opts.principal, opts.workspaceId, 'editor');
+      await requireMembership(tx, opts.principal, opts.workspaceId, 'editor', opts.projectId);
       const replayed = await this.tryReplay(
         tx,
         opts.principal,
@@ -718,7 +739,7 @@ export class ProjectApplicationService {
   ): Promise<ProjectSnapshotResponse> {
     const requestHash = canonicalRequestHash(null);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'editor');
+      await requireMembership(tx, params.principal, params.workspaceId, 'editor', params.projectId);
       const replayed = await this.tryReplay(
         tx,
         params.principal,
@@ -764,7 +785,7 @@ export class ProjectApplicationService {
   // --- permanent delete (owner only, must be archived) ----------------------
   async deletePermanently(params: ProjectMutationParams): Promise<void> {
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'owner');
+      await requireMembership(tx, params.principal, params.workspaceId, 'owner', params.projectId);
       const locked = await tx
         .select()
         .from(projects)

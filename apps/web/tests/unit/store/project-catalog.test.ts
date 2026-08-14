@@ -101,3 +101,60 @@ function makeTask(id: string): Task {
     customFields: {},
   };
 }
+
+describe('remote ref handling (scope-aware resolution)', () => {
+  const REMOTE = { instanceId: 'inst_x', workspaceId: 'ws_1', projectId: 'prj_1' };
+
+  it('renameProject on a remote ref fails cleanly when not authenticated', async () => {
+    // No instance/auth registered → repository resolution must fail with the
+    // standard message instead of falling back to the local IndexedDB repo.
+    await expect(
+      useProjectCatalogStore.getState().renameProject(REMOTE, 'New name'),
+    ).rejects.toThrow('工作区未登录或不可用');
+  });
+
+  it('moveToTrash on a remote ref fails cleanly when not authenticated', async () => {
+    await expect(useProjectCatalogStore.getState().moveToTrash(REMOTE)).rejects.toThrow(
+      '工作区未登录或不可用',
+    );
+    // The local repo must not have been touched.
+    expect(await repo.listProjects({ includeDeleted: true })).toHaveLength(0);
+  });
+
+  it('closeTab falls back to a ref in the active (remote) scope, not local', async () => {
+    const { useScopeStore } = await import('@/store/useScopeStore');
+    useScopeStore.setState({ activeScope: { instanceId: 'inst_x', workspaceId: 'ws_1' } });
+    useProjectCatalogStore.setState({
+      projects: [
+        {
+          id: 'prj_1',
+          name: 'R1',
+          taskCount: 0,
+          completedTaskCount: 0,
+          progress: 0,
+          createdAt: '',
+          updatedAt: '',
+          deletedAt: null,
+        },
+        {
+          id: 'prj_2',
+          name: 'R2',
+          taskCount: 0,
+          completedTaskCount: 0,
+          progress: 0,
+          createdAt: '',
+          updatedAt: '',
+          deletedAt: null,
+        },
+      ],
+    });
+    const remoteTab = { instanceId: 'inst_x', workspaceId: 'ws_1', projectId: 'prj_1' };
+    useProjectCatalogStore.getState().togglePinned(remoteTab);
+    useProjectStore.setState({ activeProjectRef: remoteTab });
+
+    const next = useProjectCatalogStore.getState().closeTab(remoteTab);
+    // Falls back to the other project in the same remote scope — never a
+    // local ref wrapping a remote id.
+    expect(next).toEqual({ instanceId: 'inst_x', workspaceId: 'ws_1', projectId: 'prj_2' });
+  });
+});

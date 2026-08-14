@@ -67,6 +67,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         authorization: bearer,
         host: 'localhost:3001',
         'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
       },
       payload: { jsonrpc: '2.0', id, method, params },
     });
@@ -77,7 +78,11 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/mcp',
-      headers: { host: 'localhost:3001', 'content-type': 'application/json' },
+      headers: {
+        host: 'localhost:3001',
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
       payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
     });
     expect(res.statusCode).toBe(401);
@@ -92,6 +97,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         authorization: bearer,
         host: 'evil.example.com',
         'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
       },
       payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
     });
@@ -159,6 +165,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         authorization: roBearer,
         host: 'localhost:3001',
         'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
       },
       payload: {
         jsonrpc: '2.0',

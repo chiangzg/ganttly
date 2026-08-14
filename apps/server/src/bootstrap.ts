@@ -10,6 +10,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { existsSync, readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AppConfig } from './config';
 import type { GitHubOAuthDeps } from './auth/github';
@@ -39,16 +40,24 @@ declare module 'fastify' {
 }
 
 /**
- * Count the `*.sql` files shipped under `apps/server/drizzle`. Resolved relative
- * to this module so it holds for both the tsx-run source (`src/bootstrap.ts`)
- * and the esbuild bundle (single `dist/server.js`, same parent dir → same
- * `../drizzle`). Decorated onto the instance for the `/health/ready` check.
+ * Count the migration SQL files shipped with this build (spec §14.2 health
+ * check). In the Docker image the SQL lives at `/app/drizzle` (`MIGRATIONS_FOLDER`,
+ * the same override `db/migrate.ts` uses); elsewhere it sits next to the source
+ * (dev/tsx) or the bundle (`../drizzle` relative to `dist/server.js`). A read
+ * failure degrades the readiness check to "no migrations required" but is
+ * logged so a broken image layout is visible in the container logs.
  */
-function countShippedMigrations(): number {
-  const drizzleDir = fileURLToPath(new URL('../drizzle', import.meta.url));
+function countShippedMigrations(log?: FastifyInstance['log']): number {
+  const folder = process.env.MIGRATIONS_FOLDER
+    ? resolve(process.env.MIGRATIONS_FOLDER)
+    : fileURLToPath(new URL('../drizzle', import.meta.url));
   try {
-    return readdirSync(drizzleDir).filter((f) => f.endsWith('.sql')).length;
-  } catch {
+    return readdirSync(folder).filter((f) => f.endsWith('.sql')).length;
+  } catch (err) {
+    log?.error(
+      { err, folder },
+      'cannot read migrations folder; /health/ready migration check degraded',
+    );
     return 0;
   }
 }
@@ -85,24 +94,36 @@ export async function buildServer(
   });
 
   // Map domain HttpErrors onto the shared ApiErrorResponse body; the rate
-  // limiter throws a 429 (Retry-After already set by the plugin); anything else
-  // is an unexpected failure logged as a 500 with a plain body.
+  // limiter throws a 429 (Retry-After already set by the plugin); Fastify-level
+  // client errors (malformed JSON 400, body over the limit 413, unsupported
+  // content type 415) keep their 4xx class and map onto the contract instead
+  // of collapsing into a 500; anything else is an unexpected failure logged as
+  // a 500 with the contract envelope.
   app.setErrorHandler(async (err, request, reply) => {
     if (err instanceof HttpError) {
       return reply
         .code(errorCodeToStatus[err.code])
         .send(buildApiError(err.code, err.message, request.id, err.details));
     }
-    if (err instanceof Error && (err as { statusCode?: number }).statusCode === 429) {
+    const statusCode =
+      err instanceof Error ? (err as { statusCode?: number }).statusCode : undefined;
+    if (statusCode === 429) {
       metrics.rateLimitedTotal.inc();
       return reply
         .code(429)
         .send(buildApiError(ApiErrorCode.RATE_LIMITED, 'Rate limit exceeded', request.id));
     }
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+      const code =
+        statusCode === 413 ? ApiErrorCode.LIMIT_EXCEEDED : ApiErrorCode.VALIDATION_FAILED;
+      const status = statusCode === 400 || statusCode === 415 ? 422 : statusCode;
+      const message = err instanceof Error ? err.message : 'Invalid request';
+      return reply.code(status).send(buildApiError(code, message, request.id));
+    }
     request.log.error({ err }, 'unhandled error');
     return reply
       .code(500)
-      .send({ status: 'error', message: 'Internal server error', requestId: request.id });
+      .send(buildApiError(ApiErrorCode.INTERNAL_ERROR, 'Internal server error', request.id));
   });
 
   await app.register(cors, {
@@ -198,7 +219,7 @@ export async function buildServer(
 
   // Expose the shipped migration count so /health/ready can detect a DB that
   // has not yet been migrated up to the image's version.
-  app.decorate('expectedMigrationCount', countShippedMigrations());
+  app.decorate('expectedMigrationCount', countShippedMigrations(app.log));
 
   // Same-origin Web hosting (spec §14.2). Registered LAST so the API/MCP/health/
   // discovery/metrics routes win over its wildcard; the plugin's not-found

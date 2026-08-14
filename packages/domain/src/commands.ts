@@ -31,7 +31,12 @@ import type {
 import { getCalendar } from '@ganttly/calendar-data';
 import { resolveCalendar } from './calendar';
 import { computeCascadeRollup, recomputeSelfAndAncestors } from './summary';
-import { cascadeSchedule, satisfyConstraint, satisfyDependency } from './schedule';
+import {
+  cascadeSchedule,
+  satisfyConstraint,
+  satisfyDependency,
+  wouldCreateCycle,
+} from './schedule';
 
 const getHolidays = (region: string): Holiday[] => getCalendar(region).holidays;
 export { getHolidays };
@@ -379,17 +384,22 @@ function applyAddDependency(
   const captured = new Map<string, Partial<Task>>();
   const { successorId, dependency: dep } = cmd;
 
+  // Defensive guards: the server's command endpoint accepts arbitrary command
+  // payloads, so a stale/malformed edge must not crash (missing successor) or
+  // persist a corrupt graph (cycle, including a self-loop). Return a no-op
+  // result in both cases — consistent with the other missing-task commands.
+  const successorTask = file.tasks.find((t) => t.id === successorId);
+  if (!successorTask) return ok(file, { kind: 'dependency', added: [] });
+  if (wouldCreateCycle(file.tasks, { successorId, predecessorId: dep.targetId })) {
+    return ok(file, { kind: 'dependency', added: [] });
+  }
+
   // 1. Add the dependency edge.
   let tasks = applyPatchAndCapture(
     file.tasks,
     successorId,
     {
-      dependencies: [
-        ...file.tasks
-          .find((t) => t.id === successorId)!
-          .dependencies.filter((d) => d.targetId !== dep.targetId),
-        dep,
-      ],
+      dependencies: [...successorTask.dependencies.filter((d) => d.targetId !== dep.targetId), dep],
     },
     captured,
   );

@@ -21,6 +21,7 @@ import {
   localProjectRef,
   refFromParams,
 } from './lib/routing';
+import { isLocalRef } from './data/projectRef';
 import { useProjectCatalogStore } from './store/useProjectCatalogStore';
 import { useProjectStore } from './store/useProjectStore';
 import { useInstanceStore } from './store/useInstanceStore';
@@ -215,7 +216,14 @@ function ProjectEditorRoute() {
   }
   if (!ref) return <Navigate to={buildScopePath(LOCAL_SCOPE)} replace />;
   const projectId = ref.projectId;
-  const trashedProject = trash.find((project) => project.id === projectId);
+  // The catalog list/trash reflect the *active* scope (usually local on a
+  // fresh load). For remote deep links they are irrelevant — and checking a
+  // local id against them could hide a valid remote project or let a local
+  // trashed project hijack a remote view — so gate both checks to local refs
+  // and rely on `loadState` for remote refs.
+  const trashedProject = isLocalRef(ref)
+    ? trash.find((project) => project.id === projectId)
+    : undefined;
   if (trashedProject) {
     return (
       <MessagePage
@@ -233,7 +241,9 @@ function ProjectEditorRoute() {
       />
     );
   }
-  const exists = projects.some((project) => project.id === projectId);
+  // Remote existence is answered by loadProject/loadState, not the (possibly
+  // local-scoped) catalog list.
+  const exists = isLocalRef(ref) ? projects.some((project) => project.id === projectId) : true;
   if (attemptedRef === refKey && (!exists || loadState === 'missing')) {
     return <MessagePage title="项目不存在" message="该项目可能已经被删除或链接无效。" />;
   }

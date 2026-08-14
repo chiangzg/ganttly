@@ -20,6 +20,7 @@ export const ApiErrorCode = {
   LIMIT_EXCEEDED: 'LIMIT_EXCEEDED',
   RATE_LIMITED: 'RATE_LIMITED',
   UNSUPPORTED_CLIENT: 'UNSUPPORTED_CLIENT',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
 
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
@@ -43,7 +44,7 @@ export interface ApiErrorResponse {
  * Stable HTTP status mapping (spec §9.1):
  * auth 401 · forbidden 403 · not-found 404 · validation 422 ·
  * idempotency-conflict 409 · revision-conflict 412 · size-limit 413 ·
- * rate-limited 429 · unsupported-client 426.
+ * rate-limited 429 · unsupported-client 426 · internal 500.
  */
 export const errorCodeToStatus: Record<ApiErrorCode, number> = {
   AUTH_REQUIRED: 401,
@@ -55,6 +56,7 @@ export const errorCodeToStatus: Record<ApiErrorCode, number> = {
   LIMIT_EXCEEDED: 413,
   RATE_LIMITED: 429,
   UNSUPPORTED_CLIENT: 426,
+  INTERNAL_ERROR: 500,
 };
 
 /**

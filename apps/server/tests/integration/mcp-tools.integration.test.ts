@@ -11,7 +11,13 @@ import { createEmptyFile } from '@ganttly/schema';
 import type { AuthPrincipal } from '../../src/auth/principal';
 import type { ProjectLimits } from '../../src/modules/projects/service';
 import { ProjectApplicationService } from '../../src/modules/projects/service';
-import { outboxEvents, projectOperations, projects, externalReferences } from '../../src/db/schema';
+import {
+  outboxEvents,
+  projectOperations,
+  projects,
+  externalReferences,
+  workspaceMembers,
+} from '../../src/db/schema';
 import { buildIntegrationServer, devLogin, type DevSession } from './helpers';
 
 const dbUrl = process.env.TEST_DATABASE_URL;
@@ -125,6 +131,24 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
     expect(outcome.results).toHaveLength(2);
     expect(outcome.results.every((r) => r.created)).toBe(true);
     expect(outcome.results.map((r) => r.task.name)).toEqual(['Batch A', 'Batch B']);
+  });
+
+  it('createTasks replays an idempotent batch without duplicating', async () => {
+    const input = {
+      workspaceId: session.workspaceId,
+      projectId,
+      idempotencyKey: 'ct-batch-replay',
+      tasks: [{ name: 'Replay A' }, { name: 'Replay B' }],
+    };
+    const first = await service.createTasks({ ...base(), input });
+    const second = await service.createTasks({ ...base(), input });
+    expect(second.results.map((r) => r.task.name)).toEqual(['Replay A', 'Replay B']);
+    // Replay must return the original snapshot, not create duplicates.
+    const counts = second.snapshot.file.tasks.filter(
+      (t) => t.name === 'Replay A' || t.name === 'Replay B',
+    );
+    expect(counts).toHaveLength(2);
+    expect(second.revision).toBe(first.revision);
   });
 
   it('updateTask changes a whitelisted field', async () => {
@@ -262,6 +286,82 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
     expect(withoutDep.dependencies.some((d) => d.targetId === pred.task.id)).toBe(false);
   });
 
+  it('addDependency rejects a self-loop', async () => {
+    const task = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'SelfLoop',
+        idempotencyKey: 'ct-selfloop',
+      },
+    });
+    await expect(
+      service.addDependency({
+        ...base(),
+        input: {
+          workspaceId: session.workspaceId,
+          projectId,
+          successorTaskId: task.task.id,
+          predecessorTaskId: task.task.id,
+          idempotencyKey: 'ad-selfloop',
+        },
+      }),
+    ).rejects.toThrow(/cycle/i);
+  });
+
+  it('addDependency rejects a cycle across tasks', async () => {
+    const a = await service.createTask({
+      ...base(),
+      input: { workspaceId: session.workspaceId, projectId, name: 'A', idempotencyKey: 'cyc-a' },
+    });
+    const b = await service.createTask({
+      ...base(),
+      input: { workspaceId: session.workspaceId, projectId, name: 'B', idempotencyKey: 'cyc-b' },
+    });
+    await service.addDependency({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        successorTaskId: b.task.id,
+        predecessorTaskId: a.task.id,
+        idempotencyKey: 'cyc-ab',
+      },
+    });
+    await expect(
+      service.addDependency({
+        ...base(),
+        input: {
+          workspaceId: session.workspaceId,
+          projectId,
+          successorTaskId: a.task.id,
+          predecessorTaskId: b.task.id,
+          idempotencyKey: 'cyc-ba',
+        },
+      }),
+    ).rejects.toThrow(/cycle/i);
+  });
+
+  it('addDependency rejects a missing task (NOT_FOUND)', async () => {
+    const task = await service.createTask({
+      ...base(),
+      input: { workspaceId: session.workspaceId, projectId, name: 'X', idempotencyKey: 'cyc-x' },
+    });
+    await expect(
+      service.addDependency({
+        ...base(),
+        input: {
+          workspaceId: session.workspaceId,
+          projectId,
+          successorTaskId: task.task.id,
+          predecessorTaskId: 'task_does_not_exist',
+          idempotencyKey: 'cyc-missing',
+        },
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+
   it('rejects writes from a read-only scope (FORBIDDEN)', async () => {
     await expect(
       service.createTask({
@@ -278,7 +378,7 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
   });
 
   it('rejects writes from a non-member (NOT_FOUND, no existence leak)', async () => {
-    const other = await devLogin(app); // different user/workspace
+    const other = await devLogin(app, 'dev-user-nonmember'); // different user/workspace
     await expect(
       service.createTask({
         principal: {
@@ -295,6 +395,86 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
           projectId,
           name: 'Cross',
           idempotencyKey: 'ct-cross',
+        },
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it('enforces PAT workspace narrowing even when the holder is a member (NOT_FOUND)', async () => {
+    // Give the session user a second workspace so membership alone would pass.
+    const other = await devLogin(app, 'dev-user-second-ws');
+    await app.db
+      .insert(workspaceMembers)
+      .values({
+        workspaceId: other.workspaceId,
+        userId: session.userId,
+        role: 'editor',
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing();
+
+    // PAT narrowed to the first workspace; call targets the second one.
+    const narrowed: AuthPrincipal = {
+      ...patPrincipal(),
+      workspaceId: session.workspaceId,
+    };
+    await expect(
+      service.createTask({
+        principal: narrowed,
+        workspaceId: other.workspaceId,
+        projectId,
+        requestId: 'req-narrow-ws',
+        input: {
+          workspaceId: other.workspaceId,
+          projectId,
+          name: 'Narrowed out',
+          idempotencyKey: 'ct-narrow-ws',
+        },
+      }),
+    ).rejects.toThrow(/not found/i);
+
+    // Same narrowed PAT still works on its own workspace.
+    const outcome = await service.createTask({
+      ...base(),
+      principal: narrowed,
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Narrowed in',
+        idempotencyKey: 'ct-narrow-ok',
+      },
+    });
+    expect(outcome.created).toBe(true);
+  });
+
+  it('enforces PAT project narrowing within the same workspace (NOT_FOUND)', async () => {
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/v1/workspaces/${session.workspaceId}/projects`,
+      headers: {
+        cookie: `ganttly_session=${session.cookie}`,
+        'idempotency-key': 'mcp-narrow-second',
+      },
+      payload: { file: createEmptyFile({ name: 'Second project' }) },
+    });
+    const secondId = (second.json() as { summary: { id: string } }).summary.id;
+
+    const narrowed: AuthPrincipal = {
+      ...patPrincipal(),
+      workspaceId: session.workspaceId,
+      projectId,
+    };
+    await expect(
+      service.createTask({
+        principal: narrowed,
+        workspaceId: session.workspaceId,
+        projectId: secondId,
+        requestId: 'req-narrow-prj',
+        input: {
+          workspaceId: session.workspaceId,
+          projectId: secondId,
+          name: 'Wrong project',
+          idempotencyKey: 'ct-narrow-prj',
         },
       }),
     ).rejects.toThrow(/not found/i);

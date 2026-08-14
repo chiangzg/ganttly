@@ -246,6 +246,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         saveState: { status: 'saved' },
         undoStack: [],
         redoStack: [],
+        remoteUpdateAvailable: false,
       });
       scheduleViolationCheck(normalized, get);
       return true;
@@ -280,7 +281,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   async reloadFromRemote() {
     const ref = get().activeProjectRef;
     const localRepo = get().repo;
-    if (!ref) return false;
+    // Remote-only: for a local ref this would reload from IndexedDB and
+    // silently discard unsaved edits by forcing dirty=false + clearing the
+    // undo history. The banner is never shown for local projects, but the
+    // guard makes the invariant structural rather than incidental.
+    if (!ref || isLocalRef(ref)) return false;
     const repo = resolveRepoForRef(ref, localRepo);
     if (!repo) return false;
     const generation = ++loadGeneration;
@@ -353,10 +358,23 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   undo() {
-    const { undoStack, redoStack, file } = get();
+    const { undoStack, redoStack, file, activeProjectRef } = get();
     if (undoStack.length === 0) return;
     const command = undoStack[undoStack.length - 1]!;
     const reverted = command.invert(file);
+    // Remote viewState-only commands (zoom/collapse) mirror dispatch(): write
+    // back to the per-device cache without dirtying the document or bumping
+    // the server revision (spec §5.2).
+    if (command.viewStateOnly && activeProjectRef && !isLocalRef(activeProjectRef)) {
+      const profile = useAuthStore.getState().getProfile(activeProjectRef.instanceId);
+      if (profile) saveViewState(profile.userId, activeProjectRef, reverted.viewState);
+      set({
+        file: reverted,
+        undoStack: undoStack.slice(0, -1),
+        redoStack: [...redoStack, command],
+      });
+      return;
+    }
     set({
       file: reverted,
       undoStack: undoStack.slice(0, -1),
@@ -375,10 +393,21 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   redo() {
-    const { undoStack, redoStack, file } = get();
+    const { undoStack, redoStack, file, activeProjectRef } = get();
     if (redoStack.length === 0) return;
     const command = redoStack[redoStack.length - 1]!;
     const applied = command.apply(file);
+    // Same remote viewState-only handling as undo() (spec §5.2).
+    if (command.viewStateOnly && activeProjectRef && !isLocalRef(activeProjectRef)) {
+      const profile = useAuthStore.getState().getProfile(activeProjectRef.instanceId);
+      if (profile) saveViewState(profile.userId, activeProjectRef, applied.viewState);
+      set({
+        file: applied,
+        undoStack: [...undoStack, command],
+        redoStack: redoStack.slice(0, -1),
+      });
+      return;
+    }
     set({
       file: applied,
       undoStack: [...undoStack, command],

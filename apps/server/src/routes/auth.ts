@@ -137,9 +137,17 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (
         .code(503)
         .send(buildApiError(ApiErrorCode.UNSUPPORTED_CLIENT, 'database unavailable', request.id));
     }
+    // Dev-only affordance for tests: `{ "subject": "…" }` provisions a distinct
+    // user so suites can exercise multi-user scenarios. Never available in
+    // production (guarded above).
+    const body = (request.body ?? {}) as { subject?: unknown };
+    const subject =
+      typeof body.subject === 'string' && body.subject.trim() !== ''
+        ? body.subject.trim()
+        : DEV_SUBJECT;
     const result = await provisionUser(app.db, {
       provider: DEV_PROVIDER,
-      subject: DEV_SUBJECT,
+      subject,
       email: DEV_EMAIL,
       displayName: DEV_DISPLAY_NAME,
     });

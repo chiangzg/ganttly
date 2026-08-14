@@ -3,6 +3,7 @@ import type { FastifyRequest } from 'fastify';
 import {
   ROLE_RANK,
   type WorkspaceRole,
+  enforcePatNarrowing,
   hasScope,
   meetsRole,
   requirePrincipal,
@@ -101,5 +102,51 @@ describe('requireScope', () => {
 
   it('passes silently when the scope is held', () => {
     expect(() => requireScope(webPrincipal('usr_1'), 'task:write')).not.toThrow();
+  });
+});
+
+describe('enforcePatNarrowing', () => {
+  const narrowable = {
+    actorType: 'pat' as const,
+    actorId: 'pat_1',
+    userId: 'usr_1',
+    scopes: ['task:write'] as const,
+    workspaceId: 'ws_a',
+    projectId: 'prj_a',
+  };
+
+  it('passes when the request targets the narrowed workspace and project', () => {
+    expect(() => enforcePatNarrowing(narrowable, 'ws_a', 'prj_a')).not.toThrow();
+    expect(() => enforcePatNarrowing(narrowable, 'ws_a')).not.toThrow();
+  });
+
+  it('passes for principals without narrowing (web sessions)', () => {
+    expect(() => enforcePatNarrowing(webPrincipal('usr_1'), 'ws_any', 'prj_any')).not.toThrow();
+  });
+
+  it('throws NOT_FOUND when the workspace differs from the narrowing', () => {
+    try {
+      enforcePatNarrowing(narrowable, 'ws_b', 'prj_a');
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).code).toBe('NOT_FOUND');
+    }
+  });
+
+  it('throws NOT_FOUND when the project differs from the narrowing', () => {
+    // Same workspace, different project: project narrowing still applies.
+    try {
+      enforcePatNarrowing(narrowable, 'ws_a', 'prj_b');
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).code).toBe('NOT_FOUND');
+    }
+  });
+
+  it('ignores the project check when no project is being accessed', () => {
+    const wsOnly = { ...narrowable, projectId: undefined };
+    expect(() => enforcePatNarrowing(wsOnly, 'ws_a', 'prj_b')).not.toThrow();
   });
 });

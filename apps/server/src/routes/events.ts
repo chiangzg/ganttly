@@ -14,6 +14,7 @@
  * connection is torn down on `request.raw` 'close' to avoid leaking listeners.
  */
 import { and, asc, eq, gt, isNotNull, sql } from 'drizzle-orm';
+import type { ServerResponse } from 'node:http';
 import {
   buildControlFrame,
   buildSseFrame,
@@ -46,9 +47,30 @@ export const eventsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => 
         .code(400)
         .send({ error: { message: 'workspaceId query parameter is required' } });
     }
+
+    // Register teardown BEFORE the membership await: a client that disconnects
+    // during that DB round-trip has already emitted 'close' by the time the
+    // handler resumes, and any listener attached afterwards would never fire —
+    // leaking the bus subscription, the heartbeat and the connection gauge.
+    let closed = false;
+    let unsubscribe: (() => void) | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let counted = false;
+    let res: ServerResponse | null = null;
+    const endStream = () => {
+      if (closed) return;
+      closed = true;
+      unsubscribe?.();
+      if (heartbeat) clearInterval(heartbeat);
+      if (counted && app.hasDecorator('metrics')) app.metrics.sseConnections.dec();
+      if (res && !res.writableEnded) res.end();
+    };
+    request.raw.on('close', endStream);
+
     // Membership gate BEFORE hijack — a failure here returns a normal JSON
     // error through the shared error handler.
     await requireMembership(db, requirePrincipal(request), workspaceId);
+    if (closed) return reply; // client gone during the check
 
     const lastEventId = request.headers['last-event-id'];
     const headerValue = Array.isArray(lastEventId) ? lastEventId[0] : lastEventId;
@@ -57,7 +79,11 @@ export const eventsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => 
 
     // Take ownership of the raw response.
     reply.hijack();
-    const res = reply.raw;
+    res = reply.raw;
+    // Abrupt teardown (client RST, proxy kill) surfaces as 'close'/'error' on
+    // the ServerResponse; attach after hijack, when the response is ours.
+    res.on('close', endStream);
+    res.on('error', endStream);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
@@ -66,18 +92,9 @@ export const eventsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => 
       'X-Accel-Buffering': 'no',
     });
 
-    let closed = false;
     const write = (frame: string): boolean => {
-      if (closed || res.writableEnded) return false;
-      return res.write(frame);
-    };
-    const endStream = () => {
-      if (closed) return;
-      closed = true;
-      unsubscribe();
-      clearInterval(heartbeat);
-      if (app.hasDecorator('metrics')) app.metrics.sseConnections.dec();
-      if (!res.writableEnded) res.end();
+      if (closed || res!.writableEnded) return false;
+      return res!.write(frame);
     };
 
     let lastSent = lastSequence ?? 0;
@@ -91,21 +108,21 @@ export const eventsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => 
 
     // Subscribe first (buffering) so events published during the replay query
     // are captured, then de-duped via the `lastSent` watermark.
-    const unsubscribe = app.bus.subscribe(workspaceId, (event) => {
+    unsubscribe = app.bus.subscribe(workspaceId, (event) => {
       if (event.id <= lastSent) return; // de-dup
       if (replayDone) send(event);
       else buffer.push(event);
     });
 
-    const heartbeat = setInterval(() => {
+    heartbeat = setInterval(() => {
       write(SSE_HEARTBEAT);
     }, HEARTBEAT_INTERVAL_MS);
 
-    request.raw.on('close', endStream);
-    res.on('error', endStream);
-
     // Track the live connection count for /metrics.
-    if (app.hasDecorator('metrics')) app.metrics.sseConnections.inc();
+    if (app.hasDecorator('metrics')) {
+      app.metrics.sseConnections.inc();
+      counted = true;
+    }
 
     try {
       if (lastSequence !== null) {
