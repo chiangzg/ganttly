@@ -14,9 +14,22 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { ApiErrorCode } from '@ganttly/api-contract';
-import type { ApplyCommandResponse, ProjectSnapshotResponse } from '@ganttly/api-contract';
+import type {
+  AddDependencyInput,
+  ApplyCommandResponse,
+  CreateTaskInput,
+  CreateTasksInput,
+  MoveTaskInput,
+  ProjectSnapshotResponse,
+  RemoveDependencyInput,
+  UpdateTaskInput,
+} from '@ganttly/api-contract';
 import {
+  type Dependency,
+  type DependencyType,
   type GanttlyFile,
+  type Task,
+  createDefaultTask,
   formatAjvErrors,
   normalizeFile,
   validateGanttlyFile,
@@ -25,10 +38,12 @@ import { applyProjectCommand, type ProjectCommand } from '@ganttly/domain';
 import { type AuthPrincipal, operationActorType } from '../../auth/principal';
 import type { Db, Tx } from '../../db/client';
 import { outboxEvents, projectOperations, projects } from '../../db/schema';
-import { newEventId, newOperationId, newProjectId } from '../../id';
-import { requireMembership } from '../access';
+import { newEventId, newOperationId, newProjectId, newTaskId } from '../../id';
+import { requireMembership, requireScope } from '../access';
 import { HttpError } from '../errors';
+import { findExternalReference, recordExternalReference } from './external';
 import { canonicalRequestHash } from './idempotency';
+import { isSelfOrDescendant, moveInsertIndex, planInsertion } from './ordering';
 import { buildSnapshot } from './repository';
 import { computeProjectStats } from './summary';
 import { withDefaultViewState } from './viewState';
@@ -220,88 +235,455 @@ export class ProjectApplicationService {
   // --- structured command (POST /commands; shared with MCP in PR5) ----------
   async applyCommand(params: ApplyCommandParams): Promise<ApplyCommandResponse> {
     const requestHash = canonicalRequestHash(params.command);
+    return this.mutateProject({
+      principal: params.principal,
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      idempotencyKey: params.idempotencyKey,
+      requestId: params.requestId,
+      action: commandAction(params.command),
+      requestHash,
+      apply: (current, ctx) => {
+        const outcome = applyProjectCommand(current, params.command as ProjectCommand, ctx);
+        return {
+          file: outcome.file,
+          affectedTaskIds: outcome.affectedTaskIds,
+          adjustments: outcome.adjustments,
+        };
+      },
+    });
+  }
+
+  // --- MCP task tools (spec §10.3–10.6) -------------------------------------
+  //
+  // These share the §7.1 transactional chokepoint with the Web command flow.
+  // Each is scope-gated (`task:write`) and workspace-membership-gated, applies
+  // the relevant domain command(s) to the loaded file, validates once and
+  // writes once — so MCP writes and Web writes produce identical排期 semantics.
+
+  async createTask(params: McpMutationParams<CreateTaskInput>): Promise<CreateTaskOutcome> {
+    const { principal, workspaceId, projectId, input, requestId } = params;
+    requireScope(principal, 'task:write');
+    const requestHash = canonicalRequestHash(input);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'editor');
+      await requireMembership(tx, principal, workspaceId, 'editor');
       const replayed = await this.tryReplay(
         tx,
-        params.principal,
-        params.workspaceId,
-        params.idempotencyKey,
+        principal,
+        workspaceId,
+        input.idempotencyKey,
         requestHash,
+      );
+      if (replayed) return replayed as CreateTaskOutcome;
+
+      const row = await lockProject(tx, workspaceId, projectId);
+      const current = row.fileJsonb as GanttlyFile;
+      const ctx = commandContext(principal);
+
+      const result = await applyCreateToFileSync(current, ctx, {
+        workspaceId,
+        tx,
+        item: input,
+      });
+
+      if (result.created) {
+        const canonical = withDefaultViewState(result.file);
+        this.checkLimits(canonical);
+        assertValid(canonical);
+        const newRevision = row.revision + 1;
+        await tx
+          .update(projects)
+          .set({
+            fileJsonb: canonical,
+            summaryJsonb: computeProjectStats(canonical),
+            revision: newRevision,
+            updatedAt: new Date(),
+          })
+          .where(eq(projects.id, projectId));
+        if (input.source) {
+          await recordExternalReference(tx, {
+            workspaceId,
+            projectId,
+            entityId: result.taskId,
+            entityType: 'task',
+            provider: input.source.provider,
+            externalId: input.source.externalId,
+            source: input.source,
+          });
+        }
+        const outcome: CreateTaskOutcome = {
+          created: true,
+          task: canonical.tasks.find((t) => t.id === result.taskId)!,
+          snapshot: await this.buildSnapshotFor(tx, projectId),
+          revision: String(newRevision),
+          affectedTaskIds: result.affectedTaskIds,
+          adjustments: result.adjustments,
+        };
+        await this.recordOperation(tx, {
+          workspaceId,
+          projectId,
+          principal,
+          action: 'create_task',
+          requestHash,
+          idempotencyKey: input.idempotencyKey,
+          expectedRevision: row.revision,
+          resultRevision: newRevision,
+          summary: { createdTaskId: result.taskId },
+          response: outcome,
+          requestId,
+        });
+        await this.emitOutbox(tx, {
+          workspaceId,
+          projectId,
+          type: 'project.updated',
+          payload: { projectId, revision: newRevision, command: true },
+        });
+        return outcome;
+      }
+
+      // Dedup hit: no revision bump, but record for idempotent replay.
+      const outcome: CreateTaskOutcome = {
+        created: false,
+        task: result.existingTask!,
+        snapshot: buildSnapshot(row),
+        revision: String(row.revision),
+        affectedTaskIds: [],
+        adjustments: [],
+      };
+      await this.recordOperation(tx, {
+        workspaceId,
+        projectId,
+        principal,
+        action: 'create_task',
+        requestHash,
+        idempotencyKey: input.idempotencyKey,
+        expectedRevision: row.revision,
+        resultRevision: row.revision,
+        summary: { dedup: true },
+        response: outcome,
+        requestId,
+      });
+      return outcome;
+    });
+  }
+
+  async createTasks(params: McpMutationParams<CreateTasksInput>): Promise<CreateTasksOutcome> {
+    return this.db.transaction(async (tx) => {
+      const { principal, workspaceId, projectId, input, requestId } = params;
+      requireScope(principal, 'task:write');
+      await requireMembership(tx, principal, workspaceId, 'editor');
+      const requestHash = canonicalRequestHash(input);
+
+      const row = await lockProject(tx, workspaceId, projectId);
+      const ctx = commandContext(principal);
+      let file = row.fileJsonb as GanttlyFile;
+      const results: SingleCreateResult[] = [];
+
+      for (const item of input.tasks) {
+        const result = await applyCreateToFileSync(file, ctx, {
+          workspaceId,
+          tx,
+          item,
+        });
+        file = result.file;
+        results.push(result);
+        if (result.created && item.source) {
+          await recordExternalReference(tx, {
+            workspaceId,
+            projectId,
+            entityId: result.taskId,
+            entityType: 'task',
+            provider: item.source.provider,
+            externalId: item.source.externalId,
+            source: item.source,
+          });
+        }
+      }
+
+      const canonical = withDefaultViewState(file);
+      this.checkLimits(canonical);
+      assertValid(canonical);
+      const newRevision = row.revision + 1;
+      await tx
+        .update(projects)
+        .set({
+          fileJsonb: canonical,
+          summaryJsonb: computeProjectStats(canonical),
+          revision: newRevision,
+          updatedAt: new Date(),
+        })
+        .where(eq(projects.id, projectId));
+
+      const snapshot = await this.buildSnapshotFor(tx, projectId);
+      const response: CreateTasksOutcome = {
+        snapshot,
+        revision: String(newRevision),
+        results: results.map((r) => ({
+          created: r.created,
+          task: canonical.tasks.find((t) => t.id === r.taskId)!,
+          affectedTaskIds: r.affectedTaskIds,
+          adjustments: r.adjustments,
+        })),
+      };
+      await this.recordOperation(tx, {
+        workspaceId,
+        projectId,
+        principal,
+        action: 'create_tasks',
+        requestHash,
+        idempotencyKey: input.idempotencyKey,
+        expectedRevision: row.revision,
+        resultRevision: newRevision,
+        summary: { count: results.length },
+        response,
+        requestId,
+      });
+      await this.emitOutbox(tx, {
+        workspaceId,
+        projectId,
+        type: 'project.updated',
+        payload: { projectId, revision: newRevision, command: true },
+      });
+      return response;
+    });
+  }
+
+  async updateTask(params: McpMutationParams<UpdateTaskInput>): Promise<ApplyCommandResponse> {
+    const { input } = params;
+    requireScope(params.principal, 'task:write');
+    return this.mutateProject({
+      principal: params.principal,
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      idempotencyKey: input.idempotencyKey,
+      requestId: params.requestId,
+      action: 'update_task',
+      requestHash: canonicalRequestHash(input),
+      apply: (current, ctx) => {
+        const patch: Partial<Task> = {};
+        if (input.name !== undefined) patch.name = input.name;
+        if (input.start !== undefined) patch.start = input.start;
+        if (input.duration !== undefined) patch.duration = input.duration;
+        if (input.progress !== undefined) patch.progress = input.progress;
+        if (input.isMilestone !== undefined) patch.isMilestone = input.isMilestone;
+        if (input.note !== undefined) patch.note = input.note;
+        if (input.color !== undefined) patch.color = input.color;
+        if (input.overtimeDates !== undefined) patch.overtimeDates = input.overtimeDates;
+        if (input.constraints !== undefined) patch.constraints = input.constraints;
+        if (input.assignments !== undefined) patch.assignments = input.assignments;
+        const outcome = applyProjectCommand(
+          current,
+          { kind: 'updateTask', taskId: input.taskId, patch },
+          ctx,
+        );
+        return {
+          file: outcome.file,
+          affectedTaskIds: outcome.affectedTaskIds,
+          adjustments: outcome.adjustments,
+        };
+      },
+    });
+  }
+
+  async moveTask(params: McpMutationParams<MoveTaskInput>): Promise<ApplyCommandResponse> {
+    const { input } = params;
+    requireScope(params.principal, 'task:write');
+    return this.mutateProject({
+      principal: params.principal,
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      idempotencyKey: input.idempotencyKey,
+      requestId: params.requestId,
+      action: 'move_task',
+      requestHash: canonicalRequestHash(input),
+      apply: (current, ctx) => {
+        if (
+          input.newParentTaskId !== null &&
+          isSelfOrDescendant(current.tasks, input.taskId, input.newParentTaskId)
+        ) {
+          throw new HttpError(
+            ApiErrorCode.VALIDATION_FAILED,
+            'Cannot move a task into itself or one of its descendants',
+          );
+        }
+        const insertIndex = moveInsertIndex(
+          current.tasks,
+          input.newParentTaskId,
+          input.position,
+          input.taskId,
+        );
+        const outcome = applyProjectCommand(
+          current,
+          {
+            kind: 'moveTaskWithRollup',
+            taskId: input.taskId,
+            newParentId: input.newParentTaskId,
+            newOrder: insertIndex,
+          },
+          ctx,
+        );
+        return {
+          file: outcome.file,
+          affectedTaskIds: outcome.affectedTaskIds,
+          adjustments: outcome.adjustments,
+        };
+      },
+    });
+  }
+
+  async addDependency(
+    params: McpMutationParams<AddDependencyInput>,
+  ): Promise<ApplyCommandResponse> {
+    const { input } = params;
+    requireScope(params.principal, 'task:write');
+    return this.mutateProject({
+      principal: params.principal,
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      idempotencyKey: input.idempotencyKey,
+      requestId: params.requestId,
+      action: 'add_dependency',
+      requestHash: canonicalRequestHash(input),
+      apply: (current, ctx) => {
+        const dependency: Dependency = {
+          targetId: input.predecessorTaskId,
+          type: (input.type ?? 'FS') as DependencyType,
+          lag: input.lag ?? 0,
+        };
+        const outcome = applyProjectCommand(
+          current,
+          { kind: 'addDependency', successorId: input.successorTaskId, dependency },
+          ctx,
+        );
+        return {
+          file: outcome.file,
+          affectedTaskIds: outcome.affectedTaskIds,
+          adjustments: outcome.adjustments,
+        };
+      },
+    });
+  }
+
+  async removeDependency(
+    params: McpMutationParams<RemoveDependencyInput>,
+  ): Promise<ApplyCommandResponse> {
+    const { input } = params;
+    requireScope(params.principal, 'task:write');
+    return this.mutateProject({
+      principal: params.principal,
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      idempotencyKey: input.idempotencyKey,
+      requestId: params.requestId,
+      action: 'remove_dependency',
+      requestHash: canonicalRequestHash(input),
+      apply: (current, ctx) => {
+        const outcome = applyProjectCommand(
+          current,
+          {
+            kind: 'deleteDependency',
+            successorId: input.successorTaskId,
+            targetId: input.predecessorTaskId,
+          },
+          ctx,
+        );
+        return {
+          file: outcome.file,
+          affectedTaskIds: outcome.affectedTaskIds,
+          adjustments: outcome.adjustments,
+        };
+      },
+    });
+  }
+
+  /**
+   * The shared §7.1 transactional core. Opens a transaction, checks membership,
+   * replays idempotency, locks the row FOR UPDATE, invokes `apply` to evolve
+   * the file, validates + writes once, records the operation and outbox event.
+   * Used by the Web command endpoint and the MCP update/move/dependency tools.
+   */
+  private async mutateProject(opts: {
+    principal: AuthPrincipal;
+    workspaceId: string;
+    projectId: string;
+    idempotencyKey?: string;
+    requestId: string;
+    action: string;
+    requestHash: string;
+    apply: (
+      current: GanttlyFile,
+      ctx: { now: string; today: string; actorId: string },
+    ) => {
+      file: GanttlyFile;
+      affectedTaskIds: string[];
+      adjustments: ApplyCommandResponse['adjustments'];
+    };
+  }): Promise<ApplyCommandResponse> {
+    return this.db.transaction(async (tx) => {
+      await requireMembership(tx, opts.principal, opts.workspaceId, 'editor');
+      const replayed = await this.tryReplay(
+        tx,
+        opts.principal,
+        opts.workspaceId,
+        opts.idempotencyKey,
+        opts.requestHash,
       );
       if (replayed) return replayed as ApplyCommandResponse;
 
       const locked = await tx
         .select()
         .from(projects)
-        .where(and(eq(projects.id, params.projectId), eq(projects.workspaceId, params.workspaceId)))
+        .where(and(eq(projects.id, opts.projectId), eq(projects.workspaceId, opts.workspaceId)))
         .for('update')
         .limit(1);
       const row = locked[0];
-      if (!row) {
-        throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
-      }
+      if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
 
       const current = row.fileJsonb as GanttlyFile;
-      const ctx = {
-        now: new Date().toISOString(),
-        today: todayString(),
-        actorId: params.principal.actorId,
-      };
-      const outcome = applyProjectCommand(current, params.command as ProjectCommand, ctx);
+      const ctx = commandContext(opts.principal);
+      const outcome = opts.apply(current, ctx);
       const canonical = withDefaultViewState(outcome.file);
       this.checkLimits(canonical);
-      const validation = validateGanttlyFile(canonical);
-      if (!validation.ok) {
-        throw new HttpError(
-          ApiErrorCode.VALIDATION_FAILED,
-          `Command produced an invalid project: ${formatAjvErrors(validation.errors)}`,
-        );
-      }
+      assertValid(canonical);
 
-      const now = new Date();
-      const stats = computeProjectStats(canonical);
       const newRevision = row.revision + 1;
       await tx
         .update(projects)
         .set({
           fileJsonb: canonical,
-          summaryJsonb: stats,
+          summaryJsonb: computeProjectStats(canonical),
           revision: newRevision,
-          updatedAt: now,
+          updatedAt: new Date(),
         })
-        .where(eq(projects.id, params.projectId));
+        .where(eq(projects.id, opts.projectId));
 
       const response: ApplyCommandResponse = {
-        ...(await this.buildSnapshotFor(tx, params.projectId)),
+        ...(await this.buildSnapshotFor(tx, opts.projectId)),
         affectedTaskIds: outcome.affectedTaskIds,
         adjustments: outcome.adjustments,
       };
       await this.recordOperation(tx, {
-        workspaceId: params.workspaceId,
-        projectId: params.projectId,
-        principal: params.principal,
-        action:
-          typeof params.command === 'object' && params.command && 'kind' in params.command
-            ? String((params.command as { kind: unknown }).kind)
-            : 'command',
-        requestHash,
-        idempotencyKey: params.idempotencyKey,
+        workspaceId: opts.workspaceId,
+        projectId: opts.projectId,
+        principal: opts.principal,
+        action: opts.action,
+        requestHash: opts.requestHash,
+        idempotencyKey: opts.idempotencyKey,
         expectedRevision: row.revision,
         resultRevision: newRevision,
         summary: {
-          stats,
+          stats: computeProjectStats(canonical),
           affectedTaskIds: outcome.affectedTaskIds,
           adjustments: outcome.adjustments,
         },
         response,
-        requestId: params.requestId,
+        requestId: opts.requestId,
       });
       await this.emitOutbox(tx, {
-        workspaceId: params.workspaceId,
-        projectId: params.projectId,
+        workspaceId: opts.workspaceId,
+        projectId: opts.projectId,
         type: 'project.updated',
-        payload: { projectId: params.projectId, revision: newRevision, command: true },
+        payload: { projectId: opts.projectId, revision: newRevision, command: true },
       });
       return response;
     });
@@ -545,7 +927,12 @@ export class ProjectApplicationService {
       expectedRevision: number | null;
       resultRevision: number;
       summary: Record<string, unknown>;
-      response: ProjectSnapshotResponse | ApplyCommandResponse | null;
+      response:
+        | ProjectSnapshotResponse
+        | ApplyCommandResponse
+        | CreateTaskOutcome
+        | CreateTasksOutcome
+        | null;
       requestId: string;
     },
   ): Promise<void> {
@@ -590,4 +977,198 @@ export class ProjectApplicationService {
 
 function todayString(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// MCP helper types & functions (module-level, pure or tx-scoped)
+// ---------------------------------------------------------------------------
+
+export interface McpMutationParams<TInput> {
+  principal: AuthPrincipal;
+  workspaceId: string;
+  projectId: string;
+  input: TInput;
+  requestId: string;
+}
+
+export interface CreateTaskOutcome {
+  created: boolean;
+  task: Task;
+  snapshot: ProjectSnapshotResponse;
+  revision: string;
+  affectedTaskIds: string[];
+  adjustments: ApplyCommandResponse['adjustments'];
+}
+
+export interface CreateTasksOutcome {
+  snapshot: ProjectSnapshotResponse;
+  revision: string;
+  results: Array<{
+    created: boolean;
+    task: Task;
+    affectedTaskIds: string[];
+    adjustments: ApplyCommandResponse['adjustments'];
+  }>;
+}
+
+/** Internal result of creating one task (single or batch). */
+interface SingleCreateResult {
+  created: boolean;
+  taskId: string;
+  file: GanttlyFile;
+  affectedTaskIds: string[];
+  adjustments: ApplyCommandResponse['adjustments'];
+  /** Set when a dedup hit returned an existing task. */
+  existingTask?: Task;
+}
+
+type Adjustment = ApplyCommandResponse['adjustments'][number];
+
+function commandContext(principal: AuthPrincipal): {
+  now: string;
+  today: string;
+  actorId: string;
+} {
+  return { now: new Date().toISOString(), today: todayString(), actorId: principal.actorId };
+}
+
+/** Extract a stable action label from a command for the operation log. */
+function commandAction(command: unknown): string {
+  if (typeof command === 'object' && command && 'kind' in command) {
+    return String((command as { kind: unknown }).kind);
+  }
+  return 'command';
+}
+
+/** Throw VALIDATION_FAILED when the canonical file is invalid. */
+function assertValid(file: GanttlyFile): void {
+  const result = validateGanttlyFile(file);
+  if (!result.ok) {
+    throw new HttpError(
+      ApiErrorCode.VALIDATION_FAILED,
+      `Command produced an invalid project: ${formatAjvErrors(result.errors)}`,
+    );
+  }
+}
+
+/** SELECT … FOR UPDATE the project row; NOT_FOUND if missing. */
+async function lockProject(tx: Tx, workspaceId: string, projectId: string) {
+  const locked = await tx
+    .select()
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)))
+    .for('update')
+    .limit(1);
+  const row = locked[0];
+  if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
+  return row;
+}
+
+/**
+ * Apply one task creation to the evolving file in memory. Performs the
+ * external-source dedup check (async, tx-scoped) and, on a miss, builds the
+ * task via `createDefaultTask`, inserts it at the right sibling order, then
+ * applies `addDependency` for each requested dependency so the scheduler runs.
+ * Returns the next file plus the created/existing task id and metadata.
+ */
+async function applyCreateToFileSync(
+  file: GanttlyFile,
+  ctx: { now: string; today: string; actorId: string },
+  opts: {
+    workspaceId: string;
+    tx: Tx;
+    item: CreateTasksInput['tasks'][number];
+  },
+): Promise<SingleCreateResult> {
+  const { item, workspaceId, tx } = opts;
+
+  // External dedup.
+  if (item.source) {
+    const existing = await findExternalReference(tx, {
+      workspaceId,
+      provider: item.source.provider,
+      externalId: item.source.externalId,
+      entityType: 'task',
+    });
+    const existingTask = existing ? file.tasks.find((t) => t.id === existing.entityId) : undefined;
+    if (existingTask) {
+      return {
+        created: false,
+        taskId: existingTask.id,
+        file,
+        affectedTaskIds: [],
+        adjustments: [],
+        existingTask,
+      };
+    }
+  }
+
+  const parentId = item.parentTaskId ?? null;
+  const plan = planInsertion(file.tasks, parentId, item.afterTaskId ?? null);
+
+  // Shift higher-order siblings up by one to keep orders collision-free.
+  let evolved: GanttlyFile = {
+    ...file,
+    tasks: file.tasks.map((t) =>
+      t.parentId === parentId && t.order >= plan.shiftThreshold ? { ...t, order: t.order + 1 } : t,
+    ),
+  };
+
+  const taskId = newTaskId();
+  const base = createDefaultTask({
+    id: taskId,
+    name: item.name,
+    start: item.start ?? ctx.today,
+    parentId,
+    order: plan.order,
+  });
+  const newTask: Task = {
+    ...base,
+    duration: item.duration ?? base.duration,
+    isMilestone: item.isMilestone ?? base.isMilestone,
+    progress: item.progress ?? base.progress,
+    constraints: base.constraints,
+    assignments: [],
+    dependencies: [],
+    customFields: {},
+  };
+  if (item.note !== undefined) newTask.note = item.note;
+  if (item.color !== undefined) newTask.color = item.color;
+  if (item.assignments !== undefined) newTask.assignments = [...item.assignments];
+
+  const affected = new Set<string>([taskId]);
+  const adjustments: Adjustment[] = [];
+
+  const addOutcome = applyProjectCommand(
+    evolved,
+    { kind: 'addTask', task: newTask, parentId, order: plan.order },
+    ctx,
+  );
+  evolved = addOutcome.file;
+  adjustments.push(...addOutcome.adjustments);
+
+  // Add each dependency via the domain command so the scheduler runs.
+  for (const dep of item.dependencies ?? []) {
+    const dependency: Dependency = {
+      targetId: dep.predecessorTaskId,
+      type: (dep.type ?? 'FS') as DependencyType,
+      lag: dep.lag ?? 0,
+    };
+    const depOutcome = applyProjectCommand(
+      evolved,
+      { kind: 'addDependency', successorId: taskId, dependency },
+      ctx,
+    );
+    evolved = depOutcome.file;
+    depOutcome.affectedTaskIds.forEach((id) => affected.add(id));
+    adjustments.push(...depOutcome.adjustments);
+  }
+
+  return {
+    created: true,
+    taskId,
+    file: evolved,
+    affectedTaskIds: [...affected],
+    adjustments,
+  };
 }

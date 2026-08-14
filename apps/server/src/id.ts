@@ -20,3 +20,9 @@ export const newProjectId = prefix('prj');
 export const newOperationId = prefix('op');
 export const newEventId = prefix('evt');
 export const newPersonalAccessTokenId = prefix('pat');
+/**
+ * Unprefixed task id (spec §6: "UUID v4 or nanoid"). MCP create_task mints the
+ * id up front so the same value is known for dependency wiring and the
+ * external-reference record.
+ */
+export const newTaskId = (): string => newId();
