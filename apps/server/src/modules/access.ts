@@ -58,16 +58,46 @@ export async function findMembership(
 }
 
 /**
+ * Enforce a PAT's workspace/project narrowing (spec §6.3 / §8.3): a token
+ * narrowed to one workspace (or project) must never authorise operations
+ * outside it, even when the holder is a member of the broader target.
+ *
+ * Called from {@link requireMembership} (and directly where a projectId is
+ * touched without a membership check). Throws NOT_FOUND — the same response a
+ * non-member gets — so the existence of the narrowed-away workspace/project is
+ * never leaked (spec §16.2).
+ */
+export function enforcePatNarrowing(
+  principal: AuthPrincipal,
+  workspaceId: string,
+  projectId?: string,
+): void {
+  if (principal.workspaceId !== undefined && principal.workspaceId !== workspaceId) {
+    throw new HttpError(ApiErrorCode.NOT_FOUND, 'Workspace not found');
+  }
+  if (
+    projectId !== undefined &&
+    principal.projectId !== undefined &&
+    principal.projectId !== projectId
+  ) {
+    throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
+  }
+}
+
+/**
  * Ensure the principal is a member of `workspaceId` with at least `minRole`.
  * Non-members get 404 (no existence leak); insufficient role gets 403. Returns
- * the confirmed role on success.
+ * the confirmed role on success. `projectId`, when given, is additionally
+ * checked against the principal's PAT narrowing.
  */
 export async function requireMembership(
   client: Selectable,
   principal: AuthPrincipal,
   workspaceId: string,
   minRole: WorkspaceRole = 'viewer',
+  projectId?: string,
 ): Promise<WorkspaceRole> {
+  enforcePatNarrowing(principal, workspaceId, projectId);
   const membership = await findMembership(client, principal.userId, workspaceId);
   if (!membership) {
     throw new HttpError(ApiErrorCode.NOT_FOUND, 'Workspace not found');

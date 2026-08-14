@@ -142,7 +142,7 @@ export const projectsRoutes: FastifyPluginAsync<ProjectsRoutesOptions> = async (
       workspaceId: string;
       projectId: string;
     };
-    await requireMembership(db(), principal, workspaceId, 'viewer');
+    await requireMembership(db(), principal, workspaceId, 'viewer', projectId);
     const row = await getProjectRow(db(), workspaceId, projectId);
     if (!row) {
       throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');

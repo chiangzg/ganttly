@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type * as inject from 'light-my-request';
+import { createEmptyFile } from '@ganttly/schema';
 import { DEV_TOKEN_PEPPER } from '../../src/config';
 import { resolvePatPrincipal } from '../../src/auth/pat';
 import { personalAccessTokens } from '../../src/db/schema';
@@ -123,7 +124,7 @@ describe.skipIf(!dbUrl)('PAT management integration', () => {
 
   it('forbids revoking another user token (404, no existence leak)', async () => {
     const { id } = await createPat({ name: 'cross-user' });
-    const other = await devLogin(app); // a different user
+    const other = await devLogin(app, 'dev-user-revoke-other'); // a different user
     const res = await app.inject({
       method: 'DELETE',
       url: `/api/v1/me/tokens/${id}`,
@@ -143,5 +144,99 @@ describe.skipIf(!dbUrl)('PAT management integration', () => {
       payload: { name: 'bad', scopes: ['bogus:scope'] },
     });
     expect(res.statusCode).toBe(422);
+  });
+
+  // --- narrowing validation (spec §8.3: may only narrow to own accesses) ----
+  it('creates a PAT narrowed to the own workspace', async () => {
+    const res = await authed({
+      method: 'POST',
+      url: '/api/v1/me/tokens',
+      payload: {
+        name: 'narrow-ws',
+        scopes: ['task:write'],
+        workspaceId: session.workspaceId,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { pat: { workspaceId?: string } };
+    expect(body.pat.workspaceId).toBe(session.workspaceId);
+  });
+
+  it('rejects narrowing to a workspace the caller is not a member of (404)', async () => {
+    const other = await devLogin(app, 'dev-user-foreign-ws'); // different user/workspace
+    const res = await authed({
+      method: 'POST',
+      url: '/api/v1/me/tokens',
+      payload: {
+        name: 'narrow-foreign',
+        scopes: ['task:write'],
+        workspaceId: other.workspaceId,
+      },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('rejects narrowing to an unknown project (404)', async () => {
+    const res = await authed({
+      method: 'POST',
+      url: '/api/v1/me/tokens',
+      payload: {
+        name: 'narrow-missing',
+        scopes: ['project:read'],
+        workspaceId: session.workspaceId,
+        projectId: 'prj_does-not-exist',
+      },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('creates a PAT narrowed to an own project, rejecting foreign ones (404)', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: `/api/v1/workspaces/${session.workspaceId}/projects`,
+      headers: {
+        cookie: `ganttly_session=${session.cookie}`,
+        'idempotency-key': 'pat-narrow-own',
+      },
+      payload: { file: createEmptyFile({ name: 'PAT narrowing target' }) },
+    });
+    expect(create.statusCode).toBe(201);
+    const projectId = (create.json() as { summary: { id: string } }).summary.id;
+
+    const ok = await authed({
+      method: 'POST',
+      url: '/api/v1/me/tokens',
+      payload: {
+        name: 'narrow-prj',
+        scopes: ['project:read'],
+        workspaceId: session.workspaceId,
+        projectId,
+      },
+    });
+    expect(ok.statusCode).toBe(200);
+
+    // Another user's project id must not be acceptable.
+    const other = await devLogin(app, 'dev-user-foreign-prj');
+    const foreignCreate = await app.inject({
+      method: 'POST',
+      url: `/api/v1/workspaces/${other.workspaceId}/projects`,
+      headers: {
+        cookie: `ganttly_session=${other.cookie}`,
+        'idempotency-key': 'pat-narrow-foreign',
+      },
+      payload: { file: createEmptyFile({ name: 'Foreign' }) },
+    });
+    const foreignId = (foreignCreate.json() as { summary: { id: string } }).summary.id;
+    const rejected = await authed({
+      method: 'POST',
+      url: '/api/v1/me/tokens',
+      payload: {
+        name: 'narrow-foreign-prj',
+        scopes: ['project:read'],
+        workspaceId: session.workspaceId,
+        projectId: foreignId,
+      },
+    });
+    expect(rejected.statusCode).toBe(404);
   });
 });

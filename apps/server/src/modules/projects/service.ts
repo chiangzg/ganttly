@@ -172,7 +172,7 @@ export class ProjectApplicationService {
   async saveDocument(params: SaveProjectParams): Promise<ProjectSnapshotResponse> {
     const requestHash = canonicalRequestHash(params.file);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'editor');
+      await requireMembership(tx, params.principal, params.workspaceId, 'editor', params.projectId);
       const replayed = await this.tryReplay(
         tx,
         params.principal,
@@ -266,7 +266,7 @@ export class ProjectApplicationService {
     requireScope(principal, 'task:write');
     const requestHash = canonicalRequestHash(input);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, principal, workspaceId, 'editor');
+      await requireMembership(tx, principal, workspaceId, 'editor', projectId);
       const replayed = await this.tryReplay(
         tx,
         principal,
@@ -376,7 +376,7 @@ export class ProjectApplicationService {
     return this.db.transaction(async (tx) => {
       const { principal, workspaceId, projectId, input, requestId } = params;
       requireScope(principal, 'task:write');
-      await requireMembership(tx, principal, workspaceId, 'editor');
+      await requireMembership(tx, principal, workspaceId, 'editor', projectId);
       const requestHash = canonicalRequestHash(input);
 
       const row = await lockProject(tx, workspaceId, projectId);
@@ -629,7 +629,7 @@ export class ProjectApplicationService {
     };
   }): Promise<ApplyCommandResponse> {
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, opts.principal, opts.workspaceId, 'editor');
+      await requireMembership(tx, opts.principal, opts.workspaceId, 'editor', opts.projectId);
       const replayed = await this.tryReplay(
         tx,
         opts.principal,
@@ -718,7 +718,7 @@ export class ProjectApplicationService {
   ): Promise<ProjectSnapshotResponse> {
     const requestHash = canonicalRequestHash(null);
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'editor');
+      await requireMembership(tx, params.principal, params.workspaceId, 'editor', params.projectId);
       const replayed = await this.tryReplay(
         tx,
         params.principal,
@@ -764,7 +764,7 @@ export class ProjectApplicationService {
   // --- permanent delete (owner only, must be archived) ----------------------
   async deletePermanently(params: ProjectMutationParams): Promise<void> {
     return this.db.transaction(async (tx) => {
-      await requireMembership(tx, params.principal, params.workspaceId, 'owner');
+      await requireMembership(tx, params.principal, params.workspaceId, 'owner', params.projectId);
       const locked = await tx
         .select()
         .from(projects)

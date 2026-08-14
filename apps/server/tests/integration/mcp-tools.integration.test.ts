@@ -11,7 +11,13 @@ import { createEmptyFile } from '@ganttly/schema';
 import type { AuthPrincipal } from '../../src/auth/principal';
 import type { ProjectLimits } from '../../src/modules/projects/service';
 import { ProjectApplicationService } from '../../src/modules/projects/service';
-import { outboxEvents, projectOperations, projects, externalReferences } from '../../src/db/schema';
+import {
+  outboxEvents,
+  projectOperations,
+  projects,
+  externalReferences,
+  workspaceMembers,
+} from '../../src/db/schema';
 import { buildIntegrationServer, devLogin, type DevSession } from './helpers';
 
 const dbUrl = process.env.TEST_DATABASE_URL;
@@ -278,7 +284,7 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
   });
 
   it('rejects writes from a non-member (NOT_FOUND, no existence leak)', async () => {
-    const other = await devLogin(app); // different user/workspace
+    const other = await devLogin(app, 'dev-user-nonmember'); // different user/workspace
     await expect(
       service.createTask({
         principal: {
@@ -295,6 +301,86 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
           projectId,
           name: 'Cross',
           idempotencyKey: 'ct-cross',
+        },
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it('enforces PAT workspace narrowing even when the holder is a member (NOT_FOUND)', async () => {
+    // Give the session user a second workspace so membership alone would pass.
+    const other = await devLogin(app, 'dev-user-second-ws');
+    await app.db
+      .insert(workspaceMembers)
+      .values({
+        workspaceId: other.workspaceId,
+        userId: session.userId,
+        role: 'editor',
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing();
+
+    // PAT narrowed to the first workspace; call targets the second one.
+    const narrowed: AuthPrincipal = {
+      ...patPrincipal(),
+      workspaceId: session.workspaceId,
+    };
+    await expect(
+      service.createTask({
+        principal: narrowed,
+        workspaceId: other.workspaceId,
+        projectId,
+        requestId: 'req-narrow-ws',
+        input: {
+          workspaceId: other.workspaceId,
+          projectId,
+          name: 'Narrowed out',
+          idempotencyKey: 'ct-narrow-ws',
+        },
+      }),
+    ).rejects.toThrow(/not found/i);
+
+    // Same narrowed PAT still works on its own workspace.
+    const outcome = await service.createTask({
+      ...base(),
+      principal: narrowed,
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Narrowed in',
+        idempotencyKey: 'ct-narrow-ok',
+      },
+    });
+    expect(outcome.created).toBe(true);
+  });
+
+  it('enforces PAT project narrowing within the same workspace (NOT_FOUND)', async () => {
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/v1/workspaces/${session.workspaceId}/projects`,
+      headers: {
+        cookie: `ganttly_session=${session.cookie}`,
+        'idempotency-key': 'mcp-narrow-second',
+      },
+      payload: { file: createEmptyFile({ name: 'Second project' }) },
+    });
+    const secondId = (second.json() as { summary: { id: string } }).summary.id;
+
+    const narrowed: AuthPrincipal = {
+      ...patPrincipal(),
+      workspaceId: session.workspaceId,
+      projectId,
+    };
+    await expect(
+      service.createTask({
+        principal: narrowed,
+        workspaceId: session.workspaceId,
+        projectId: secondId,
+        requestId: 'req-narrow-prj',
+        input: {
+          workspaceId: session.workspaceId,
+          projectId: secondId,
+          name: 'Wrong project',
+          idempotencyKey: 'ct-narrow-prj',
         },
       }),
     ).rejects.toThrow(/not found/i);
