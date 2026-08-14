@@ -62,6 +62,23 @@ const rawConfigSchema = z.object({
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   /** Expose the /metrics Prometheus endpoint. */
   METRICS_ENABLED: z.coerce.boolean().default(true),
+
+  // --- Self-hosted deployment (spec §14.2) -----------------------------------
+  /**
+   * Directory of the built Web assets. When set to an existing path the server
+   * serves them same-origin (SPA fallback) so a single container can host the
+   * client, API, MCP and SSE. Empty (default) = API-only; the Web app runs
+   * separately (dev, or split CDN deploy).
+   */
+  WEB_DIST_DIR: z.string().default(''),
+  /**
+   * Override the session cookie `Secure` flag. Accepts `1`/`true` or `0`/`false`
+   * (parsed manually because `z.coerce.boolean()` treats the string `"false"` as
+   * truthy). Unset = automatic (Secure in production). Set to `false` to allow a
+   * trusted HTTP-only LAN deployment that terminates no TLS — see self-hosting
+   * docs for the security trade-off.
+   */
+  SESSION_COOKIE_SECURE: z.string().optional(),
 });
 
 export type AuthMode = z.infer<typeof AuthMode>;
@@ -103,6 +120,10 @@ export interface AppConfig {
   rateLimitMax: number;
   rateLimitWindowSeconds: number;
   metricsEnabled: boolean;
+
+  /** Self-hosted deployment (spec §14.2). */
+  webDistDir: string;
+  sessionCookieSecure: boolean;
 
   /** True when running outside development/test. */
   isProduction: boolean;
@@ -175,6 +196,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
+  // Session cookie Secure flag: explicit override wins, otherwise automatic
+  // (Secure only in production). Parsed manually — `z.coerce.boolean()` would
+  // treat the string "false" as truthy (spec §14.2 self-host trade-off).
+  const sessionCookieSecure = parseBoolEnv(env.SESSION_COOKIE_SECURE, isProduction);
+
   // Hostnames the /mcp endpoint will accept (DNS-rebinding defence, spec §13).
   // Derived from PUBLIC_BASE_URL; dev also allows localhost variants.
   const publicHost = hostOf(r.PUBLIC_BASE_URL);
@@ -211,6 +237,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     rateLimitMax: r.RATE_LIMIT_MAX,
     rateLimitWindowSeconds: r.RATE_LIMIT_WINDOW_SECONDS,
     metricsEnabled: r.METRICS_ENABLED,
+    webDistDir: r.WEB_DIST_DIR,
+    sessionCookieSecure,
     isProduction,
   };
 }
@@ -235,4 +263,17 @@ function hostOf(url: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Parse a boolean env override. Accepts `1`/`true` (any case) and `0`/`false`;
+ * empty/undefined falls back to {@link fallback}. Used instead of
+ * `z.coerce.boolean()` which would coerce the string `"false"` to `true`.
+ */
+function parseBoolEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === '') return fallback;
+  const v = value.trim().toLowerCase();
+  if (v === '1' || v === 'true') return true;
+  if (v === '0' || v === 'false') return false;
+  return fallback;
 }

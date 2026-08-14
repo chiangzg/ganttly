@@ -147,3 +147,56 @@ describe('loadConfig — fail-fast', () => {
     expect(() => loadConfig({ ...validDevEnv(), AUTH_MODE: 'github' })).toThrow(ConfigError);
   });
 });
+
+describe('loadConfig — self-hosted deployment knobs', () => {
+  it('defaults WEB_DIST_DIR to empty (API-only mode)', () => {
+    const cfg = loadConfig(validDevEnv());
+    expect(cfg.webDistDir).toBe('');
+  });
+
+  it('honours an explicit WEB_DIST_DIR', () => {
+    const cfg = loadConfig({ ...validDevEnv(), WEB_DIST_DIR: '/app/apps/web/dist' });
+    expect(cfg.webDistDir).toBe('/app/apps/web/dist');
+  });
+
+  it('derives sessionCookieSecure from isProduction when unset', () => {
+    expect(loadConfig(validDevEnv()).sessionCookieSecure).toBe(false); // dev
+    const prod = loadConfig({
+      ...validDevEnv(),
+      NODE_ENV: 'production',
+      AUTH_MODE: 'github',
+      GITHUB_OAUTH_CLIENT_ID: 'id',
+      GITHUB_OAUTH_CLIENT_SECRET: 'secret',
+      SESSION_SECRET: 'x'.repeat(32),
+      TOKEN_PEPPER: 'p'.repeat(32),
+    });
+    expect(prod.sessionCookieSecure).toBe(true);
+  });
+
+  it('parses SESSION_COOKIE_SECURE="false" as false even in production', () => {
+    // z.coerce.boolean() would wrongly coerce "false" to true; manual parse fixes it.
+    const cfg = loadConfig({
+      ...validDevEnv(),
+      NODE_ENV: 'production',
+      AUTH_MODE: 'github',
+      GITHUB_OAUTH_CLIENT_ID: 'id',
+      GITHUB_OAUTH_CLIENT_SECRET: 'secret',
+      SESSION_SECRET: 'x'.repeat(32),
+      TOKEN_PEPPER: 'p'.repeat(32),
+      SESSION_COOKIE_SECURE: 'false',
+    });
+    expect(cfg.sessionCookieSecure).toBe(false);
+  });
+
+  it('parses SESSION_COOKIE_SECURE="1"/"true" as true in dev', () => {
+    expect(loadConfig({ ...validDevEnv(), SESSION_COOKIE_SECURE: '1' }).sessionCookieSecure).toBe(
+      true,
+    );
+    expect(
+      loadConfig({ ...validDevEnv(), SESSION_COOKIE_SECURE: 'true' }).sessionCookieSecure,
+    ).toBe(true);
+    expect(loadConfig({ ...validDevEnv(), SESSION_COOKIE_SECURE: '0' }).sessionCookieSecure).toBe(
+      false,
+    );
+  });
+});
