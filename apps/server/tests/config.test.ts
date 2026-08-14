@@ -21,6 +21,16 @@ describe('loadConfig — happy path', () => {
     expect(cfg.logLevel).toBe('info');
   });
 
+  it('defaults the PAT TTL to 90 days', () => {
+    const cfg = loadConfig(validDevEnv());
+    expect(cfg.patDefaultTtlDays).toBe(90);
+  });
+
+  it('honours an explicit PAT_DEFAULT_TTL_DAYS override', () => {
+    const cfg = loadConfig({ ...validDevEnv(), PAT_DEFAULT_TTL_DAYS: '30' });
+    expect(cfg.patDefaultTtlDays).toBe(30);
+  });
+
   it('parses a comma-separated CORS list, trimming blanks', () => {
     const cfg = loadConfig({
       ...validDevEnv(),
