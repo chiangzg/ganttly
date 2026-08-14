@@ -76,6 +76,7 @@ export const eventsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => 
       closed = true;
       unsubscribe();
       clearInterval(heartbeat);
+      if (app.hasDecorator('metrics')) app.metrics.sseConnections.dec();
       if (!res.writableEnded) res.end();
     };
 
@@ -102,6 +103,9 @@ export const eventsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => 
 
     request.raw.on('close', endStream);
     res.on('error', endStream);
+
+    // Track the live connection count for /metrics.
+    if (app.hasDecorator('metrics')) app.metrics.sseConnections.inc();
 
     try {
       if (lastSequence !== null) {

@@ -52,6 +52,7 @@ export const mcpRoutes: FastifyPluginAsync<McpRoutesOptions> = async (
     const authorization = request.headers.authorization;
     const principal = await resolvePatPrincipal(db, authorization, config.tokenPepper);
     if (!principal) {
+      if (app.hasDecorator('metrics')) app.metrics.authFailuresTotal.labels('pat').inc();
       return reply
         .code(401)
         .header('WWW-Authenticate', 'Bearer')
@@ -63,6 +64,7 @@ export const mcpRoutes: FastifyPluginAsync<McpRoutesOptions> = async (
     // --- Delegate to the stateless transport --------------------------------
     // Pass the already-parsed body so the transport does not re-read the
     // consumed Fastify stream.
+    if (app.hasDecorator('metrics')) app.metrics.mcpToolCallsTotal.inc();
     await handle.transport.handleRequest(request.raw, reply.raw, request.body);
   });
 };

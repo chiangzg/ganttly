@@ -54,6 +54,14 @@ const rawConfigSchema = z.object({
   OUTBOX_LAG_ALERT_THRESHOLD: z.coerce.number().int().positive().default(1000),
   /** Prune + sample interval for the maintenance loop. */
   OUTBOX_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
+
+  // --- Rate limiting (spec §15) ----------------------------------------------
+  /** Global request cap per time window. */
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+  /** Rate-limit time window in seconds. */
+  RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Expose the /metrics Prometheus endpoint. */
+  METRICS_ENABLED: z.coerce.boolean().default(true),
 });
 
 export type AuthMode = z.infer<typeof AuthMode>;
@@ -90,6 +98,11 @@ export interface AppConfig {
   outboxRetentionDays: number;
   outboxLagAlertThreshold: number;
   outboxMaintenanceIntervalMs: number;
+
+  /** Rate limiting (spec §15). */
+  rateLimitMax: number;
+  rateLimitWindowSeconds: number;
+  metricsEnabled: boolean;
 
   /** True when running outside development/test. */
   isProduction: boolean;
@@ -195,6 +208,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     outboxRetentionDays: r.OUTBOX_RETENTION_DAYS,
     outboxLagAlertThreshold: r.OUTBOX_LAG_ALERT_THRESHOLD,
     outboxMaintenanceIntervalMs: r.OUTBOX_MAINTENANCE_INTERVAL_MS,
+    rateLimitMax: r.RATE_LIMIT_MAX,
+    rateLimitWindowSeconds: r.RATE_LIMIT_WINDOW_SECONDS,
+    metricsEnabled: r.METRICS_ENABLED,
     isProduction,
   };
 }

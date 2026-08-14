@@ -5,14 +5,16 @@
  * discovery. Returning the unbuilt-then-built instance lets tests use Fastify
  * `inject()` without binding a port.
  */
-import { API_PREFIX, buildApiError, errorCodeToStatus } from '@ganttly/api-contract';
+import { API_PREFIX, ApiErrorCode, buildApiError, errorCodeToStatus } from '@ganttly/api-contract';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import type { AppConfig } from './config';
 import type { GitHubOAuthDeps } from './auth/github';
 import { HttpError } from './modules/errors';
 import { createWorkspaceEventBus } from './modules/events/bus';
 import { createOutboxPublisher, type OutboxPublisher } from './modules/events/publisher';
+import { collectOutboxMetrics, createMetrics } from './modules/metrics';
 import authPlugin from './plugins/auth';
 import databasePlugin from './plugins/database';
 import { observabilityPlugin } from './plugins/observability';
@@ -22,6 +24,7 @@ import { healthRoutes } from './routes/health';
 import { identityRoutes } from './routes/identity';
 import { instanceRoutes } from './routes/instance';
 import { mcpRoutes } from './routes/mcp';
+import { metricsRoutes } from './routes/metrics';
 import { patRoutes } from './routes/pats';
 import { projectsRoutes } from './routes/projects';
 
@@ -56,14 +59,20 @@ export async function buildServer(
     bodyLimit: config.maxProjectBytes,
   });
 
-  // Map domain HttpErrors onto the shared ApiErrorResponse body; anything else
-  // is an unexpected failure logged as a 500 with a plain body (the contract
-  // defines no code for internal errors).
+  // Map domain HttpErrors onto the shared ApiErrorResponse body; the rate
+  // limiter throws a 429 (Retry-After already set by the plugin); anything else
+  // is an unexpected failure logged as a 500 with a plain body.
   app.setErrorHandler(async (err, request, reply) => {
     if (err instanceof HttpError) {
       return reply
         .code(errorCodeToStatus[err.code])
         .send(buildApiError(err.code, err.message, request.id, err.details));
+    }
+    if (err instanceof Error && (err as { statusCode?: number }).statusCode === 429) {
+      metrics.rateLimitedTotal.inc();
+      return reply
+        .code(429)
+        .send(buildApiError(ApiErrorCode.RATE_LIMITED, 'Rate limit exceeded', request.id));
     }
     request.log.error({ err }, 'unhandled error');
     return reply
@@ -78,7 +87,22 @@ export async function buildServer(
     credentials: true,
   });
 
-  await app.register(observabilityPlugin, { instanceId: config.instanceId });
+  // Prometheus metrics (spec §15). Decorated so routes (SSE/MCP) can record
+  // business counters; /metrics exposes the registry text.
+  const metrics = createMetrics(config.instanceId);
+  app.decorate('metrics', metrics);
+
+  // Rate limiting (spec §15): a global per-IP cap. On exceed the plugin throws
+  // (having already set the Retry-After header); the shared error handler maps
+  // that onto a RATE_LIMITED ApiErrorResponse.
+  await app.register(rateLimit, {
+    max: config.rateLimitMax,
+    timeWindow: `${config.rateLimitWindowSeconds}s`,
+    addHeadersOnExceeding: { 'x-ratelimit-limit': true, 'x-ratelimit-remaining': true },
+    addHeaders: { 'x-ratelimit-limit': true, 'x-ratelimit-remaining': true, 'retry-after': true },
+  });
+
+  await app.register(observabilityPlugin, { instanceId: config.instanceId, metrics });
 
   // Stateless session cookie + principal resolution. Registered before routes
   // so `request.principal` is available to every handler.
@@ -126,6 +150,26 @@ export async function buildServer(
   await app.register(eventsRoutes, { prefix: API_PREFIX });
   // MCP lives at the root (/mcp), not under /api/v1.
   await app.register(mcpRoutes, { config });
+
+  // Prometheus scrape endpoint (gated by config; no auth).
+  if (config.metricsEnabled) {
+    await app.register(metricsRoutes, { metrics });
+  }
+
+  // Periodically sample the outbox backlog into the metrics gauges.
+  if (options.registerDatabase !== false) {
+    let metricsTimer: ReturnType<typeof setInterval> | null = null;
+    app.addHook('onReady', async () => {
+      metricsTimer = setInterval(
+        () => void collectOutboxMetrics(app.db, metrics),
+        config.outboxMaintenanceIntervalMs,
+      );
+      metricsTimer.unref?.();
+    });
+    app.addHook('onClose', async () => {
+      if (metricsTimer) clearInterval(metricsTimer);
+    });
+  }
 
   return app;
 }

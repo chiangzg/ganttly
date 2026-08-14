@@ -69,6 +69,7 @@ describe('error contract', () => {
     expect(errorCodeToStatus[ApiErrorCode.IDEMPOTENCY_CONFLICT]).toBe(409);
     expect(errorCodeToStatus[ApiErrorCode.REVISION_CONFLICT]).toBe(412);
     expect(errorCodeToStatus[ApiErrorCode.LIMIT_EXCEEDED]).toBe(413);
+    expect(errorCodeToStatus[ApiErrorCode.RATE_LIMITED]).toBe(429);
     expect(errorCodeToStatus[ApiErrorCode.UNSUPPORTED_CLIENT]).toBe(426);
   });
 
