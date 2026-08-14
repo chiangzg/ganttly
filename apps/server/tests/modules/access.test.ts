@@ -3,9 +3,12 @@ import type { FastifyRequest } from 'fastify';
 import {
   ROLE_RANK,
   type WorkspaceRole,
+  hasScope,
   meetsRole,
   requirePrincipal,
+  requireScope,
 } from '../../src/modules/access';
+import { webPrincipal } from '../../src/auth/principal';
 import { HttpError } from '../../src/modules/errors';
 
 describe('ROLE_RANK', () => {
@@ -54,5 +57,49 @@ describe('requirePrincipal', () => {
     };
     const req = { principal } as unknown as FastifyRequest;
     expect(requirePrincipal(req)).toBe(principal);
+  });
+});
+
+describe('hasScope', () => {
+  it('grants a scope the principal holds', () => {
+    const principal = {
+      actorType: 'pat' as const,
+      actorId: 'pat_1',
+      userId: 'usr_1',
+      scopes: ['task:write', 'project:read'] as const,
+    };
+    expect(hasScope(principal, 'task:write')).toBe(true);
+  });
+
+  it('denies a scope the principal lacks', () => {
+    const principal = {
+      actorType: 'pat' as const,
+      actorId: 'pat_1',
+      userId: 'usr_1',
+      scopes: ['project:read'] as const,
+    };
+    expect(hasScope(principal, 'task:write')).toBe(false);
+  });
+});
+
+describe('requireScope', () => {
+  it('throws FORBIDDEN when the scope is missing', () => {
+    const principal = {
+      actorType: 'pat' as const,
+      actorId: 'pat_1',
+      userId: 'usr_1',
+      scopes: ['project:read'] as const,
+    };
+    try {
+      requireScope(principal, 'task:write');
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpError);
+      expect((err as HttpError).code).toBe('FORBIDDEN');
+    }
+  });
+
+  it('passes silently when the scope is held', () => {
+    expect(() => requireScope(webPrincipal('usr_1'), 'task:write')).not.toThrow();
   });
 });

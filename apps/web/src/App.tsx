@@ -12,6 +12,7 @@ import {
 import { AlertTriangle, LoaderCircle } from 'lucide-react';
 import { GanttView } from './components/GanttView';
 import { ProjectCenter } from './components/projects/ProjectCenter';
+import { PatSettings } from './components/settings/PatSettings';
 import { getRepository } from './data/createRepository';
 import {
   buildProjectPath,
@@ -67,6 +68,9 @@ export function App() {
             element={<Navigate to={`${buildScopePath(LOCAL_SCOPE)}/trash`} replace />}
           />
           <Route path="/projects/:projectId" element={<LegacyProjectRedirect />} />
+
+          {/* Settings. */}
+          <Route path="/settings/tokens" element={<PatSettings />} />
 
           <Route path="*" element={<Navigate to={buildScopePath(LOCAL_SCOPE)} replace />} />
         </Routes>

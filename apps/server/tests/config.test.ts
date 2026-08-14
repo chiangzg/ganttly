@@ -21,6 +21,26 @@ describe('loadConfig — happy path', () => {
     expect(cfg.logLevel).toBe('info');
   });
 
+  it('defaults the PAT TTL to 90 days', () => {
+    const cfg = loadConfig(validDevEnv());
+    expect(cfg.patDefaultTtlDays).toBe(90);
+  });
+
+  it('honours an explicit PAT_DEFAULT_TTL_DAYS override', () => {
+    const cfg = loadConfig({ ...validDevEnv(), PAT_DEFAULT_TTL_DAYS: '30' });
+    expect(cfg.patDefaultTtlDays).toBe(30);
+  });
+
+  it('derives allowedMcpHosts from PUBLIC_BASE_URL and allows localhost in dev', () => {
+    const cfg = loadConfig(validDevEnv());
+    expect(cfg.allowedMcpHosts.has('localhost')).toBe(true);
+    expect(cfg.allowedMcpHosts.has('127.0.0.1')).toBe(true);
+    // A non-localhost PUBLIC_BASE_URL adds its host too.
+    const prodish = loadConfig({ ...validDevEnv(), PUBLIC_BASE_URL: 'https://api.ganttly.com' });
+    expect(prodish.allowedMcpHosts.has('api.ganttly.com')).toBe(true);
+    expect(prodish.allowedMcpHosts.has('localhost')).toBe(true);
+  });
+
   it('parses a comma-separated CORS list, trimming blanks', () => {
     const cfg = loadConfig({
       ...validDevEnv(),

@@ -8,4 +8,6 @@
 export * from './errors';
 export * from './instance';
 export * from './limits';
+export * from './mcp';
+export * from './pat';
 export * from './project';

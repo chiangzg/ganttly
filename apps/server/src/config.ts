@@ -40,6 +40,8 @@ const rawConfigSchema = z.object({
 
   MAX_PROJECT_BYTES: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectBytes),
   MAX_PROJECT_TASKS: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectTasks),
+  /** Default PAT lifetime in days when the client omits `expiresAt` (spec §8.3). */
+  PAT_DEFAULT_TTL_DAYS: z.coerce.number().int().positive().default(90),
 });
 
 export type AuthMode = z.infer<typeof AuthMode>;
@@ -62,9 +64,13 @@ export interface AppConfig {
   tokenPepper: string;
   /** Parsed, de-duplicated CORS origin list (empty = no origins allowed). */
   allowedWebOrigins: string[];
+  /** Hostnames accepted by the /mcp endpoint (DNS-rebinding defence). */
+  allowedMcpHosts: ReadonlySet<string>;
 
   maxProjectBytes: number;
   maxProjectTasks: number;
+  /** Default PAT lifetime in days (spec §8.3). */
+  patDefaultTtlDays: number;
 
   /** True when running outside development/test. */
   isProduction: boolean;
@@ -88,7 +94,8 @@ const PROD_SECRET_KEYS = [
 ] as const;
 
 const DEV_SESSION_SECRET = 'dev-session-secret-not-for-production-use';
-const DEV_TOKEN_PEPPER = 'dev-token-pepper-not-for-production-use';
+/** Dev-only pepper (non-secret); tests use it to verify PAT hashing. */
+export const DEV_TOKEN_PEPPER = 'dev-token-pepper-not-for-production-use';
 
 /**
  * Parse and validate configuration. Throws {@link ConfigError} (fail-fast) on
@@ -136,6 +143,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
+  // Hostnames the /mcp endpoint will accept (DNS-rebinding defence, spec §13).
+  // Derived from PUBLIC_BASE_URL; dev also allows localhost variants.
+  const publicHost = hostOf(r.PUBLIC_BASE_URL);
+  const allowedMcpHosts = new Set<string>(publicHost ? [publicHost] : []);
+  if (!isProduction) {
+    allowedMcpHosts.add('localhost');
+    allowedMcpHosts.add('127.0.0.1');
+  }
+
   return {
     nodeEnv: r.NODE_ENV,
     port: r.PORT,
@@ -151,8 +167,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionSecret,
     tokenPepper,
     allowedWebOrigins,
+    allowedMcpHosts,
     maxProjectBytes: r.MAX_PROJECT_BYTES,
     maxProjectTasks: r.MAX_PROJECT_TASKS,
+    patDefaultTtlDays: r.PAT_DEFAULT_TTL_DAYS,
     isProduction,
   };
 }
@@ -168,4 +186,13 @@ export function getConfig(): AppConfig {
 /** Test-only: reset the memoised singleton between cases. */
 export function resetConfigCacheForTests(): void {
   cached = null;
+}
+
+/** Extract the host (without port) from a URL; undefined for invalid input. */
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
 }

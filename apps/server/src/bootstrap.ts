@@ -18,6 +18,8 @@ import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { identityRoutes } from './routes/identity';
 import { instanceRoutes } from './routes/instance';
+import { mcpRoutes } from './routes/mcp';
+import { patRoutes } from './routes/pats';
 import { projectsRoutes } from './routes/projects';
 
 export interface BuildServerOptions {
@@ -97,6 +99,9 @@ export async function buildServer(
   });
   await app.register(identityRoutes, { prefix: API_PREFIX });
   await app.register(projectsRoutes, { prefix: API_PREFIX, config });
+  await app.register(patRoutes, { prefix: API_PREFIX, config });
+  // MCP lives at the root (/mcp), not under /api/v1.
+  await app.register(mcpRoutes, { config });
 
   return app;
 }

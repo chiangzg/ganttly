@@ -77,3 +77,25 @@ export async function requireMembership(
   }
   return membership.role;
 }
+
+/**
+ * Whether a principal holds `scope`. Web sessions implicitly hold the full
+ * role-gated scope set; PATs (and future OAuth clients) hold only their granted
+ * scopes (spec §6.3: effective authority = token scope ∩ workspace role).
+ */
+export function hasScope(principal: AuthPrincipal, scope: string): boolean {
+  return principal.scopes.includes(scope);
+}
+
+/**
+ * Throw FORBIDDEN when the principal lacks `scope`. Used by MCP tool handlers
+ * to gate writes/reads before touching the database.
+ */
+export function requireScope(principal: AuthPrincipal, scope: string): void {
+  if (!hasScope(principal, scope)) {
+    throw new HttpError(
+      ApiErrorCode.FORBIDDEN,
+      `This credential lacks the required scope: ${scope}`,
+    );
+  }
+}
