@@ -127,6 +127,7 @@ const ERROR_CLASSES: Record<ApiErrorCode, typeof RemoteError> = {
   IDEMPOTENCY_CONFLICT: IdempotencyConflictError,
   REVISION_CONFLICT: RemoteError, // handled specially below
   LIMIT_EXCEEDED: LimitExceededError,
+  RATE_LIMITED: RemoteError,
   UNSUPPORTED_CLIENT: UnsupportedClientError,
 };
 

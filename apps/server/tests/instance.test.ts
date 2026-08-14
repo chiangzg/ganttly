@@ -19,10 +19,10 @@ describe('buildDiscovery', () => {
     expect(d.events.url).toBe('http://localhost:3001/api/v1/events');
   });
 
-  it('marks mcp/sse features false until PR5/PR6 wire them', () => {
+  it('advertises the mcp/sse features as wired (PR5/PR6)', () => {
     const d = buildDiscovery(buildTestConfig());
-    expect(d.features.mcp).toBe(false);
-    expect(d.features.sse).toBe(false);
+    expect(d.features.mcp).toBe(true);
+    expect(d.features.sse).toBe(true);
     expect(d.features.projectImport).toBe(true);
     expect(d.auth.providers).toEqual(['github']);
   });

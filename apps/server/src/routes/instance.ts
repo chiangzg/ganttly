@@ -72,8 +72,8 @@ export function buildDiscovery(config: AppConfig): InstanceDiscovery {
     minClientVersion: '0.6.0',
     features: {
       projectImport: true,
-      mcp: false, // PR5 wires the MCP endpoint.
-      sse: false, // PR6 wires the SSE endpoint.
+      mcp: true,
+      sse: true,
       teamWorkspaces: false,
     },
   };

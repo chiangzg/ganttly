@@ -18,6 +18,7 @@ export const ApiErrorCode = {
   REVISION_CONFLICT: 'REVISION_CONFLICT',
   IDEMPOTENCY_CONFLICT: 'IDEMPOTENCY_CONFLICT',
   LIMIT_EXCEEDED: 'LIMIT_EXCEEDED',
+  RATE_LIMITED: 'RATE_LIMITED',
   UNSUPPORTED_CLIENT: 'UNSUPPORTED_CLIENT',
 } as const;
 
@@ -42,10 +43,7 @@ export interface ApiErrorResponse {
  * Stable HTTP status mapping (spec §9.1):
  * auth 401 · forbidden 403 · not-found 404 · validation 422 ·
  * idempotency-conflict 409 · revision-conflict 412 · size-limit 413 ·
- * unsupported-client 426.
- *
- * Rate limiting (429) is emitted out-of-band by the limiter and does not use
- * one of these domain codes.
+ * rate-limited 429 · unsupported-client 426.
  */
 export const errorCodeToStatus: Record<ApiErrorCode, number> = {
   AUTH_REQUIRED: 401,
@@ -55,6 +53,7 @@ export const errorCodeToStatus: Record<ApiErrorCode, number> = {
   IDEMPOTENCY_CONFLICT: 409,
   REVISION_CONFLICT: 412,
   LIMIT_EXCEEDED: 413,
+  RATE_LIMITED: 429,
   UNSUPPORTED_CLIENT: 426,
 };
 

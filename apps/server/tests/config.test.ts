@@ -31,6 +31,27 @@ describe('loadConfig — happy path', () => {
     expect(cfg.patDefaultTtlDays).toBe(30);
   });
 
+  it('defaults the outbox/SSE tuning knobs', () => {
+    const cfg = loadConfig(validDevEnv());
+    expect(cfg.outboxPollIntervalMs).toBe(250);
+    expect(cfg.outboxBatchSize).toBe(100);
+    expect(cfg.outboxRetentionDays).toBe(7);
+    expect(cfg.outboxLagAlertThreshold).toBe(1000);
+    expect(cfg.outboxMaintenanceIntervalMs).toBe(30_000);
+  });
+
+  it('honours explicit outbox overrides (coerced from strings)', () => {
+    const cfg = loadConfig({
+      ...validDevEnv(),
+      OUTBOX_POLL_INTERVAL_MS: '500',
+      OUTBOX_BATCH_SIZE: '50',
+      OUTBOX_RETENTION_DAYS: '14',
+    });
+    expect(cfg.outboxPollIntervalMs).toBe(500);
+    expect(cfg.outboxBatchSize).toBe(50);
+    expect(cfg.outboxRetentionDays).toBe(14);
+  });
+
   it('derives allowedMcpHosts from PUBLIC_BASE_URL and allows localhost in dev', () => {
     const cfg = loadConfig(validDevEnv());
     expect(cfg.allowedMcpHosts.has('localhost')).toBe(true);
