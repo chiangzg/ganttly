@@ -6,6 +6,7 @@
  * `apps/web` and `apps/server` can import it.
  */
 export * from './errors';
+export * from './events';
 export * from './instance';
 export * from './limits';
 export * from './mcp';

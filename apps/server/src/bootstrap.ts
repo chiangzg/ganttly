@@ -11,6 +11,8 @@ import cors from '@fastify/cors';
 import type { AppConfig } from './config';
 import type { GitHubOAuthDeps } from './auth/github';
 import { HttpError } from './modules/errors';
+import { createWorkspaceEventBus } from './modules/events/bus';
+import { createOutboxPublisher, type OutboxPublisher } from './modules/events/publisher';
 import authPlugin from './plugins/auth';
 import databasePlugin from './plugins/database';
 import { observabilityPlugin } from './plugins/observability';
@@ -87,6 +89,26 @@ export async function buildServer(
   if (options.registerDatabase !== false) {
     await app.register(databasePlugin, { databaseUrl: config.databaseUrl });
   }
+
+  // Event bus + outbox publisher (spec §11). The bus is decorated onto the
+  // instance so the SSE route (PR6/2) can subscribe; the publisher is started
+  // once the server is listening and stopped before the pool closes.
+  const bus = createWorkspaceEventBus();
+  let publisher: OutboxPublisher | null = null;
+  app.decorate('bus', bus);
+  if (options.registerDatabase !== false) {
+    publisher = createOutboxPublisher(app.db, bus, {
+      pollIntervalMs: config.outboxPollIntervalMs,
+      batchSize: config.outboxBatchSize,
+      retentionDays: config.outboxRetentionDays,
+      lagAlertThreshold: config.outboxLagAlertThreshold,
+      maintenanceIntervalMs: config.outboxMaintenanceIntervalMs,
+      logger: app.log,
+    });
+    app.addHook('onReady', async () => publisher?.start());
+    app.addHook('onClose', async () => publisher?.stop());
+  }
+  app.addHook('onClose', async () => bus.close());
 
   await app.register(healthRoutes);
   await app.register(instanceRoutes, { config });

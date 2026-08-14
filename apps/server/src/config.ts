@@ -42,6 +42,18 @@ const rawConfigSchema = z.object({
   MAX_PROJECT_TASKS: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectTasks),
   /** Default PAT lifetime in days when the client omits `expiresAt` (spec §8.3). */
   PAT_DEFAULT_TTL_DAYS: z.coerce.number().int().positive().default(90),
+
+  // --- Transactional outbox / SSE (spec §11.2) -------------------------------
+  /** How often the publisher polls for unpublished events. */
+  OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(250),
+  /** Max events drained per poll (FOR UPDATE SKIP LOCKED batch). */
+  OUTBOX_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+  /** Published rows older than this are pruned (cursor retention window). */
+  OUTBOX_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  /** Warn when the unpublished backlog reaches this many rows. */
+  OUTBOX_LAG_ALERT_THRESHOLD: z.coerce.number().int().positive().default(1000),
+  /** Prune + sample interval for the maintenance loop. */
+  OUTBOX_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 export type AuthMode = z.infer<typeof AuthMode>;
@@ -71,6 +83,13 @@ export interface AppConfig {
   maxProjectTasks: number;
   /** Default PAT lifetime in days (spec §8.3). */
   patDefaultTtlDays: number;
+
+  /** Transactional outbox / SSE tuning (spec §11.2). */
+  outboxPollIntervalMs: number;
+  outboxBatchSize: number;
+  outboxRetentionDays: number;
+  outboxLagAlertThreshold: number;
+  outboxMaintenanceIntervalMs: number;
 
   /** True when running outside development/test. */
   isProduction: boolean;
@@ -171,6 +190,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     maxProjectBytes: r.MAX_PROJECT_BYTES,
     maxProjectTasks: r.MAX_PROJECT_TASKS,
     patDefaultTtlDays: r.PAT_DEFAULT_TTL_DAYS,
+    outboxPollIntervalMs: r.OUTBOX_POLL_INTERVAL_MS,
+    outboxBatchSize: r.OUTBOX_BATCH_SIZE,
+    outboxRetentionDays: r.OUTBOX_RETENTION_DAYS,
+    outboxLagAlertThreshold: r.OUTBOX_LAG_ALERT_THRESHOLD,
+    outboxMaintenanceIntervalMs: r.OUTBOX_MAINTENANCE_INTERVAL_MS,
     isProduction,
   };
 }
