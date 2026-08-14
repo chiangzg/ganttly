@@ -9,8 +9,9 @@
  * prompts the login flow rather than switching.
  */
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, Cloud, HardDrive, LogIn, Plus } from 'lucide-react';
+import { Check, ChevronDown, Cloud, HardDrive, KeyRound, LogIn, Plus } from 'lucide-react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { buildScopePath } from '@/lib/routing';
 import { officialInstance, useInstanceStore } from '@/store/useInstanceStore';
@@ -23,6 +24,7 @@ import { AddInstanceDialog } from './AddInstanceDialog';
 
 export function WorkspaceSwitcher() {
   const [addOpen, setAddOpen] = useState(false);
+  const navigate = useNavigate();
   const customInstances = useInstanceStore((s) => s.customInstances);
   const activeScope = useScopeStore((s) => s.activeScope);
   const workspacesByInstance = useScopeStore((s) => s.workspacesByInstance);
@@ -156,6 +158,16 @@ export function WorkspaceSwitcher() {
             })}
 
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
+
+            {authByInstance[officialInstance().id] ? (
+              <DropdownMenu.Item
+                onSelect={() => navigate('/settings/tokens')}
+                className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm text-fg-muted outline-none hover:bg-bg focus:bg-bg"
+              >
+                <KeyRound size={16} />
+                MCP 访问令牌
+              </DropdownMenu.Item>
+            ) : null}
 
             <DropdownMenu.Item
               onSelect={() => setAddOpen(true)}
