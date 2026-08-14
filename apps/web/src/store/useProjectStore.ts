@@ -81,6 +81,8 @@ interface ProjectStoreState {
   dirty: boolean;
   loadState: 'idle' | 'loading' | 'ready' | 'missing' | 'error';
   saveState: SaveState;
+  /** A remote update arrived for the current project while it had unsaved local edits (spec §11.3). */
+  remoteUpdateAvailable: boolean;
 
   // Lifecycle
   setRepository(repo: ProjectRepository): void;
@@ -89,6 +91,14 @@ interface ProjectStoreState {
   unloadProject(): void;
   flushPendingSave(): Promise<void>;
   setFile(file: GanttlyFile): void;
+  /**
+   * Re-fetch the current remote project snapshot and reset undo/redo, WITHOUT
+   * flushing pending edits. Used by the SSE handler when a remote change
+   * arrived and the local copy is clean (spec §11.3 case a), and by the
+   * "remote has updates" banner when the user explicitly reloads (case b).
+   */
+  reloadFromRemote(): Promise<boolean>;
+  setRemoteUpdateAvailable(value: boolean): void;
 
   // Command dispatch (also pushes onto undo stack)
   dispatch(command: Command): void;
@@ -176,6 +186,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   undoStack: [],
   redoStack: [],
   lastSaveError: null,
+  remoteUpdateAvailable: false,
 
   setRepository(repo) {
     set({ repo });
@@ -258,7 +269,49 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       undoStack: [],
       redoStack: [],
       saveState: { status: 'idle' },
+      remoteUpdateAvailable: false,
     });
+  },
+
+  setRemoteUpdateAvailable(value) {
+    set({ remoteUpdateAvailable: value });
+  },
+
+  async reloadFromRemote() {
+    const ref = get().activeProjectRef;
+    const localRepo = get().repo;
+    if (!ref) return false;
+    const repo = resolveRepoForRef(ref, localRepo);
+    if (!repo) return false;
+    const generation = ++loadGeneration;
+    clearSaveTimer();
+    try {
+      const snapshot = await repo.loadProject(ref.projectId);
+      if (generation !== loadGeneration) return false;
+      if (!snapshot || snapshot.summary.deletedAt) {
+        set({ loadState: 'missing', remoteUpdateAvailable: false });
+        return false;
+      }
+      const normalized = withCalendar(snapshot.file);
+      set({
+        activeProjectRef: ref,
+        revision: snapshot.revision,
+        file: normalized,
+        dirty: false,
+        loadState: 'ready',
+        saveState: { status: 'saved' },
+        undoStack: [],
+        redoStack: [],
+        remoteUpdateAvailable: false,
+      });
+      scheduleViolationCheck(normalized, get);
+      return true;
+    } catch (error) {
+      if (generation === loadGeneration) {
+        set({ loadState: 'error', lastSaveError: (error as Error).message });
+      }
+      return false;
+    }
   },
 
   async flushPendingSave() {
