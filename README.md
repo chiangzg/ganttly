@@ -39,6 +39,17 @@ pnpm test:e2e     # Playwright + 截图回归 (50+ 用例)
 
 环境要求:Node ≥ 18, pnpm ≥ 9。
 
+## 自建部署
+
+一份 Docker 镜像同时提供 Web 界面、REST API、MCP 端点与 SSE 实时通知,配合 GitHub OAuth 即可拥有自己的 ganttly 实例:
+
+```bash
+cp .env.example .env   # 填入 GitHub OAuth 与密钥
+docker compose up -d
+```
+
+完整步骤(TLS、备份、升级、故障排查)见 [docs/self-hosting.md](docs/self-hosting.md)。
+
 ## 主要功能
 
 | 功能         | MVP   | 说明                                           |
