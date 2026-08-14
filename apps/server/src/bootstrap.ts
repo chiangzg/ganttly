@@ -17,6 +17,7 @@ import authPlugin from './plugins/auth';
 import databasePlugin from './plugins/database';
 import { observabilityPlugin } from './plugins/observability';
 import { authRoutes } from './routes/auth';
+import { eventsRoutes } from './routes/events';
 import { healthRoutes } from './routes/health';
 import { identityRoutes } from './routes/identity';
 import { instanceRoutes } from './routes/instance';
@@ -122,6 +123,7 @@ export async function buildServer(
   await app.register(identityRoutes, { prefix: API_PREFIX });
   await app.register(projectsRoutes, { prefix: API_PREFIX, config });
   await app.register(patRoutes, { prefix: API_PREFIX, config });
+  await app.register(eventsRoutes, { prefix: API_PREFIX });
   // MCP lives at the root (/mcp), not under /api/v1.
   await app.register(mcpRoutes, { config });
 
