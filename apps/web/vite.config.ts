@@ -22,8 +22,9 @@ export default defineConfig({
     proxy: {
       // Proxy API + discovery to the server so the browser sees same-origin
       // requests — session cookies flow without CORS/SameSite friction.
-      '/api': 'http://localhost:3000',
-      '/.well-known': 'http://localhost:3000',
+      // Default server port is 3001 (apps/server/src/config.ts + .env.example).
+      '/api': 'http://localhost:3001',
+      '/.well-known': 'http://localhost:3001',
     },
   },
   preview: {

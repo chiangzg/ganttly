@@ -9,6 +9,8 @@ import { API_PREFIX, ApiErrorCode, buildApiError, errorCodeToStatus } from '@gan
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import { existsSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { AppConfig } from './config';
 import type { GitHubOAuthDeps } from './auth/github';
 import { HttpError } from './modules/errors';
@@ -18,6 +20,7 @@ import { collectOutboxMetrics, createMetrics } from './modules/metrics';
 import authPlugin from './plugins/auth';
 import databasePlugin from './plugins/database';
 import { observabilityPlugin } from './plugins/observability';
+import webStaticPlugin from './plugins/webStatic';
 import { authRoutes } from './routes/auth';
 import { eventsRoutes } from './routes/events';
 import { healthRoutes } from './routes/health';
@@ -27,6 +30,28 @@ import { mcpRoutes } from './routes/mcp';
 import { metricsRoutes } from './routes/metrics';
 import { patRoutes } from './routes/pats';
 import { projectsRoutes } from './routes/projects';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Number of migration SQL files shipped with the image (health/ready). */
+    expectedMigrationCount?: number;
+  }
+}
+
+/**
+ * Count the `*.sql` files shipped under `apps/server/drizzle`. Resolved relative
+ * to this module so it holds for both the tsx-run source (`src/bootstrap.ts`)
+ * and the esbuild bundle (single `dist/server.js`, same parent dir → same
+ * `../drizzle`). Decorated onto the instance for the `/health/ready` check.
+ */
+function countShippedMigrations(): number {
+  const drizzleDir = fileURLToPath(new URL('../drizzle', import.meta.url));
+  try {
+    return readdirSync(drizzleDir).filter((f) => f.endsWith('.sql')).length;
+  } catch {
+    return 0;
+  }
+}
 
 export interface BuildServerOptions {
   /**
@@ -108,7 +133,7 @@ export async function buildServer(
   // so `request.principal` is available to every handler.
   await app.register(authPlugin, {
     sessionSecret: config.sessionSecret,
-    secureCookies: config.isProduction,
+    secureCookies: config.sessionCookieSecure,
   });
 
   if (options.registerDatabase !== false) {
@@ -169,6 +194,17 @@ export async function buildServer(
     app.addHook('onClose', async () => {
       if (metricsTimer) clearInterval(metricsTimer);
     });
+  }
+
+  // Expose the shipped migration count so /health/ready can detect a DB that
+  // has not yet been migrated up to the image's version.
+  app.decorate('expectedMigrationCount', countShippedMigrations());
+
+  // Same-origin Web hosting (spec §14.2). Registered LAST so the API/MCP/health/
+  // discovery/metrics routes win over its wildcard; the plugin's not-found
+  // handler gives browser navigation an SPA shell while keeping API 404s JSON.
+  if (config.webDistDir && existsSync(config.webDistDir)) {
+    await app.register(webStaticPlugin, { root: config.webDistDir });
   }
 
   return app;

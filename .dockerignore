@@ -1,0 +1,51 @@
+# Keep the Docker build context small and free of local state/secrets.
+# The builder re-runs pnpm install and both builds — nothing below is needed.
+
+# VCS / CI / tooling
+.git
+.github
+.husky
+.zcode
+.qoder
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Dependencies (installed inside the image)
+node_modules
+**/node_modules
+
+# Build outputs (rebuilt in the builder stage)
+dist
+**/dist
+build
+*.tsbuildinfo
+
+# Test artifacts
+coverage
+**/coverage
+test-results
+**/test-results
+playwright-report
+**/playwright-report
+**/tests
+**/*.test.ts
+**/*.test.tsx
+
+# Local env — NEVER bake secrets into images
+.env
+.env.*
+!.env.example
+
+# Docs and repo meta not needed to build
+docs
+*.md
+!README.md
+
+# Misc
+*.log
+.cache
+.claude
+CLAUDE.md
+AGENTS.md
