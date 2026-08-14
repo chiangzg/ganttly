@@ -9,6 +9,7 @@
  * can surface them to the model rather than treating them as protocol failures.
  */
 import { randomUUID } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { eq } from 'drizzle-orm';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -86,17 +87,19 @@ function projectLabel(row: ProjectRow): string {
 }
 
 export interface McpHandle {
-  server: McpServer;
-  transport: StreamableHTTPServerTransport;
+  /**
+   * Serve one stateless MCP request. A fresh transport is created per request:
+   * the Streamable HTTP transport rejects reuse in stateless mode (message-id
+   * collisions), and a `Protocol` instance accepts exactly one transport.
+   */
+  handleRequest(req: IncomingMessage, res: ServerResponse, body: unknown): Promise<void>;
 }
 
 /**
- * Build the connected MCP server + transport. Stateless (no session id) so any
- * instance can serve any request — suitable for horizontal scaling (spec §10).
+ * Register the eleven first-version tools onto a (fresh) {@link McpServer}.
  */
-export function createMcpServer(deps: CreateMcpServerDeps): McpHandle {
+function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
   const { db, service } = deps;
-  const server = new McpServer({ name: 'ganttly', version: '1.0.0' });
 
   // --- read tools -----------------------------------------------------------
   server.registerTool(
@@ -147,7 +150,7 @@ export function createMcpServer(deps: CreateMcpServerDeps): McpHandle {
       toolResult(extra.authInfo, async (p) => {
         requireScope(p, 'project:read');
         const { workspaceId, projectId } = args;
-        await requireMembership(db, p, workspaceId, 'viewer');
+        await requireMembership(db, p, workspaceId, 'viewer', projectId);
         const row = await getProjectRow(db, workspaceId, projectId);
         if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
         return { project: buildSummary(row) };
@@ -164,7 +167,7 @@ export function createMcpServer(deps: CreateMcpServerDeps): McpHandle {
     (args, extra) =>
       toolResult(extra.authInfo, async (p) => {
         requireScope(p, 'project:read');
-        await requireMembership(db, p, args.workspaceId, 'viewer');
+        await requireMembership(db, p, args.workspaceId, 'viewer', args.projectId);
         const row = await getProjectRow(db, args.workspaceId, args.projectId);
         if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
         return searchTasksInFile(row.fileJsonb as never, args);
@@ -180,7 +183,7 @@ export function createMcpServer(deps: CreateMcpServerDeps): McpHandle {
     (args, extra) =>
       toolResult(extra.authInfo, async (p) => {
         requireScope(p, 'project:read');
-        await requireMembership(db, p, args.workspaceId, 'viewer');
+        await requireMembership(db, p, args.workspaceId, 'viewer', args.projectId);
         const row = await getProjectRow(db, args.workspaceId, args.projectId);
         if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
         const detail = getTaskDetail(row.fileJsonb as never, args.taskId);
@@ -299,14 +302,31 @@ export function createMcpServer(deps: CreateMcpServerDeps): McpHandle {
         }),
       ),
   );
+}
 
-  // Stateless + JSON responses: each POST returns a plain JSON-RPC result (no
-  // SSE stream). SSE notifications land in PR6; v1 MCP only needs tool calls.
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
-  return { server, transport };
+/**
+ * Build the MCP request handler. Stateless (no session id) so any instance can
+ * serve any request — suitable for horizontal scaling (spec §10). Each call
+ * spins up a fresh {@link McpServer} + transport and connects them; the
+ * transport rejects reuse in stateless mode and a `Protocol` holds at most one
+ * transport, so the two cannot be shared across requests.
+ */
+export function createMcpServer(deps: CreateMcpServerDeps): McpHandle {
+  async function handleRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    body: unknown,
+  ): Promise<void> {
+    const server = new McpServer({ name: 'ganttly', version: '1.0.0' });
+    registerTools(server, deps);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, body);
+  }
+  return { handleRequest };
 }
 
 export { projectLabel };

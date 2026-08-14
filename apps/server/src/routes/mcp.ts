@@ -38,8 +38,6 @@ export const mcpRoutes: FastifyPluginAsync<McpRoutesOptions> = async (
   };
   const service = new ProjectApplicationService(db, limits);
   const handle: McpHandle = createMcpServer({ db, service });
-  // One shared server+transport for all stateless requests.
-  await handle.server.connect(handle.transport);
 
   app.all('/mcp', async (request, reply) => {
     // --- DNS-rebinding defence (spec §13) -----------------------------------
@@ -65,7 +63,7 @@ export const mcpRoutes: FastifyPluginAsync<McpRoutesOptions> = async (
     // Pass the already-parsed body so the transport does not re-read the
     // consumed Fastify stream.
     if (app.hasDecorator('metrics')) app.metrics.mcpToolCallsTotal.inc();
-    await handle.transport.handleRequest(request.raw, reply.raw, request.body);
+    await handle.handleRequest(request.raw, reply.raw, request.body);
   });
 };
 
