@@ -1,6 +1,6 @@
 {
   "name": "ganttly",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Open-source web Gantt chart software — a modern, local-first, Chinese-first alternative to GanttProject.",
   "license": "MIT",
@@ -11,8 +11,10 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @ganttly/web dev",
-    "build": "pnpm --filter @ganttly/web build",
+    "dev": "pnpm --parallel --filter @ganttly/web --filter @ganttly/server run dev",
+    "dev:setup": "node scripts/dev-setup.mjs",
+    "dev:down": "docker compose -f docker-compose.dev.yml down",
+    "build": "pnpm --filter @ganttly/web build && pnpm --filter @ganttly/server build",
     "preview": "pnpm --filter @ganttly/web preview",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",

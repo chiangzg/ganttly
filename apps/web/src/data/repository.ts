@@ -1,4 +1,6 @@
 import type { GanttlyFile, Task } from '@ganttly/schema';
+import type { ProjectRef } from './projectRef';
+import { localRef } from './projectRef';
 
 export type ProjectId = string;
 export type ProjectRevision = string;
@@ -39,28 +41,132 @@ export interface ListProjectOptions {
 }
 
 export interface OpenProjectTab {
-  projectId: ProjectId;
+  ref: ProjectRef;
   pinned: boolean;
 }
 
 export interface RecentProject {
-  projectId: ProjectId;
+  ref: ProjectRef;
   lastOpenedAt: string;
 }
 
 export interface ProjectNavigationState {
-  lastActiveProjectId: ProjectId | null;
+  lastActiveRef: ProjectRef | null;
   openTabs: OpenProjectTab[];
-  favoriteProjectIds: ProjectId[];
+  favoriteRefs: ProjectRef[];
   recentProjects: RecentProject[];
 }
 
 export const EMPTY_PROJECT_NAVIGATION: ProjectNavigationState = {
-  lastActiveProjectId: null,
+  lastActiveRef: null,
   openTabs: [],
-  favoriteProjectIds: [],
+  favoriteRefs: [],
   recentProjects: [],
 };
+
+/**
+ * Migrate a raw persisted navigation blob into the current {@link ProjectRef}-
+ * based shape. Handles the pre-PR4 format where ids were bare strings
+ * (implicitly local-mode) by wrapping each in a `{ local, local, id }` ref.
+ *
+ * Also validates the new shape defensively — corrupt arrays / unknown keys
+ * are dropped rather than crashing the app.
+ */
+export function migrateNavigation(raw: unknown): ProjectNavigationState {
+  if (!raw || typeof raw !== 'object') return structuredClone(EMPTY_PROJECT_NAVIGATION);
+  const obj = raw as Record<string, unknown>;
+
+  // Detect old format: presence of lastActiveProjectId / favoriteProjectIds.
+  const isOldFormat =
+    'lastActiveProjectId' in obj ||
+    'favoriteProjectIds' in obj ||
+    (Array.isArray(obj.openTabs) &&
+      obj.openTabs.length > 0 &&
+      typeof (obj.openTabs as Array<Record<string, unknown>>)[0]?.projectId === 'string');
+
+  if (isOldFormat) {
+    return migrateOldNavigation(obj);
+  }
+
+  // New format — validate shape.
+  const lastActiveRef = parseRef(obj.lastActiveRef);
+  const openTabs = Array.isArray(obj.openTabs)
+    ? obj.openTabs.map(parseTab).filter((t): t is OpenProjectTab => t !== null)
+    : [];
+  const favoriteRefs = Array.isArray(obj.favoriteRefs)
+    ? obj.favoriteRefs.map(parseRef).filter((r): r is ProjectRef => r !== null)
+    : [];
+  const recentProjects = Array.isArray(obj.recentProjects)
+    ? obj.recentProjects.map(parseRecent).filter((r): r is RecentProject => r !== null)
+    : [];
+
+  return { lastActiveRef, openTabs, favoriteRefs, recentProjects };
+}
+
+function migrateOldNavigation(obj: Record<string, unknown>): ProjectNavigationState {
+  const oldLastActive =
+    typeof obj.lastActiveProjectId === 'string' ? obj.lastActiveProjectId : null;
+  const oldFavorites = Array.isArray(obj.favoriteProjectIds)
+    ? (obj.favoriteProjectIds as unknown[]).filter((id): id is string => typeof id === 'string')
+    : [];
+  const oldTabs = Array.isArray(obj.openTabs)
+    ? (obj.openTabs as Array<Record<string, unknown>>)
+    : [];
+  const oldRecents = Array.isArray(obj.recentProjects)
+    ? (obj.recentProjects as Array<Record<string, unknown>>)
+    : [];
+
+  return {
+    lastActiveRef: oldLastActive ? localRef(oldLastActive) : null,
+    openTabs: oldTabs
+      .filter((tab) => typeof tab.projectId === 'string')
+      .map((tab) => ({
+        ref: localRef(tab.projectId as string),
+        pinned: Boolean(tab.pinned),
+      })),
+    favoriteRefs: oldFavorites.map((id) => localRef(id)),
+    recentProjects: oldRecents
+      .filter((r) => typeof r.projectId === 'string')
+      .map((r) => ({
+        ref: localRef(r.projectId as string),
+        lastOpenedAt:
+          typeof r.lastOpenedAt === 'string' ? r.lastOpenedAt : new Date(0).toISOString(),
+      })),
+  };
+}
+
+function parseRef(value: unknown): ProjectRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  if (
+    typeof obj.instanceId === 'string' &&
+    typeof obj.workspaceId === 'string' &&
+    typeof obj.projectId === 'string'
+  ) {
+    return { instanceId: obj.instanceId, workspaceId: obj.workspaceId, projectId: obj.projectId };
+  }
+  return null;
+}
+
+function parseTab(value: unknown): OpenProjectTab | null {
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  const ref = parseRef(obj.ref);
+  if (!ref) return null;
+  return { ref, pinned: Boolean(obj.pinned) };
+}
+
+function parseRecent(value: unknown): RecentProject | null {
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  const ref = parseRef(obj.ref);
+  if (!ref) return null;
+  return {
+    ref,
+    lastOpenedAt:
+      typeof obj.lastOpenedAt === 'string' ? obj.lastOpenedAt : new Date(0).toISOString(),
+  };
+}
 
 export class RevisionConflictError extends Error {
   constructor(

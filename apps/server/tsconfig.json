@@ -1,0 +1,8 @@
+{
+  "extends": "@ganttly/tsconfig/node.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "tests/**/*", "drizzle.config.ts", "vitest.config.ts"]
+}

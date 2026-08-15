@@ -11,13 +11,15 @@ import { expect, test } from '@playwright/test';
  * frame. Virtualisation is exercised too: only the visible row/column band
  * is drawn each frame.
  *
- * The threshold is CI-aware. Standard GitHub-hosted runners are 2–3× slower
- * than a dev laptop and run single-worker, so we lower the bar there. If
- * virtualisation ever breaks, the full 1000 rows get redrawn every frame and
- * FPS collapses to single digits — well below either floor — so the
- * regression guard stays effective.
+ * The threshold is CI-aware. GitHub-hosted runners measure absolute FPS with
+ * wide run-to-run variance: healthy samples ranged 10.8–14.8 FPS across CI
+ * runs (clean main measured 13.9–14.8 and still missed the old floor of 15),
+ * and a dev laptop lands around 23 FPS. The floor therefore only needs to sit
+ * above the regression cliff: if virtualisation ever breaks, the full 1000
+ * rows get redrawn every frame and FPS collapses to ~1–2 — far below either
+ * floor — so the guard stays effective.
  */
-const FPS_FLOOR = process.env.CI ? 15 : 30;
+const FPS_FLOOR = process.env.CI ? 8 : 20;
 const WARMUP_FRAMES = 15;
 const MEASURE_FRAMES = 120;
 const SCROLL_STEP_PX = 40;
@@ -208,10 +210,9 @@ test('1000-task canvas with active baseline scrolls smoothly', async ({ page }) 
   expect(finalScrollLeft, 'scroll actually advanced during sampling').toBeGreaterThan(0);
   // Allow headroom vs the plain 1000-task floor — baseline assembly adds work
   // per frame (snapshot map + per-row variance), but it must stay well above
-  // the single-digit regression cliff. The local floor is a touch lower than
-  // the plain test because parallel E2E runs (default workers) cause CPU
-  // contention; CI runs serially (workers=1) so its floor stays tight.
-  const FPS_FLOOR_BASELINE = process.env.CI ? 12 : 20;
+  // the ~1–2 FPS regression cliff. Local floors also account for CPU
+  // contention from parallel E2E workers (CI runs serially, workers=1).
+  const FPS_FLOOR_BASELINE = process.env.CI ? 8 : 15;
   expect(fps, `measured FPS with baseline: ${fps.toFixed(1)}`).toBeGreaterThanOrEqual(
     FPS_FLOOR_BASELINE,
   );

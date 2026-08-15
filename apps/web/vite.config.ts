@@ -14,11 +14,18 @@ export default defineConfig({
   },
   // Pre-bundle workspace deps so they reload cleanly on change.
   optimizeDeps: {
-    include: ['@ganttly/schema', '@ganttly/calendar-data'],
+    include: ['@ganttly/schema', '@ganttly/calendar-data', '@ganttly/domain'],
   },
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      // Proxy API + discovery to the server so the browser sees same-origin
+      // requests — session cookies flow without CORS/SameSite friction.
+      // Default server port is 3001 (apps/server/src/config.ts + .env.example).
+      '/api': 'http://localhost:3001',
+      '/.well-known': 'http://localhost:3001',
+    },
   },
   preview: {
     port: 4173,

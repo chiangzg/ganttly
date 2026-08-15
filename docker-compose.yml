@@ -1,0 +1,60 @@
+# ganttly self-hosted stack (spec §14.2).
+#
+#   cp .env.example .env   # fill in every value
+#   docker compose up -d   # builds the image, migrates, starts the server
+#
+# Three services:
+#   postgres — data lives in the named volume `pgdata`
+#   migrate  — one-shot: applies the Drizzle migrations bundled in the image
+#              (explicit release step, spec §14.1 — the server never
+#              auto-migrates). `server` waits for its successful completion.
+#   server   — serves the Web bundle + API + MCP + SSE on one origin
+#
+# DATABASE_URL is interpolated here from POSTGRES_PASSWORD so the password is
+# written once in .env; do not set DATABASE_URL there.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ganttly
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ganttly']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    image: ganttly
+    command: ['node', 'apps/server/dist/migrate.js']
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/ganttly
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  server:
+    build: .
+    image: ganttly
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/ganttly
+    env_file: .env
+    ports:
+      - '${GANTTLY_PORT:-3001}:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:

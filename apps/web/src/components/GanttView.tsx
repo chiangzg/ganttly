@@ -30,16 +30,20 @@ import { StatusBar } from './StatusBar';
 import { TaskDrawer } from './TaskDrawer';
 import { ContextMenu } from './ContextMenu';
 import { BatchActionBar } from './BatchActionBar';
+import { RemoteUpdateBanner } from './editor/RemoteUpdateBanner';
 import { useViewStore } from '@/store/useViewStore';
 import { ProjectHeader } from './projects/ProjectHeader';
 import { UndoToastStack } from '@/lib/toast';
 import { useEditorShortcuts } from './useEditorShortcuts';
+import { useRemoteEvents } from '@/hooks/useRemoteEvents';
 
 export function GanttView() {
   const viewMode = useViewStore((s) => s.viewMode);
   // Global undo/redo/save shortcuts (plan §4.2). Mounted here so the listener
   // is alive whenever the editor is on screen, regardless of which pane has focus.
   useEditorShortcuts();
+  // Subscribe to remote workspace events (spec §11.3); no-op for local scope.
+  useRemoteEvents();
 
   return (
     <div className="flex h-full flex-col">
@@ -47,6 +51,7 @@ export function GanttView() {
         <ProjectHeader />
         <Toolbar />
       </div>
+      <RemoteUpdateBanner />
       {/* `relative` anchors the floating BatchActionBar (plan §4.6). */}
       <div className="relative flex flex-1 overflow-hidden">
         {viewMode === 'resource' ? (
