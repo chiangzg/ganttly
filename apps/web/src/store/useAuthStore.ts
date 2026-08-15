@@ -37,7 +37,18 @@ interface AuthState {
   isAuthenticated(instanceId: string): boolean;
   getProfile(instanceId: string): UserProfile | null;
   checkAuth(instance: InstanceConfig): Promise<UserProfile | null>;
-  login(instance: InstanceConfig, returnTo?: string): void;
+  /**
+   * Start the GitHub OAuth web flow. Resolves `false` when the instance is
+   * unreachable (server down, CORS/network failure) so callers can surface a
+   * friendly error instead of dumping the user onto a raw proxy 500 page.
+   */
+  login(instance: InstanceConfig, returnTo?: string): Promise<boolean>;
+  /**
+   * Dev-instance login: POST `/auth/dev-session` to provision the fixed test
+   * user, then verify via {@link checkAuth}. Returns the profile on success,
+   * null when the instance is unreachable or not running AUTH_MODE=dev.
+   */
+  devLogin(instance: InstanceConfig): Promise<UserProfile | null>;
   logout(instance: InstanceConfig): Promise<void>;
   clearAuth(instanceId: string): void;
 }
@@ -87,7 +98,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  login(instance, returnTo) {
+  async login(instance: InstanceConfig, returnTo?: string): Promise<boolean> {
+    const baseUrl = instance.baseUrl.replace(/\/+$/, '');
+    // Pre-flight reachability before redirecting: `/me` answers 401 when the
+    // server is healthy but logged out (the expected pre-login state); any
+    // other failure means the OAuth entrypoint cannot be reached right now.
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/me`, {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (response.status !== 401 && !response.ok) return false;
+    } catch {
+      return false;
+    }
     const path =
       returnTo ??
       (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/');
@@ -96,10 +120,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // sessionStorage unavailable — proceed without return-to.
     }
-    const baseUrl = instance.baseUrl.replace(/\/+$/, '');
     if (typeof window !== 'undefined') {
       window.location.href = `${baseUrl}/api/v1/auth/github`;
     }
+    return true;
+  },
+
+  async devLogin(instance: InstanceConfig): Promise<UserProfile | null> {
+    const baseUrl = instance.baseUrl.replace(/\/+$/, '');
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/auth/dev-session`, {
+        method: 'POST',
+        credentials: 'include',
+        // Fastify rejects an empty body when Content-Type is JSON — send `{}`.
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) return null;
+    } catch {
+      return null;
+    }
+    // The dev-session cookie is set — confirm via /me so authByInstance
+    // updates and login-gated UI re-renders.
+    return get().checkAuth(instance);
   },
 
   async logout(instance) {

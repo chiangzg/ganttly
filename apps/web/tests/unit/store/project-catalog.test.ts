@@ -158,3 +158,20 @@ describe('remote ref handling (scope-aware resolution)', () => {
     expect(next).toEqual({ instanceId: 'inst_x', workspaceId: 'ws_1', projectId: 'prj_2' });
   });
 });
+
+describe('boot race (refresh before init)', () => {
+  it('a refresh racing ahead of init cannot starve initialization', async () => {
+    // Fresh page load: ProjectCenter's refresh effect flushes before App's
+    // init effect (child passive effects run first), so refresh sees no repo.
+    useProjectCatalogStore.setState({ repo: null, status: 'idle', error: null });
+    await useProjectCatalogStore.getState().refresh();
+    expect(useProjectCatalogStore.getState().status).toBe('error');
+
+    // App's init guard keys off the repository, not `status === 'idle'`,
+    // so init still runs and clears the transient error.
+    await useProjectCatalogStore.getState().init(repo);
+    expect(useProjectCatalogStore.getState().status).toBe('ready');
+    expect(useProjectCatalogStore.getState().error).toBeNull();
+    expect(useProjectCatalogStore.getState().repo).toBe(repo);
+  });
+});

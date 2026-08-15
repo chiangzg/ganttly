@@ -15,14 +15,21 @@ import {
   Upload,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { GanttlyFile } from '@ganttly/schema';
 import type { ProjectSummary } from '@/data/repository';
 import type { ProjectRef } from '@/data/projectRef';
-import { buildProjectPath, buildScopePath, buildTrashPath, LOCAL_SCOPE } from '@/lib/routing';
+import {
+  buildProjectPath,
+  buildScopePath,
+  buildTrashPath,
+  LOCAL_SCOPE,
+  scopeFromParams,
+} from '@/lib/routing';
 import { cn } from '@/lib/cn';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { useScopeStore } from '@/store/useScopeStore';
+import { useProjectStore } from '@/store/useProjectStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { WorkspaceSwitcher } from '@/components/workspace/WorkspaceSwitcher';
 import { LoginGate } from '@/components/workspace/LoginGate';
@@ -35,11 +42,13 @@ type Sort = 'recent' | 'updated' | 'name';
 
 export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const navigate = useNavigate();
+  const params = useParams();
   const projects = useProjectCatalogStore((state) => (trashMode ? state.trash : state.projects));
   const navigation = useProjectCatalogStore((state) => state.navigation);
   const status = useProjectCatalogStore((state) => state.status);
   const error = useProjectCatalogStore((state) => state.error);
   const refresh = useProjectCatalogStore((state) => state.refresh);
+  const repo = useProjectCatalogStore((state) => state.repo);
   const createProject = useProjectCatalogStore((state) => state.createProject);
   const renameProject = useProjectCatalogStore((state) => state.renameProject);
   const activeScope = useScopeStore((state) => state.activeScope);
@@ -62,6 +71,27 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   const scopeKey = `${activeScope.instanceId}/${activeScope.workspaceId}`;
   const isRemote = activeScope.instanceId !== 'local';
   const remoteAuthed = !isRemote || Boolean(authByInstance[activeScope.instanceId]);
+  // While the login gate is up, the (possibly stale local) project grid must
+  // not render alongside it.
+  const loginGated = isRemote && !remoteAuthed;
+
+  // The URL is the source of truth for the active scope: deep links and
+  // post-login redirects render a scope path without going through the
+  // workspace switcher, so reconcile the store to the route on mount.
+  const routeScope = scopeFromParams(params) ?? LOCAL_SCOPE;
+  const routeInstanceId = routeScope.instanceId;
+  const routeWorkspaceId = routeScope.workspaceId;
+  useEffect(() => {
+    const current = useScopeStore.getState().activeScope;
+    if (current.instanceId === routeInstanceId && current.workspaceId === routeWorkspaceId) {
+      return;
+    }
+    void useScopeStore
+      .getState()
+      .switchScope({ instanceId: routeInstanceId, workspaceId: routeWorkspaceId }, () =>
+        useProjectStore.getState().flushPendingSave(),
+      );
+  }, [routeInstanceId, routeWorkspaceId]);
 
   // The card grid reflects the active scope, so every ref derived from a
   // summary must carry that scope — never assume local.
@@ -72,8 +102,11 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
   });
 
   useEffect(() => {
-    if (remoteAuthed) void refresh();
-  }, [scopeKey, remoteAuthed]);
+    // Skip until the catalog repository is injected: this effect runs before
+    // App's init effect on a fresh page load, and refreshing without a repo
+    // would flip the catalog into a transient error state.
+    if (repo && remoteAuthed) void refresh();
+  }, [scopeKey, remoteAuthed, repo]);
 
   // Pre-compute active-scope lookup sets from the ref-based navigation state.
   const recentRank = useMemo(() => {
@@ -147,7 +180,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
               >
                 <ArrowLeft size={16} /> 返回项目中心
               </button>
-            ) : (
+            ) : loginGated ? null : (
               <>
                 <button
                   type="button"
@@ -170,7 +203,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8">
-        {isRemote && !remoteAuthed ? (
+        {loginGated ? (
           <LoginGate />
         ) : !trashMode ? (
           <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -221,14 +254,14 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
           </div>
         ) : null}
 
-        {status === 'loading' ? <ProjectGridSkeleton /> : null}
-        {error ? (
+        {status === 'loading' && !loginGated ? <ProjectGridSkeleton /> : null}
+        {error && !loginGated ? (
           <div className="rounded-2xl border border-danger/30 bg-danger/5 p-5 text-sm text-danger">
             无法加载项目：{error}
           </div>
         ) : null}
 
-        {status !== 'loading' && shown.length === 0 ? (
+        {status !== 'loading' && shown.length === 0 && !loginGated ? (
           <EmptyState
             trashMode={trashMode}
             hasQuery={Boolean(query)}
@@ -236,7 +269,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
           />
         ) : null}
 
-        {shown.length > 0 ? (
+        {shown.length > 0 && !loginGated ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
             {!trashMode && !query && filter === 'all' ? (
               <button

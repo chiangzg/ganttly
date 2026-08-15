@@ -33,6 +33,27 @@ describe('instance discovery schema', () => {
     });
     expect(result.instanceId).toBe('inst_official');
     expect(result.mcp.transport).toBe('streamable-http');
+    // Old servers predate the field — it must default rather than reject.
+    expect(result.auth.devLogin).toBe(false);
+  });
+
+  it('accepts an explicit devLogin flag for dev instances', () => {
+    const result = instanceDiscoverySchema.parse({
+      protocol: INSTANCE_PROTOCOL,
+      protocolVersion: INSTANCE_PROTOCOL_VERSION,
+      instanceId: 'inst_dev',
+      displayName: 'ganttly Dev',
+      baseUrl: 'http://localhost:3001',
+      apiBaseUrl: 'http://localhost:3001/api/v1',
+      webAppUrl: 'http://localhost:5173',
+      mcp: { url: 'http://localhost:3001/mcp', transport: 'streamable-http', authMethods: ['pat'] },
+      auth: { browserModes: ['session'], providers: ['github'], devLogin: true },
+      events: { transport: 'sse', url: 'http://localhost:3001/api/v1/events' },
+      apiVersions: ['v1'],
+      minClientVersion: '0.6.0',
+      features: { projectImport: true, mcp: true, sse: true, teamWorkspaces: false },
+    });
+    expect(result.auth.devLogin).toBe(true);
   });
 
   it('rejects a non-https-looking baseUrl (must be a valid URL)', () => {

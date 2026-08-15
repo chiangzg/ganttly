@@ -26,6 +26,21 @@ describe('buildDiscovery', () => {
     expect(d.features.projectImport).toBe(true);
     expect(d.auth.providers).toEqual(['github']);
   });
+
+  it('advertises devLogin only for AUTH_MODE=dev', () => {
+    expect(buildDiscovery(buildTestConfig()).auth.devLogin).toBe(true);
+    expect(
+      buildDiscovery(
+        buildTestConfig({
+          AUTH_MODE: 'github',
+          GITHUB_OAUTH_CLIENT_ID: 'client-id',
+          GITHUB_OAUTH_CLIENT_SECRET: 'client-secret',
+          SESSION_SECRET: 'x'.repeat(32),
+          TOKEN_PEPPER: 'x'.repeat(32),
+        }),
+      ).auth.devLogin,
+    ).toBe(false);
+  });
 });
 
 describe('GET /.well-known/ganttly-instance', () => {

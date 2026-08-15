@@ -63,6 +63,7 @@ export function buildDiscovery(config: AppConfig): InstanceDiscovery {
     auth: {
       browserModes: ['session'],
       providers: ['github'],
+      devLogin: config.authMode === 'dev',
     },
     events: {
       transport: 'sse',

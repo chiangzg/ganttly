@@ -1,0 +1,31 @@
+# ganttly 开发者模式数据库（配合 `pnpm dev:setup` / `pnpm dev` 使用）。
+#
+# 只跑一个带端口映射的 postgres：web(5173)/server(3001) 留在宿主机，
+# 保证 vite HMR 与 tsx watch 的即时反馈。与 docker-compose.yml（生产
+# 自建栈，postgres 不暴露端口、migrate/server 服务、密钥必填）完全独立，
+# 数据卷也分开，互不影响。
+#
+#   up:    pnpm dev:setup   （探测 5432 不可达时自动 up）
+#   down:  pnpm dev:down    （保留数据卷；清数据手动 down -v）
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ganttly-dev-pg
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ganttly
+    ports:
+      - '5432:5432'
+    volumes:
+      - ganttly_pg_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ganttly']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  ganttly_pg_dev_data:

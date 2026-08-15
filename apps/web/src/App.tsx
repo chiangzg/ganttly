@@ -33,7 +33,12 @@ export function App() {
   const dirty = useProjectStore((state) => state.dirty);
 
   useEffect(() => {
-    if (useProjectCatalogStore.getState().status === 'idle') void init(getRepository());
+    // Guard on the repository rather than `status === 'idle'`: a refresh that
+    // races ahead of this effect (child effects run before parent effects)
+    // can set status to 'error' before init ever runs, and the old guard
+    // would then skip initialization forever — leaving the local workspace
+    // stuck on "工作区未登录或不可用" until the app is reloaded from `/`.
+    if (!useProjectCatalogStore.getState().repo) void init(getRepository());
   }, [init]);
 
   useEffect(() => {

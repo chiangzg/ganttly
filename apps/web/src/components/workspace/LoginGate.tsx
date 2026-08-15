@@ -3,19 +3,48 @@
  * the user has not yet authenticated with (spec §12.3).
  *
  * Replaces the project grid with a centered card offering the GitHub OAuth
- * entry point. The actual redirect happens in `authStore.login`.
+ * entry point. The actual redirect happens in `authStore.login`. Instances
+ * that advertise `auth.devLogin` (AUTH_MODE=dev, local testing) instead get
+ * a one-click dev-session button — the GitHub flow always fails there.
  */
 import { Cloud, LogIn } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useInstanceStore } from '@/store/useInstanceStore';
+import { fetchInstanceDiscovery, useInstanceStore } from '@/store/useInstanceStore';
 import { useScopeStore } from '@/store/useScopeStore';
-import { buildScopePath } from '@/lib/routing';
+import { buildScopePath, LOCAL_SCOPE } from '@/lib/routing';
 
 export function LoginGate() {
   const activeScope = useScopeStore((s) => s.activeScope);
   const findInstance = useInstanceStore((s) => s.findInstance);
+  const navigate = useNavigate();
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [devCapable, setDevCapable] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
 
   const instance = findInstance(activeScope.instanceId);
+  const instanceId = activeScope.instanceId;
+  const instanceUrl = instance?.baseUrl ?? '';
+
+  useEffect(() => {
+    // Keyed on primitives: officialInstance() builds a fresh object per
+    // render, so an object dep would re-run this effect every render.
+    if (!instanceId || !instanceUrl) return;
+    const current = useInstanceStore.getState().findInstance(instanceId);
+    if (!current) return;
+    let cancelled = false;
+    // The session cookie outlives a page reload (auth state is memory-only)
+    // — re-check it first so a valid session skips the login prompt entirely.
+    void useAuthStore.getState().checkAuth(current);
+    void fetchInstanceDiscovery({ baseUrl: instanceUrl }).then((discovery) => {
+      if (!cancelled) setDevCapable(Boolean(discovery?.auth.devLogin));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [instanceId, instanceUrl]);
+
   if (!instance) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-fg-muted">
@@ -24,13 +53,39 @@ export function LoginGate() {
     );
   }
 
-  const handleLogin = () => {
-    useAuthStore
+  const handleDevLogin = async () => {
+    setLoginError(null);
+    setLoggingIn(true);
+    try {
+      const profile = await useAuthStore.getState().devLogin(instance);
+      if (!profile) {
+        setLoginError('开发登录失败，请确认服务状态');
+        return;
+      }
+      const workspaces = await useScopeStore.getState().loadWorkspaces(instance);
+      const first = workspaces[0];
+      navigate(
+        first
+          ? buildScopePath({ instanceId: instance.id, workspaceId: first.id })
+          : buildScopePath(LOCAL_SCOPE),
+        { replace: true },
+      );
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    setLoginError(null);
+    const started = await useAuthStore
       .getState()
       .login(
         instance,
         buildScopePath({ instanceId: instance.id, workspaceId: activeScope.workspaceId }),
       );
+    if (!started) {
+      setLoginError(`无法连接 ${instance.displayName}，请确认服务已启动`);
+    }
   };
 
   return (
@@ -41,15 +96,29 @@ export function LoginGate() {
         </span>
         <h2 className="mt-5 text-lg font-semibold text-fg">连接到 {instance.displayName}</h2>
         <p className="mt-2 text-sm leading-6 text-fg-muted">
-          使用 GitHub 登录以访问该工作区的项目。你的凭证仅在此实例上验证，不经过 ganttly 本地。
+          {devCapable
+            ? '该实例运行在开发模式，可直接建立测试会话。'
+            : '使用 GitHub 登录以访问该工作区的项目。你的凭证仅在此实例上验证，不经过 ganttly 本地。'}
         </p>
-        <button
-          type="button"
-          onClick={handleLogin}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90"
-        >
-          <LogIn size={16} /> 连接 GitHub
-        </button>
+        {devCapable ? (
+          <button
+            type="button"
+            disabled={loggingIn}
+            onClick={() => void handleDevLogin()}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-60"
+          >
+            <LogIn size={16} /> {loggingIn ? '正在登录…' : '开发登录'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleLogin()}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90"
+          >
+            <LogIn size={16} /> 连接 GitHub
+          </button>
+        )}
+        {loginError ? <p className="mt-3 text-xs text-danger">{loginError}</p> : null}
       </div>
     </div>
   );

@@ -42,6 +42,13 @@ export const instanceDiscoverySchema = z.object({
   auth: z.object({
     browserModes: z.array(browserModeSchema).min(1),
     providers: z.array(authProviderSchema),
+    /**
+     * True when the instance offers `POST /auth/dev-session` (AUTH_MODE=dev).
+     * Lets local-development clients show a dev login affordance instead of
+     * the GitHub flow, which dev instances always reject. Defaults to false
+     * so descriptors from older servers keep parsing.
+     */
+    devLogin: z.boolean().default(false),
   }),
   events: z.object({
     transport: z.literal('sse'),

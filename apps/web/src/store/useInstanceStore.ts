@@ -37,6 +37,28 @@ export function officialInstance(): InstanceConfig {
   };
 }
 
+/**
+ * Fetch + validate a live instance's discovery descriptor. Returns null on
+ * any failure (unreachable, non-200, contract mismatch) — callers fall back
+ * to their existing flow instead of crashing. Unlike {@link
+ * InstanceState.addCustomInstance} this never mutates the registry.
+ */
+export async function fetchInstanceDiscovery(
+  instance: Pick<InstanceConfig, 'baseUrl'>,
+): Promise<InstanceDiscovery | null> {
+  const baseUrl = instance.baseUrl.replace(/\/+$/, '');
+  try {
+    const response = await fetch(`${baseUrl}/.well-known/ganttly-instance`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+    const parsed = instanceDiscoverySchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 interface InstanceState {
   customInstances: InstanceConfig[];
   /** All known instances: official first, then custom. */

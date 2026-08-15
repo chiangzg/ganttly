@@ -25,19 +25,23 @@ ganttly 通过以下方式解决这些痛点:
 ## 快速上手
 
 ```bash
-# 本地开发
+# 本地开发(开发者模式:一键起 web + server + postgres)
 pnpm install
-pnpm dev          # 启动 http://localhost:5173
+pnpm dev:setup     # 首次准备:apps/server/.env + 开发数据库(Docker) + 迁移,幂等可重复执行
+pnpm dev           # 并行启动 web(5173) 与 server(3001)
 
-# 生产构建
+# 只做纯前端开发(不需要数据库)
+pnpm --filter @ganttly/web dev
+
+# 生产构建 / 跑测试
 pnpm build
-
-# 跑测试
-pnpm test         # 单元测试 (200+)
-pnpm test:e2e     # Playwright + 截图回归 (50+ 用例)
+pnpm test          # 单元测试 (200+)
+pnpm test:e2e      # Playwright + 截图回归 (50+ 用例)
 ```
 
-环境要求:Node ≥ 18, pnpm ≥ 9。
+环境要求:Node ≥ 18, pnpm ≥ 9;开发者模式另需 Docker(仅用于 postgres,`pnpm dev:down` 可停库)。
+
+开发者模式(`AUTH_MODE=dev`)下远端功能零配置:在工作区切换器选 **ganttly Cloud → 开发登录** 即可建立测试会话,项目数据真实存于本地 postgres。GitHub OAuth 真实流程的验证见[自建部署](#自建部署)。
 
 ## 自建部署
 
@@ -89,7 +93,9 @@ monorepo 结构:
 
 ```
 ganttly/
-├── apps/web/                 # React 前端
+├── apps/
+│   ├── web/                   # React 前端
+│   └── server/                # Fastify 服务端(REST API + MCP + SSE)
 ├── packages/
 │   ├── schema/               # 数据模型 + JSON Schema
 │   ├── calendar-data/        # 节假日数据(zh-CN.json)

@@ -14,7 +14,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { buildScopePath } from '@/lib/routing';
-import { officialInstance, useInstanceStore } from '@/store/useInstanceStore';
+import {
+  officialInstance,
+  useInstanceStore,
+  fetchInstanceDiscovery,
+} from '@/store/useInstanceStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useScopeStore, type WorkspaceSummary } from '@/store/useScopeStore';
 import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
@@ -24,6 +28,7 @@ import { AddInstanceDialog } from './AddInstanceDialog';
 
 export function WorkspaceSwitcher() {
   const [addOpen, setAddOpen] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const navigate = useNavigate();
   const customInstances = useInstanceStore((s) => s.customInstances);
   const activeScope = useScopeStore((s) => s.activeScope);
@@ -40,22 +45,37 @@ export function WorkspaceSwitcher() {
     if (scopeEqual(activeScope, scope)) return;
     const ok = await switchScope(scope, () => useProjectStore.getState().flushPendingSave());
     if (!ok) return;
+    // Keep the URL aligned with the store scope — ProjectCenter reconciles
+    // the store from the route, so the two must never disagree.
+    navigate(buildScopePath(scope));
     await refresh();
   };
 
   const handleSelectInstance = async (instanceId: string) => {
-    const auth = authByInstance[instanceId];
-    if (!auth) {
-      // Not logged in — trigger login flow.
-      const instance = instances.find((i) => i.id === instanceId);
-      if (instance) {
-        useAuthStore.getState().login(instance, buildScopePath({ instanceId, workspaceId: '' }));
-      }
-      return;
-    }
-    // Authenticated — load workspaces and switch to the first one.
+    setLoginError(null);
     const instance = instances.find((i) => i.id === instanceId);
     if (!instance) return;
+    if (!authByInstance[instanceId]) {
+      // Not logged in — dev instances offer a test session; others go to
+      // the GitHub OAuth flow.
+      const discovery = await fetchInstanceDiscovery(instance);
+      if (discovery?.auth.devLogin) {
+        const profile = await useAuthStore.getState().devLogin(instance);
+        if (!profile) {
+          setLoginError(`无法登录 ${instance.displayName}，请确认服务已启动`);
+          return;
+        }
+      } else {
+        const started = await useAuthStore
+          .getState()
+          .login(instance, buildScopePath({ instanceId, workspaceId: '' }));
+        if (!started) {
+          setLoginError(`无法连接 ${instance.displayName}，请确认服务已启动`);
+        }
+        return; // Redirected to the OAuth entrypoint (or stayed with an error).
+      }
+    }
+    // Authenticated — load workspaces and switch to the first one.
     const workspaces = await loadWorkspaces(instance);
     const first = workspaces[0];
     if (first) {
@@ -134,7 +154,12 @@ export function WorkspaceSwitcher() {
                     ))
                   ) : (
                     <DropdownMenu.Item
-                      onSelect={() => void handleSelectInstance(instance.id)}
+                      onSelect={(event) => {
+                        // Keep the menu open so a failed login can show its
+                        // error message inline.
+                        event.preventDefault();
+                        void handleSelectInstance(instance.id);
+                      }}
                       className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm outline-none hover:bg-bg focus:bg-bg"
                     >
                       <Cloud size={16} className="text-fg-muted" />
@@ -156,6 +181,12 @@ export function WorkspaceSwitcher() {
                 </div>
               );
             })}
+
+            {loginError ? (
+              <div className="mx-1 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
+                {loginError}
+              </div>
+            ) : null}
 
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
 

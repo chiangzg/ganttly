@@ -59,16 +59,83 @@ describe('useAuthStore', () => {
   });
 
   describe('login', () => {
-    it('stashes return path in sessionStorage', () => {
-      // The sessionStorage write happens before the redirect, so we verify
-      // that side-effect. jsdom logs a harmless "Not implemented" warning for
-      // the cross-origin navigation assignment.
-      useAuthStore.getState().login(official, '/instances/official/workspaces/ws1/projects');
+    it('stashes return path and redirects when the server is reachable', async () => {
+      // `/me` answers 401 before login — the expected pre-flight answer.
+      mockFetch({ error: { code: 'AUTH_REQUIRED' } }, 401);
+      // jsdom logs a harmless "Not implemented" warning for the cross-origin
+      // navigation assignment.
+      const started = await useAuthStore
+        .getState()
+        .login(official, '/instances/official/workspaces/ws1/projects');
+      expect(started).toBe(true);
       const stashed = consumePostLoginRedirect();
       expect(stashed).toEqual({
         instanceId: 'official',
         path: '/instances/official/workspaces/ws1/projects',
       });
+    });
+
+    it('returns false without stashing when the instance is unreachable', async () => {
+      // A downed backend surfaces as a proxy 500 page — fail fast instead of
+      // navigating the user onto it.
+      mockFetch({ error: { code: 'PROXY_ERROR' } }, 500);
+      const started = await useAuthStore.getState().login(official);
+      expect(started).toBe(false);
+      expect(sessionStorage.getItem('ganttly:post-login-redirect')).toBeNull();
+    });
+
+    it('returns false without stashing on network error', async () => {
+      fetchSpy.mockRejectedValue(new Error('network'));
+      const started = await useAuthStore.getState().login(official);
+      expect(started).toBe(false);
+      expect(sessionStorage.getItem('ganttly:post-login-redirect')).toBeNull();
+    });
+  });
+
+  describe('devLogin', () => {
+    it('provisions the dev session and re-checks /me on success', async () => {
+      const calls: Array<{ body?: string; contentType?: string }> = [];
+      let call = 0;
+      // Re-spy (like mockFetch) rather than configuring the shared fetchSpy:
+      // earlier mockFetch calls wrap the spy, and a stale mockResolvedValue on
+      // the outer wrapper would otherwise answer these fetches.
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async (_input: unknown, init?: RequestInit) => {
+          call += 1;
+          if (call === 1) {
+            const headers = new Headers(init?.headers);
+            calls.push({
+              body: init?.body as string | undefined,
+              contentType: headers.get('Content-Type') ?? undefined,
+            });
+          }
+          // 1st call: POST /auth/dev-session; 2nd: GET /me with the session.
+          return call === 1
+            ? new Response(JSON.stringify({ ok: true, userId: 'usr_dev' }), { status: 200 })
+            : new Response(JSON.stringify({ id: 'usr_dev', displayName: 'Dev User' }), {
+                status: 200,
+              });
+        },
+      );
+      const profile = await useAuthStore.getState().devLogin(official);
+      expect(profile).toEqual({ userId: 'usr_dev', displayName: 'Dev User' });
+      expect(useAuthStore.getState().isAuthenticated('official')).toBe(true);
+      // Fastify rejects an empty body with a JSON Content-Type — the POST
+      // must carry a serialized object.
+      expect(calls[0]).toEqual({ body: '{}', contentType: 'application/json' });
+    });
+
+    it('returns null when the instance rejects dev sessions (not dev mode)', async () => {
+      mockFetch({ error: { code: 'NOT_FOUND' } }, 404);
+      const profile = await useAuthStore.getState().devLogin(official);
+      expect(profile).toBeNull();
+      expect(useAuthStore.getState().isAuthenticated('official')).toBe(false);
+    });
+
+    it('returns null on network error', async () => {
+      fetchSpy.mockRejectedValue(new Error('network'));
+      const profile = await useAuthStore.getState().devLogin(official);
+      expect(profile).toBeNull();
     });
   });
 
