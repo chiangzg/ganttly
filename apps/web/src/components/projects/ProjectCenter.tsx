@@ -175,7 +175,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
             {trashMode ? (
               <button
                 type="button"
-                onClick={() => navigate(buildScopePath(LOCAL_SCOPE))}
+                onClick={() => navigate(buildScopePath(activeScope))}
                 className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-medium text-fg hover:bg-bg"
               >
                 <ArrowLeft size={16} /> 返回项目中心
@@ -184,7 +184,7 @@ export function ProjectCenter({ trashMode = false }: { trashMode?: boolean }) {
               <>
                 <button
                   type="button"
-                  onClick={() => navigate(buildTrashPath(LOCAL_SCOPE))}
+                  onClick={() => navigate(buildTrashPath(activeScope))}
                   className="hidden items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-fg-muted hover:bg-bg hover:text-fg sm:flex"
                 >
                   <Trash2 size={16} /> 回收站

@@ -121,12 +121,14 @@ export class RemoteRepository implements ProjectRepository {
   async moveToTrash(id: ProjectId): Promise<void> {
     await this.http.request<ProjectSnapshotResponse>(`${projectPath(this.ws, id)}/archive`, {
       method: 'POST',
+      idempotencyKey: cryptoIdempotencyKey(),
     });
   }
 
   async restoreProject(id: ProjectId): Promise<void> {
     await this.http.request<ProjectSnapshotResponse>(`${projectPath(this.ws, id)}/restore`, {
       method: 'POST',
+      idempotencyKey: cryptoIdempotencyKey(),
     });
   }
 
@@ -176,8 +178,9 @@ export class RemoteRepository implements ProjectRepository {
 }
 
 /**
- * Generate an idempotency key for a create POST. Uses crypto.randomUUID when
- * available (browsers), falls back to a timestamp+random string.
+ * Generate an idempotency key for a non-idempotent POST (spec §9.3). Uses
+ * crypto.randomUUID when available (browsers), falls back to a
+ * timestamp+random string.
  */
 function cryptoIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
