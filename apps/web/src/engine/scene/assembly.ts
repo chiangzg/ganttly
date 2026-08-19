@@ -532,6 +532,7 @@ export function assembleResourceScene(
     Map<string, Array<{ taskId: string; name: string; load: number }>>
   >();
   for (const task of file.tasks) {
+    if (hasChildren(task.id)) continue; // summaries never contribute (G13 parity with computeResourceLoad)
     if (task.assignments.length === 0) continue;
     const days = effectiveTaskDays(task, cal);
     for (const assignment of task.assignments) {

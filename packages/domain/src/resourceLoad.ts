@@ -29,6 +29,12 @@ export type ResourceLoadMap = Map<string, Map<string, number>>;
  * with an entry for every known resource — even those with no assignments —
  * which simplifies downstream rendering (no `?. ?? 0` guards).
  *
+ * Summary tasks (tasks with children) are skipped: their dates are rolled up
+ * from children, and their own `assignments` are ignored (G13: double-count
+ * guard — mirrors `cost.ts`). A task assigned while it was still a leaf keeps
+ * a stale assignment after children are indented beneath it; counting it here
+ * would double every child's load over the rolled-up span.
+ *
  * A rest day produces a load bar only when the task explicitly lists it in
  * `overtimeDates`; an unmarked weekend inside the task span remains unloaded.
  */
@@ -43,10 +49,15 @@ export function computeResourceLoad(
     loadMap.set(r.id, new Map());
   }
 
+  // Tasks referenced as a parent are summaries — skip them (same pattern as
+  // `computeProjectPersonDays` in cost.ts).
+  const summaryIds = new Set<string>();
+  for (const t of tasks) {
+    if (t.parentId) summaryIds.add(t.parentId);
+  }
+
   for (const task of tasks) {
-    // Summary tasks roll up their children; their own assignments are ignored
-    // (G13: double-count guard). The caller should avoid assigning to summary
-    // tasks, but this keeps the math safe regardless.
+    if (summaryIds.has(task.id)) continue; // summary — children already count
     if (task.assignments.length === 0) continue;
     const days = effectiveTaskDays(task, cal);
     for (const assignment of task.assignments) {
