@@ -80,6 +80,36 @@ describe('computeResourceLoad', () => {
     expect(load.get('r1')?.size).toBe(0);
   });
 
+  it("ignores a summary task's stale assignment so children are not double-counted (G13)", () => {
+    // Regression: a task is assigned while it is still a leaf, then other tasks
+    // are indented beneath it (Tab). The rollup rewrites its dates but keeps
+    // the stale assignment — counting it would add the parent's load on top of
+    // every child's over the rolled-up span.
+    const resources: Resource[] = [{ id: 'r1', name: 'A', capacity: 1.0 }];
+    const tasks = [
+      // Summary: rolled-up span Mon–Fri, stale assignment from its leaf days.
+      makeTask('parent', { assignments: [{ resourceId: 'r1', load: 100 }] }),
+      makeTask('c1', { parentId: 'parent', assignments: [{ resourceId: 'r1', load: 100 }] }),
+      makeTask('c2', { parentId: 'parent', assignments: [{ resourceId: 'r1', load: 50 }] }),
+    ];
+    const load = computeResourceLoad(tasks, resources, cal);
+    // 100 (c1) + 50 (c2) = 150 — NOT 250 with the parent's stale 100.
+    expect(loadOn(load, 'r1', '2026-01-05')).toBe(150);
+    expect(peakLoad(load, 'r1')).toBe(150);
+  });
+
+  it('skips nested summaries at every level of the hierarchy', () => {
+    const resources: Resource[] = [{ id: 'r1', name: 'A', capacity: 1.0 }];
+    const tasks = [
+      makeTask('root', { assignments: [{ resourceId: 'r1', load: 100 }] }),
+      makeTask('mid', { parentId: 'root', assignments: [{ resourceId: 'r1', load: 100 }] }),
+      makeTask('leaf', { parentId: 'mid', assignments: [{ resourceId: 'r1', load: 30 }] }),
+    ];
+    const load = computeResourceLoad(tasks, resources, cal);
+    // Only the leaf counts — root and mid are both summaries.
+    expect(loadOn(load, 'r1', '2026-01-06')).toBe(30);
+  });
+
   it('loads only explicitly marked rest days inside a cross-week task', () => {
     const resources: Resource[] = [{ id: 'r1', name: 'A', capacity: 1.0 }];
     const tasks = [
