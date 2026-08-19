@@ -8,7 +8,7 @@ import {
   type ProjectRepository,
   type ProjectSummary,
 } from '@/data/repository';
-import { isLocalRef, refEqual, type ProjectRef } from '@/data/projectRef';
+import { isLocalRef, refEqual, scopeEqual, type ProjectRef } from '@/data/projectRef';
 import { resolveProjectRepository } from '@/data/resolveRepository';
 import { useProjectStore } from './useProjectStore';
 import { useViewStore } from './useViewStore';
@@ -82,8 +82,16 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
       set({ status: 'error', error: '工作区未登录或不可用' });
       return;
     }
+    // Stale-response guard: the list below must land only while `scope` is
+    // still active. ProjectCenter fires a refresh per scope change, and a
+    // slower request from the previous scope (e.g. remote HTTP losing to a
+    // faster local IndexedDB read) would otherwise clobber the current
+    // scope's list — e.g. an empty remote list wiping the local grid until
+    // a manual page reload.
+    const stillActive = () => scopeEqual(useScopeStore.getState().activeScope, scope);
     try {
       const summaries = await repo.listProjects({ includeDeleted: true });
+      if (!stillActive()) return;
       const projects = summaries.filter((project) => !project.deletedAt);
       const trash = summaries.filter((project) => Boolean(project.deletedAt));
       // Only re-sanitize navigation for the local scope — remote project lists
@@ -97,6 +105,7 @@ export const useProjectCatalogStore = create<ProjectCatalogState>((set, get) => 
         set({ projects, trash, status: 'ready', error: null });
       }
     } catch (error) {
+      if (!stillActive()) return;
       set({ status: 'error', error: (error as Error).message });
     }
   },

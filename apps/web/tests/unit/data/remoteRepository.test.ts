@@ -257,6 +257,7 @@ describe('RemoteRepository', () => {
       await repo.moveToTrash(PROJECT);
       expect(http.calls[0]?.path).toContain('/archive');
       expect(http.calls[0]?.options.method).toBe('POST');
+      expect(http.calls[0]?.options.idempotencyKey).toBeTruthy();
     });
 
     it('restoreProject POSTs to restore endpoint', async () => {
@@ -276,6 +277,8 @@ describe('RemoteRepository', () => {
       });
       await repo.restoreProject(PROJECT);
       expect(http.calls[0]?.path).toContain('/restore');
+      expect(http.calls[0]?.options.method).toBe('POST');
+      expect(http.calls[0]?.options.idempotencyKey).toBeTruthy();
     });
 
     it('deleteProjectPermanently sends DELETE', async () => {
