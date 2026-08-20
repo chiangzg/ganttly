@@ -89,12 +89,13 @@ test('collapse/expand sync — row count decreases and recovers', async ({ page 
   const rowsBefore = await page.locator('[role="row"]').count();
   expect(rowsBefore).toBe(3); // parent + 2 children
 
-  // Collapse parent via its ▼ button.
-  await page.locator('[role="row"]').first().locator('button').filter({ hasText: '▼' }).click();
+  // Collapse parent via its expand toggle (chevron in the name cell).
+  await page.locator('[role="row"]').first().locator('[data-testid="expand-toggle"]').click();
   expect(await page.locator('[role="row"]').count()).toBe(1); // only parent remains
 
-  // Expand via ▶.
-  await page.locator('[role="row"]').first().locator('button').filter({ hasText: '▶' }).click();
+  // Expand again — collapsed parents carry a child-count chip.
+  await expect(page.locator('[data-testid="child-count"]').first()).toHaveText('2 项');
+  await page.locator('[role="row"]').first().locator('[data-testid="expand-toggle"]').click();
   expect(await page.locator('[role="row"]').count()).toBe(3);
 });
 
@@ -116,8 +117,8 @@ test('summary task row renders with font-semibold styling', async ({ page }) => 
   // its name cell, distinguishing it from the summary row.
   const secondRow = page.locator('[role="row"]').nth(1);
   await expect(secondRow).toBeVisible();
-  // Leaf has no ▼ toggle either, confirming it's not a summary.
-  await expect(secondRow.locator('button').filter({ hasText: '▼' })).toHaveCount(0);
+  // Leaf has no expand toggle either, confirming it's not a summary.
+  await expect(secondRow.locator('[data-testid="expand-toggle"]')).toHaveCount(0);
 });
 
 test('editing child progress rolls up to the parent summary', async ({ page }) => {

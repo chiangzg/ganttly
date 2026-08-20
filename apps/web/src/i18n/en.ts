@@ -154,6 +154,11 @@ export const en = {
     confirmDeleteImpactSummary: '{{total}} task(s) will be deleted in total.',
     copySuffix: 'copy',
     dragHint: 'Drag to reorder or reparent',
+    expandTask: 'Expand subtasks',
+    collapseTask: 'Collapse subtasks',
+    expandAll: 'Expand all',
+    collapseAll: 'Collapse all',
+    childCount: '{{count}}',
     unassigned: 'Unassigned',
     cellReadOnlySummary:
       'Summary task duration/progress is rolled up from children and cannot be edited directly',
@@ -295,6 +300,7 @@ export const en = {
   },
   contextMenu: {
     edit: 'Edit',
+    rename: 'Rename',
     delete: 'Delete',
     toMilestone: 'Convert to milestone',
     toTask: 'Convert to task',

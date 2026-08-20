@@ -209,6 +209,13 @@ export function ContextMenu() {
     handleClose();
   };
 
+  const onRename = () => {
+    // TaskTable owns the inline-edit cell; ask it to start a name edit via the
+    // one-shot store request (double-click is reserved for opening the drawer).
+    useViewStore.getState().requestRename(task.id);
+    handleClose();
+  };
+
   const onCopy = () => {
     copyToClipboard(task);
     handleClose();
@@ -264,20 +271,23 @@ export function ContextMenu() {
         <MenuItem ref={setItemRef(0)} onClick={onEdit}>
           {t('contextMenu.edit')}
         </MenuItem>
-        <MenuItem ref={setItemRef(1)} onClick={onCopy} shortcut={`${mod}+C`}>
+        <MenuItem ref={setItemRef(1)} onClick={onRename} shortcut="F2">
+          {t('contextMenu.rename')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(2)} onClick={onCopy} shortcut={`${mod}+C`}>
           {t('contextMenu.copy')}
         </MenuItem>
-        <MenuItem ref={setItemRef(2)} onClick={onCut} shortcut={`${mod}+X`}>
+        <MenuItem ref={setItemRef(3)} onClick={onCut} shortcut={`${mod}+X`}>
           {t('contextMenu.cut')}
         </MenuItem>
-        <MenuItem ref={setItemRef(3)} onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
+        <MenuItem ref={setItemRef(4)} onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
           {t('contextMenu.paste')}
         </MenuItem>
-        <MenuItem ref={setItemRef(4)} onClick={onToggleMilestone}>
+        <MenuItem ref={setItemRef(5)} onClick={onToggleMilestone}>
           {task.isMilestone ? t('contextMenu.toTask') : t('contextMenu.toMilestone')}
         </MenuItem>
         <MenuItem
-          ref={setItemRef(5)}
+          ref={setItemRef(6)}
           onClick={() => onMoveSibling(-1)}
           disabled={!pos.canMoveUp}
           shortcut="Alt+↑"
@@ -285,25 +295,25 @@ export function ContextMenu() {
           {t('contextMenu.moveUp')}
         </MenuItem>
         <MenuItem
-          ref={setItemRef(6)}
+          ref={setItemRef(7)}
           onClick={() => onMoveSibling(1)}
           disabled={!pos.canMoveDown}
           shortcut="Alt+↓"
         >
           {t('contextMenu.moveDown')}
         </MenuItem>
-        <MenuItem ref={setItemRef(7)} onClick={onIndent} disabled={!pos.canIndent} shortcut="Tab">
+        <MenuItem ref={setItemRef(8)} onClick={onIndent} disabled={!pos.canIndent} shortcut="Tab">
           {t('contextMenu.indent')}
         </MenuItem>
         <MenuItem
-          ref={setItemRef(8)}
+          ref={setItemRef(9)}
           onClick={onOutdent}
           disabled={!pos.canOutdent}
           shortcut="Shift+Tab"
         >
           {t('contextMenu.outdent')}
         </MenuItem>
-        <MenuItem ref={setItemRef(9)} onClick={onDelete} danger shortcut="Delete">
+        <MenuItem ref={setItemRef(10)} onClick={onDelete} danger shortcut="Delete">
           {t('contextMenu.delete')}
         </MenuItem>
       </div>

@@ -2,17 +2,28 @@
  * WBS task table — the left pane (PRD §3.1, §3.10).
  *
  * Features:
- * - Render the task tree (WBS numbers, names, dates, duration, progress)
- * - Click to select, double-click to open the edit drawer
+ * - Render the task tree (flat WBS numbers + tree affordances in the name cell)
+ * - Click to select, double-click ANYWHERE on the row to open the edit drawer
+ * - Inline edit via F2 (+ Tab traversal); rename also from the context menu
  * - Keyboard: arrows navigate/collapse, Tab indents, Enter adds, Delete removes, F2 renames
- * - Mouse drag to reorder + reparent (HTML5 DnD)
- * - Right-click for the context menu
+ * - Drag reordering starts ONLY from the grip slot (HTML5 DnD); the row itself
+ *   is not draggable, so clicks never become accidental drags
+ * - Right-click for the context menu; expand/collapse-all in the search bar
  * - Vertical scroll shared with GanttCanvas via projectStore.scrollTop
  */
 import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { TFunction } from 'i18next';
-import { Plus, Search, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  GripVertical,
+  Plus,
+  Search,
+  X,
+} from 'lucide-react';
 import {
   useProjectStore,
   setViewStateCommand,
@@ -201,22 +212,20 @@ export function TaskTable() {
     return flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
   }, [file.tasks, file.calendar, file.viewState.collapsedTaskIds, searchQuery, taskFilter]);
 
-  // The WBS cell contains the hierarchy indentation, the drag affordance, an
-  // optional expand button, and the number itself. A fixed 44px track cannot
-  // hold those pieces once a task is nested, so the number gets clipped (for
-  // example, `3.1` is rendered as just `3`). Keep the header and every row on
-  // one computed track and let the task-name column absorb the extra width.
+  // The WBS cell is a flat "row number" track: [grip slot 18px][number]. The
+  // number starts at the same x on every row regardless of depth (the tree
+  // structure lives in the NAME cell), so the column reads like spreadsheet
+  // row numbers. Width = fixed slots + the longest visible number — no
+  // clipping, no depth-dependent growth.
   const wbsWidth = useMemo(() => {
     const minWidth = 44;
+    const gripSlot = 18;
+    const leftGap = 6;
     const charWidth = 8;
-    const dragHandleWidth = 14;
-    const expandControlWidth = 18;
     const rightPadding = 8;
     return rows.reduce((max, node) => {
-      const indentation = 8 + node.depth * 16;
-      const controls = dragHandleWidth + (node.children.length > 0 ? expandControlWidth : 0);
       const numberWidth = Math.max(1, node.wbsNumber.length) * charWidth;
-      return Math.max(max, indentation + controls + numberWidth + rightPadding);
+      return Math.max(max, gripSlot + leftGap + numberWidth + rightPadding);
     }, minWidth);
   }, [rows]);
 
@@ -751,6 +760,36 @@ export function TaskTable() {
   draggedIdRef.current = draggedId;
   dropTargetRef.current = dropTarget;
 
+  // Context-menu "Rename": TaskTable owns the inline-edit cell, so the menu
+  // files a one-shot request here. Focus + reveal the row so Enter/Escape and
+  // the blur-commit logic behave exactly like an F2 rename.
+  const renameRequest = useViewStore((s) => s.renameRequest);
+  useEffect(() => {
+    if (!renameRequest) return;
+    const idx = rows.findIndex((r) => r.task.id === renameRequest.taskId);
+    if (idx === -1) return;
+    selectSingle(renameRequest.taskId);
+    focusAndRevealRow(scrollRef.current, idx, ROW_HEIGHT);
+    startEditing(renameRequest.taskId, 'name');
+    useViewStore.getState().clearRenameRequest();
+  }, [renameRequest, rows, selectSingle, startEditing]);
+
+  // Expand/collapse-all (search-bar buttons). Batch navigation, not undoable
+  // data — written via direct setState like scrollTop, NOT setViewStateCommand,
+  // so it never pollutes the undo stack (unlike the per-row toggle).
+  const setCollapsedIds = (ids: string[]) => {
+    useProjectStore.setState({
+      file: { ...file, viewState: { ...file.viewState, collapsedTaskIds: ids } },
+    });
+  };
+  const expandAll = () => setCollapsedIds([]);
+  const collapseAll = () => {
+    const parents = [
+      ...new Set(file.tasks.map((t) => t.parentId).filter((id): id is string => id !== null)),
+    ];
+    setCollapsedIds(parents);
+  };
+
   // Track the live pointer Y for auto-scroll, updated via a window listener
   // during a drag. Kept in a ref so we don't re-render per mousemove.
   const pointerY = useRef(0);
@@ -863,6 +902,26 @@ export function TaskTable() {
             label={t('filter.overdue')}
             ariaLabel={t('filter.toggleLabel', { label: t('filter.overdue') })}
           />
+          {/* Batch tree navigation — direct view-state writes (never undoable). */}
+          <div aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
+          <button
+            type="button"
+            onClick={expandAll}
+            aria-label={t('table.expandAll')}
+            title={t('table.expandAll')}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none transition hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35"
+          >
+            <ChevronsUpDown size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={collapseAll}
+            aria-label={t('table.collapseAll')}
+            title={t('table.collapseAll')}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none transition hover:bg-bg hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/35"
+          >
+            <ChevronsDownUp size={13} />
+          </button>
           {/* §3.1: task creation primary entry lives NEAR the task list (not the
               far toolbar). Uses the same shared helper as the zero-task empty
               state, so every entry point behaves identically (§5.1). */}
@@ -948,7 +1007,12 @@ export function TaskTable() {
           ) : rows.length === 0 ? (
             <EmptyState title={t('empty.filteredTitle')} description={t('empty.filteredHint')} />
           ) : (
-            <div className="relative" style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}>
+            <div
+              role="treegrid"
+              aria-label={t('table.taskColumnsHeader')}
+              className="relative"
+              style={{ height: Math.max(rows.length * ROW_HEIGHT, 0) }}
+            >
               {rows.map((node, i) => {
                 const y = i * ROW_HEIGHT;
                 // §4.6: highlight every selected row; the anchor gets a stronger
@@ -960,19 +1024,22 @@ export function TaskTable() {
                 const isDropHere = dropTarget?.taskId === node.task.id && !dropTarget.invalid;
                 const isDragged = draggedId === node.task.id;
                 const invalidHere = dropTarget?.taskId === node.task.id && dropTarget.invalid;
-                const dropIndent = 8 + node.depth * 16;
+                const isParent = node.children.length > 0;
+                const collapsed = file.viewState.collapsedTaskIds.includes(node.task.id);
+                // Insertion line aligns with the NAME cell's tree indent
+                // (grip slot + guides + chevron slot), not the flat WBS number.
+                const dropIndent = wbsWidth + node.depth * 16 + 20;
                 return (
                   <div
                     key={node.task.id}
                     role="row"
                     tabIndex={0}
                     aria-selected={selected}
-                    draggable
-                    onDragStart={(e) => onDragStart(e, node)}
+                    aria-level={node.depth + 1}
+                    aria-expanded={isParent ? !collapsed : undefined}
                     onDrop={(e) => onDrop(e, node)}
                     onDragOver={(e) => onDragOver(e, node)}
                     onDragLeave={onDragLeave}
-                    onDragEnd={onDragEnd}
                     data-task-id={node.task.id}
                     data-keyboard-row-index={i}
                     onClick={(e) => {
@@ -987,23 +1054,12 @@ export function TaskTable() {
                     }}
                     onDoubleClick={(e) => {
                       // Modifier-double-click is ambiguous with multi-select; only
-                      // plain double-click edits/opens (matches historical UX).
+                      // plain double-click opens (matches historical UX).
                       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+                      // ONE rule, everywhere on the row: double-click opens the
+                      // drawer. Inline edit is reached via F2 (+Tab traversal) or
+                      // the context menu's 重命名 — never a hidden pixel boundary.
                       select(node.task.id);
-                      // Double-clicking an editable data cell enters inline edit
-                      // (plan §4.3); double-clicking anywhere else (WBS, effort,
-                      // padding) opens the drawer.
-                      const field = (e.target as HTMLElement)
-                        .closest('[data-field]')
-                        ?.getAttribute('data-field') as EditableField | null;
-                      if (
-                        field &&
-                        EDITABLE_FIELDS.includes(field) &&
-                        isFieldEditable(node, field)
-                      ) {
-                        startEditing(node.task.id, field);
-                        return;
-                      }
                       openDrawer();
                     }}
                     onKeyDown={(e) => onKeyDown(e, node)}
@@ -1064,76 +1120,127 @@ export function TaskTable() {
                       )}
                     <div
                       data-field="wbs"
-                      className="group/cell flex items-center overflow-hidden border-r border-border px-2 text-fg-muted"
-                      style={{ paddingLeft: 8 + node.depth * 16 }}
+                      className="flex h-full items-center overflow-hidden border-r border-border text-fg-muted"
                     >
-                      {/* Drag handle — visible on row hover/focus, gives the row a
-                       * clear "grab here to reorder" affordance without colliding
-                       * with the row's click-to-select / double-click-to-edit
-                       * semantics (plan §2.3 step 6). */}
-                      <span
-                        aria-hidden
+                      {/* Drag grip — the ONLY drag source on the row (the row
+                       * itself is not draggable, so clicks never turn into
+                       * accidental drags). The 18px slot is always reserved and
+                       * the icon only animates opacity: hovering can never shift
+                       * the number or the name cell's chevron. Clicks are
+                       * isolated — grabbing here neither selects nor opens. */}
+                      <div
+                        data-testid="row-drag-handle"
+                        draggable
+                        onDragStart={(e) => onDragStart(e, node)}
+                        onDragEnd={onDragEnd}
+                        onClick={(e) => e.stopPropagation()}
+                        onDoubleClick={(e) => e.stopPropagation()}
                         title={t('table.dragHint')}
-                        className="mr-1 hidden shrink-0 cursor-grab text-[10px] leading-none text-fg-muted/50 hover:text-fg group-hover/row:inline-block active:cursor-grabbing"
+                        className="flex h-full w-[18px] shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
                       >
-                        ⠿
+                        <GripVertical
+                          size={12}
+                          aria-hidden
+                          className="text-fg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100 hover:text-fg"
+                        />
+                      </div>
+                      <span
+                        data-testid="wbs-number"
+                        className="pl-1.5 text-[11px] leading-none tabular-nums"
+                      >
+                        {node.wbsNumber}
                       </span>
-                      {node.children.length > 0 && (
+                    </div>
+                    <div
+                      data-field="name"
+                      className="flex h-full min-w-0 items-center border-r border-border"
+                    >
+                      {/* Tree structure lives HERE, not in the WBS number:
+                       * per-depth guide lines + a chevron slot reserved on
+                       * every row, so parents (chevron + semibold) vs leaves
+                       * are distinguishable at a glance and sibling names
+                       * stay strictly aligned. */}
+                      {Array.from({ length: node.depth }).map((_, d) => (
+                        <span
+                          key={d}
+                          aria-hidden
+                          className="h-full w-4 shrink-0 border-r border-border/60"
+                        />
+                      ))}
+                      {isParent ? (
                         <button
                           type="button"
-                          className="mr-1 inline-flex shrink-0 items-center justify-center text-[10px] text-fg-muted hover:text-fg"
-                          style={{ width: 14, height: 14 }}
+                          data-testid="expand-toggle"
+                          aria-expanded={!collapsed}
+                          aria-label={collapsed ? t('table.expandTask') : t('table.collapseTask')}
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleCollapse(node.task.id);
                           }}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          className="flex h-5 w-4 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-none transition-colors hover:bg-bg hover:text-fg focus-visible:ring-1 focus-visible:ring-primary/40"
                         >
-                          {file.viewState.collapsedTaskIds.includes(node.task.id) ? '▶' : '▼'}
+                          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                         </button>
-                      )}
-                      {node.wbsNumber}
-                    </div>
-                    <div
-                      data-field="name"
-                      className={cn(
-                        'min-w-0 truncate border-r border-border px-2 font-medium',
-                        node.children.length > 0 && 'font-semibold',
-                      )}
-                    >
-                      {node.task.isMilestone && <span className="mr-1 text-warning">◆</span>}
-                      {activeField === 'name' ? (
-                        <input
-                          autoFocus
-                          defaultValue={node.task.name}
-                          // Commit-on-blur matches the original F2 behaviour. The
-                          // guard avoids a double-dispatch when Enter/Tab already
-                          // committed: those handlers call stopEditing() first,
-                          // which nulls editingCell before blur fires.
-                          onBlur={(e) => {
-                            if (editingCell.current?.taskId !== node.task.id) {
-                              commitName(node.task.id, e.target.value);
-                              stopEditing();
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              commitName(node.task.id, (e.target as HTMLInputElement).value);
-                              stopEditing();
-                            } else if (e.key === 'Escape') {
-                              e.preventDefault();
-                              stopEditing();
-                            } else if (e.key === 'Tab') {
-                              e.preventDefault();
-                              commitName(node.task.id, (e.target as HTMLInputElement).value);
-                              tabCell(node.task.id, 'name', e.shiftKey, node);
-                            }
-                          }}
-                          className="w-full bg-transparent outline-none"
-                        />
                       ) : (
-                        node.task.name || t('table.placeholderName')
+                        <span aria-hidden className="w-4 shrink-0" />
                       )}
+                      <div className="flex min-w-0 flex-1 items-center pl-1 pr-2">
+                        {node.task.isMilestone && (
+                          <span className="mr-1 shrink-0 text-warning">◆</span>
+                        )}
+                        {activeField === 'name' ? (
+                          <input
+                            autoFocus
+                            defaultValue={node.task.name}
+                            // Commit-on-blur matches the original F2 behaviour. The
+                            // guard avoids a double-dispatch when Enter/Tab already
+                            // committed: those handlers call stopEditing() first,
+                            // which nulls editingCell before blur fires.
+                            onBlur={(e) => {
+                              if (editingCell.current?.taskId !== node.task.id) {
+                                commitName(node.task.id, e.target.value);
+                                stopEditing();
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                commitName(node.task.id, (e.target as HTMLInputElement).value);
+                                stopEditing();
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                stopEditing();
+                              } else if (e.key === 'Tab') {
+                                e.preventDefault();
+                                commitName(node.task.id, (e.target as HTMLInputElement).value);
+                                tabCell(node.task.id, 'name', e.shiftKey, node);
+                              }
+                            }}
+                            className="h-5 min-w-0 flex-1 rounded-sm bg-transparent outline-none"
+                          />
+                        ) : (
+                          <span
+                            className={cn(
+                              'min-w-0 flex-1 truncate font-medium',
+                              isParent && 'font-semibold',
+                            )}
+                          >
+                            {node.task.name || t('table.placeholderName')}
+                          </span>
+                        )}
+                        {/* Collapsed parents quantify their hidden children
+                         * (Notion-style count chip) so nothing is silently
+                         * invisible; expanded rows show the children anyway. */}
+                        {isParent && collapsed && activeField !== 'name' && (
+                          <span
+                            data-testid="child-count"
+                            className="ml-1.5 shrink-0 rounded bg-bg px-1 text-[10px] leading-4 tabular-nums text-fg-muted"
+                          >
+                            {t('table.childCount', { count: node.children.length })}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div
                       data-field="duration"

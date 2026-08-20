@@ -49,6 +49,17 @@ interface ViewStoreState {
   openContextMenu(taskId: string, x: number, y: number): void;
   closeContextMenu(): void;
 
+  /**
+   * One-shot inline-rename request. The context menu (outside TaskTable) asks
+   * TaskTable to start editing a task's name cell; TaskTable owns the
+   * editingCell ref, so it watches this field and clears it once handled.
+   * `nonce` lets the same task be requested twice in a row. Pure UI state —
+   * never in the project file or the undo stack.
+   */
+  renameRequest: { taskId: string; nonce: number } | null;
+  requestRename(taskId: string): void;
+  clearRenameRequest(): void;
+
   /** Active view: task (Gantt) ↔ resource (load chart). G11: ephemeral. */
   viewMode: ViewMode;
   setViewMode(mode: ViewMode): void;
@@ -161,6 +172,11 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   openContextMenu: (taskId, x, y) => set({ contextMenu: { taskId, x, y } }),
   closeContextMenu: () => set({ contextMenu: null }),
 
+  renameRequest: null,
+  requestRename: (taskId) =>
+    set((s) => ({ renameRequest: { taskId, nonce: (s.renameRequest?.nonce ?? 0) + 1 } })),
+  clearRenameRequest: () => set({ renameRequest: null }),
+
   viewMode: 'task',
   setViewMode: (mode) => set({ viewMode: mode }),
 
@@ -244,6 +260,7 @@ export const useViewStore = create<ViewStoreState>((set) => ({
     set({
       drawer: 'closed',
       contextMenu: null,
+      renameRequest: null,
       resourceScrollTop: 0,
       selectedResourceId: null,
       expandedResourceIds: new Set<string>(),

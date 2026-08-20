@@ -3,11 +3,10 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * Inline cell editing E2E (editor-interaction-optimization-plan §4.3).
  *
- * Verifies double-click on the name/duration/progress cells enters inline edit,
- * Enter commits, Escape cancels, Tab moves to the next editable cell, and the
- * summary/milestone read-only rules are honoured. Also verifies the §4.3 double-
- * click semantics: double-clicking a data cell edits in place, while double-
- * clicking the WBS/effort area still opens the drawer.
+ * Inline edit is entered via F2 (name) and F2+Tab (duration/progress traversal)
+ * — double-click on the row is now UNIFORMLY "open the edit drawer" and never
+ * starts an edit. Verifies Enter commits, Escape cancels, Tab moves to the
+ * next editable cell, and the summary/milestone read-only rules are honoured.
  */
 
 interface Task {
@@ -81,14 +80,28 @@ async function readTask(page: Page, id: string): Promise<Task> {
   }, id);
 }
 
+/**
+ * Enter the inline editor for `field` via the keyboard path: F2 opens the name
+ * editor, Tab traverses name → duration → progress (skipping read-only cells).
+ */
+async function startEdit(page: Page, taskId: string, field: 'name' | 'duration' | 'progress') {
+  const row = page.locator(`[data-task-id="${taskId}"]`);
+  await row.click();
+  await row.press('F2');
+  const hops = { name: 0, duration: 1, progress: 2 }[field];
+  for (let i = 0; i < hops; i++) {
+    await page.locator('[data-field] input').first().press('Tab');
+    await page.waitForTimeout(50);
+  }
+  const input = page.locator(`[data-field="${field}"] input`).first();
+  await input.waitFor();
+  return input;
+}
+
 test.describe('inline cell editing', () => {
-  test('double-click name cell edits and Enter commits', async ({ page }) => {
+  test('F2 edits the name cell and Enter commits', async ({ page }) => {
     await inject(page, [leafTask({ id: 't0', name: '设计' })]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    // Double-click directly on the name cell.
-    await page.locator('[data-task-id="t0"] [data-field="name"]').dblclick();
-    const input = page.locator('[data-field="name"] input').first();
-    await input.waitFor();
+    const input = await startEdit(page, 't0', 'name');
     await input.fill('设计V2');
     await input.press('Enter');
     await page.waitForTimeout(150);
@@ -97,9 +110,7 @@ test.describe('inline cell editing', () => {
 
   test('one undo reverts the name edit', async ({ page }) => {
     await inject(page, [leafTask({ id: 't0', name: '设计' })]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="name"]').dblclick();
-    const input = page.locator('[data-field="name"] input').first();
+    const input = await startEdit(page, 't0', 'name');
     await input.fill('设计V2');
     await input.press('Enter');
     await page.waitForTimeout(150);
@@ -108,14 +119,11 @@ test.describe('inline cell editing', () => {
     expect((await readTask(page, 't0')).name).toBe('设计');
   });
 
-  test('double-click duration cell edits, recomputes end, Enter commits', async ({ page }) => {
+  test('F2+Tab edits the duration cell, recomputes end, Enter commits', async ({ page }) => {
     await inject(page, [
       leafTask({ id: 't0', name: '设计', duration: 5, start: '2026-02-02', end: '2026-02-06' }),
     ]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="duration"]').dblclick();
-    const input = page.locator('[data-field="duration"] input').first();
-    await input.waitFor();
+    const input = await startEdit(page, 't0', 'duration');
     await input.fill('3');
     await input.press('Enter');
     await page.waitForTimeout(150);
@@ -129,9 +137,7 @@ test.describe('inline cell editing', () => {
     await inject(page, [
       leafTask({ id: 't0', name: '设计', duration: 5, start: '2026-02-02', end: '2026-02-06' }),
     ]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="duration"]').dblclick();
-    const input = page.locator('[data-field="duration"] input').first();
+    const input = await startEdit(page, 't0', 'duration');
     await input.fill('3');
     await input.press('Enter');
     await page.waitForTimeout(150);
@@ -142,12 +148,9 @@ test.describe('inline cell editing', () => {
     expect(after.end).toBe('2026-02-06');
   });
 
-  test('double-click progress cell edits and Enter commits (clamped)', async ({ page }) => {
+  test('F2+Tab×2 edits the progress cell and Enter commits (clamped)', async ({ page }) => {
     await inject(page, [leafTask({ id: 't0', name: '设计', progress: 0 })]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="progress"]').dblclick();
-    const input = page.locator('[data-field="progress"] input').first();
-    await input.waitFor();
+    const input = await startEdit(page, 't0', 'progress');
     await input.fill('60');
     await input.press('Enter');
     await page.waitForTimeout(150);
@@ -156,9 +159,7 @@ test.describe('inline cell editing', () => {
 
   test('Escape cancels without modifying data', async ({ page }) => {
     await inject(page, [leafTask({ id: 't0', name: '设计', progress: 0 })]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="progress"]').dblclick();
-    const input = page.locator('[data-field="progress"] input').first();
+    const input = await startEdit(page, 't0', 'progress');
     await input.fill('80');
     await input.press('Escape');
     await page.waitForTimeout(150);
@@ -169,10 +170,7 @@ test.describe('inline cell editing', () => {
     page,
   }) => {
     await inject(page, [leafTask({ id: 't0', name: '设计', duration: 5, progress: 0 })]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="duration"]').dblclick();
-    const durInput = page.locator('[data-field="duration"] input').first();
-    await durInput.waitFor();
+    const durInput = await startEdit(page, 't0', 'duration');
     await durInput.fill('3');
     await durInput.press('Tab');
     await page.waitForTimeout(150);
@@ -186,36 +184,39 @@ test.describe('inline cell editing', () => {
     const parent = leafTask({ id: 't0', name: '父任务', duration: 5 });
     const child = leafTask({ id: 't1', name: '子任务', parentId: 't0', order: 0 });
     await inject(page, [parent, child]);
-    await page.locator('[role="row"]', { hasText: '父任务' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="duration"]').dblclick();
+    await startEdit(page, 't0', 'name');
+    await page.locator('[data-field="name"] input').first().press('Tab');
     await page.waitForTimeout(150);
-    // No input appears for a summary task's duration cell.
+    // Tab skips the summary's read-only duration (and progress) cells — no
+    // duration input ever appears.
     await expect(page.locator('[data-field="duration"] input')).toHaveCount(0);
   });
 
   test('milestone duration cell is read-only', async ({ page }) => {
     await inject(page, [leafTask({ id: 't0', name: '里程碑', isMilestone: true, duration: 0 })]);
-    await page.locator('[role="row"]', { hasText: '里程碑' }).first().click();
-    await page.locator('[data-task-id="t0"] [data-field="duration"]').dblclick();
+    await startEdit(page, 't0', 'name');
+    await page.locator('[data-field="name"] input').first().press('Tab');
     await page.waitForTimeout(150);
     await expect(page.locator('[data-field="duration"] input')).toHaveCount(0);
   });
 
-  test('double-click name edits in place; double-click WBS opens the drawer', async ({ page }) => {
+  test('double-click opens the drawer from ANY cell — name, WBS and duration alike', async ({
+    page,
+  }) => {
     await inject(page, [leafTask({ id: 't0', name: '设计' })]);
-    await page.locator('[role="row"]', { hasText: '设计' }).first().click();
 
-    // Double-click the name cell → inline editor, NOT the drawer.
+    // Double-click the name cell → drawer (NOT an inline editor).
     await page.locator('[data-task-id="t0"] [data-field="name"]').dblclick();
-    await page.waitForTimeout(150);
-    await expect(page.locator('[data-field="name"] input')).toBeVisible();
-    await expect(page.getByText('编辑任务')).toHaveCount(0);
-    // Cancel out.
-    await page.locator('[data-field="name"] input').press('Escape');
-    await page.waitForTimeout(100);
-
-    // Double-click the WBS cell → opens the drawer.
-    await page.locator('[data-task-id="t0"] [data-field="wbs"]').first().dblclick();
     await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('[data-field="name"] input')).toHaveCount(0);
+
+    // Double-click the WBS cell → the same drawer (stays open; idempotent).
+    await page.locator('[data-task-id="t0"] [data-field="wbs"]').first().dblclick();
+    await expect(page.getByText('编辑任务')).toBeVisible();
+
+    // Double-click the duration cell → still the drawer, never an edit.
+    await page.locator('[data-task-id="t0"] [data-field="duration"]').dblclick();
+    await expect(page.getByText('编辑任务')).toBeVisible();
+    await expect(page.locator('[data-field="duration"] input')).toHaveCount(0);
   });
 });
