@@ -66,7 +66,9 @@ test.describe('person-days column', () => {
   }) => {
     // Switch to resource view, where Alice (r1) carries task "开发" at 50% load.
     await page.getByRole('button', { name: '资源视图' }).click();
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' }),
+    ).toBeVisible();
 
     // The person-days column is always shown — no toggle needed.
     const resourceList = page.locator('[data-resource-list]');
@@ -76,10 +78,7 @@ test.describe('person-days column', () => {
     await expect(resourceList.getByText('人天', { exact: true })).toHaveCount(0);
 
     // Drill down Alice to reveal her task lane.
-    const aliceRow = page
-      .locator('[role="row"]')
-      .filter({ has: page.locator('input[value="Alice"]') });
-    await aliceRow.locator('button', { hasText: '▶' }).click();
+    await page.locator('[data-resource-id="r1"] [data-testid="expand-toggle"]').click();
     await expect(resourceList.getByText('工期', { exact: true })).toBeVisible();
     await expect(resourceList.getByText('人天', { exact: true })).toBeVisible();
     // The drilled-down task lane "开发" now appears beneath Alice's row.

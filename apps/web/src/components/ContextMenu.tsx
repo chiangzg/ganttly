@@ -1,7 +1,9 @@
 /**
- * Right-click context menu (PRD §3.10).
+ * Right-click context menu (PRD §3.10). One shell, two item sets: task rows
+ * (task view) and resource rows (resource view) — `useViewStore.contextMenu`
+ * carries the kind.
  *
- * Actions:
+ * Task actions:
  * - Edit (open drawer)
  * - Toggle milestone / task
  * - Move up / down (swap sibling order — Alt+↑/↓ on the table)
@@ -10,6 +12,9 @@
  *   after a menu-driven move (plan §5.4; the old path used the non-rollup
  *   command and left parent progress/dates stale).
  * - Delete (cascade)
+ *
+ * Resource actions: Rename (F2, one-shot request to ResourceList) /
+ * Expand-Collapse drill-down / Add resource / Delete (confirm dialog).
  *
  * §5.4 keyboard + accessibility behavior:
  * - Escape closes; ArrowUp/ArrowDown move focus; Enter/Space activates.
@@ -29,12 +34,14 @@ import {
   moveTaskWithRollupCommand,
   swapSiblingOrderCommand,
   pasteTaskCommand,
+  addResourceCommand,
 } from '@/store/useProjectStore';
 import { clipboard, copyToClipboard, cutToClipboard, clearClipboard } from '@/lib/clipboard';
 import { modKeyLabel } from '@/lib/platform';
 import { computeTaskPosition } from '@/lib/taskPosition';
 import { nanoid } from 'nanoid';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
+import { DeleteResourceConfirm } from './DeleteResourceConfirm';
 
 export function ContextMenu() {
   const { t } = useTranslation();
@@ -44,6 +51,7 @@ export function ContextMenu() {
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+  const [confirmDeleteResourceId, setConfirmDeleteResourceId] = useState<string | null>(null);
 
   // §5.4 focus restore: right-click focuses the (focusable) row/canvas before
   // the menu opens, so capture it whenever the menu opens and restore it on
@@ -126,6 +134,98 @@ export function ContextMenu() {
   }, [menu]);
 
   if (!menu) return null;
+
+  // The shell (overlay + clamped menu container) is shared by the task and
+  // resource item sets; only the items and confirm dialog differ.
+  const renderMenu = (items: React.ReactNode, confirm: React.ReactNode) => (
+    <>
+      <div
+        className="fixed inset-0 z-20"
+        onClick={handleClose}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+      <div
+        ref={menuRef}
+        role="menu"
+        className="fixed z-30 min-w-52 rounded border border-border bg-bg-elevated py-1 text-sm shadow-xl"
+        style={
+          clampedPos ? { left: clampedPos.x, top: clampedPos.y } : { left: menu.x, top: menu.y }
+        }
+      >
+        {items}
+      </div>
+      {confirm}
+    </>
+  );
+  const setItemRef = (index: number) => (el: HTMLButtonElement | null) => {
+    itemRefs.current[index] = el;
+  };
+
+  if (menu.kind === 'resource') {
+    const resource = file.resources.find((x) => x.id === menu.resourceId);
+    if (!resource) return null;
+    // Leaf-task count (same rule as the resource view's drill-down).
+    const parentIds = new Set(file.tasks.map((x) => x.parentId));
+    const taskCount = file.tasks.filter(
+      (x) => !parentIds.has(x.id) && x.assignments.some((a) => a.resourceId === resource.id),
+    ).length;
+    const expanded = useViewStore.getState().expandedResourceIds.has(resource.id);
+
+    const onResourceRename = () => {
+      // ResourceList owns the inline-edit cell; ask it to start a name edit
+      // via the one-shot store request (double-click drills down instead).
+      useViewStore.getState().requestResourceRename(resource.id);
+      handleClose();
+    };
+    const onResourceToggle = () => {
+      useViewStore.getState().toggleResourceExpanded(resource.id);
+      handleClose();
+    };
+    const onResourceAdd = () => {
+      dispatch(
+        addResourceCommand({
+          id: nanoid(10),
+          name: t('resource.placeholderName'),
+          capacity: 1.0,
+        }),
+      );
+      handleClose();
+    };
+    const onResourceDelete = () => {
+      // Keep the menu state mounted as the dialog's anchor (same trick as the
+      // task branch): the dialog overlays it, and dismissing the dialog both
+      // clears this flag and closes the menu. Closing the menu here would
+      // unmount the whole component — dialog included.
+      setConfirmDeleteResourceId(resource.id);
+    };
+
+    return renderMenu(
+      <>
+        <MenuItem ref={setItemRef(0)} onClick={onResourceRename} shortcut="F2">
+          {t('contextMenu.rename')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(1)} onClick={onResourceToggle} disabled={taskCount === 0}>
+          {expanded ? t('resource.collapse') : t('resource.expand')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(2)} onClick={onResourceAdd}>
+          {t('resource.add')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(3)} onClick={onResourceDelete} danger shortcut="Delete">
+          {t('resource.delete')}
+        </MenuItem>
+      </>,
+      confirmDeleteResourceId && (
+        <DeleteResourceConfirm
+          resourceId={confirmDeleteResourceId}
+          onClose={() => {
+            setConfirmDeleteResourceId(null);
+            handleClose();
+          }}
+        />
+      ),
+    );
+  }
+
   const task = file.tasks.find((x) => x.id === menu.taskId);
   if (!task) return null;
 
@@ -249,78 +349,59 @@ export function ContextMenu() {
   const canPaste = clipboard.task !== null;
   // Shortcut hints use the platform modifier (⌘ on macOS, Ctrl elsewhere).
   const mod = modKeyLabel();
-  const setItemRef = (index: number) => (el: HTMLButtonElement | null) => {
-    itemRefs.current[index] = el;
-  };
 
-  return (
+  return renderMenu(
     <>
-      <div
-        className="fixed inset-0 z-20"
-        onClick={handleClose}
-        onContextMenu={(e) => e.preventDefault()}
-      />
-      <div
-        ref={menuRef}
-        role="menu"
-        className="fixed z-30 min-w-52 rounded border border-border bg-bg-elevated py-1 text-sm shadow-xl"
-        style={
-          clampedPos ? { left: clampedPos.x, top: clampedPos.y } : { left: menu.x, top: menu.y }
-        }
+      <MenuItem ref={setItemRef(0)} onClick={onEdit}>
+        {t('contextMenu.edit')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(1)} onClick={onRename} shortcut="F2">
+        {t('contextMenu.rename')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(2)} onClick={onCopy} shortcut={`${mod}+C`}>
+        {t('contextMenu.copy')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(3)} onClick={onCut} shortcut={`${mod}+X`}>
+        {t('contextMenu.cut')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(4)} onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
+        {t('contextMenu.paste')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(5)} onClick={onToggleMilestone}>
+        {task.isMilestone ? t('contextMenu.toTask') : t('contextMenu.toMilestone')}
+      </MenuItem>
+      <MenuItem
+        ref={setItemRef(6)}
+        onClick={() => onMoveSibling(-1)}
+        disabled={!pos.canMoveUp}
+        shortcut="Alt+↑"
       >
-        <MenuItem ref={setItemRef(0)} onClick={onEdit}>
-          {t('contextMenu.edit')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(1)} onClick={onRename} shortcut="F2">
-          {t('contextMenu.rename')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(2)} onClick={onCopy} shortcut={`${mod}+C`}>
-          {t('contextMenu.copy')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(3)} onClick={onCut} shortcut={`${mod}+X`}>
-          {t('contextMenu.cut')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(4)} onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
-          {t('contextMenu.paste')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(5)} onClick={onToggleMilestone}>
-          {task.isMilestone ? t('contextMenu.toTask') : t('contextMenu.toMilestone')}
-        </MenuItem>
-        <MenuItem
-          ref={setItemRef(6)}
-          onClick={() => onMoveSibling(-1)}
-          disabled={!pos.canMoveUp}
-          shortcut="Alt+↑"
-        >
-          {t('contextMenu.moveUp')}
-        </MenuItem>
-        <MenuItem
-          ref={setItemRef(7)}
-          onClick={() => onMoveSibling(1)}
-          disabled={!pos.canMoveDown}
-          shortcut="Alt+↓"
-        >
-          {t('contextMenu.moveDown')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(8)} onClick={onIndent} disabled={!pos.canIndent} shortcut="Tab">
-          {t('contextMenu.indent')}
-        </MenuItem>
-        <MenuItem
-          ref={setItemRef(9)}
-          onClick={onOutdent}
-          disabled={!pos.canOutdent}
-          shortcut="Shift+Tab"
-        >
-          {t('contextMenu.outdent')}
-        </MenuItem>
-        <MenuItem ref={setItemRef(10)} onClick={onDelete} danger shortcut="Delete">
-          {t('contextMenu.delete')}
-        </MenuItem>
-      </div>
-      {confirmDeleteTaskId && (
-        <DeleteTaskConfirm taskId={confirmDeleteTaskId} onClose={handleClose} />
-      )}
-    </>
+        {t('contextMenu.moveUp')}
+      </MenuItem>
+      <MenuItem
+        ref={setItemRef(7)}
+        onClick={() => onMoveSibling(1)}
+        disabled={!pos.canMoveDown}
+        shortcut="Alt+↓"
+      >
+        {t('contextMenu.moveDown')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(8)} onClick={onIndent} disabled={!pos.canIndent} shortcut="Tab">
+        {t('contextMenu.indent')}
+      </MenuItem>
+      <MenuItem
+        ref={setItemRef(9)}
+        onClick={onOutdent}
+        disabled={!pos.canOutdent}
+        shortcut="Shift+Tab"
+      >
+        {t('contextMenu.outdent')}
+      </MenuItem>
+      <MenuItem ref={setItemRef(10)} onClick={onDelete} danger shortcut="Delete">
+        {t('contextMenu.delete')}
+      </MenuItem>
+    </>,
+    confirmDeleteTaskId && <DeleteTaskConfirm taskId={confirmDeleteTaskId} onClose={handleClose} />,
   );
 }
 

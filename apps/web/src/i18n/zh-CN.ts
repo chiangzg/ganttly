@@ -203,6 +203,11 @@ export const zhCN = {
     confirmDeleteImpact: '该资源已分配给 {{count}} 个任务，其分配将同时移除。',
     expand: '展开任务',
     collapse: '收起任务',
+    expandAll: '全部展开',
+    collapseAll: '全部收起',
+    taskCount: '{{count}} 项',
+    dragHint: '拖拽调整顺序',
+    listAriaLabel: '资源列表',
     // Canvas info & interaction (plan §3.5 / §3.6 / §5.3).
     canvasAriaLabel: '资源负载图区域，单击选中，双击任务条打开详情',
     tooltipDate: '日期',

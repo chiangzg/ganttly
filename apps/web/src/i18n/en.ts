@@ -209,6 +209,11 @@ export const en = {
       'This resource is assigned to {{count}} task(s); those assignments will also be removed.',
     expand: 'Expand tasks',
     collapse: 'Collapse tasks',
+    expandAll: 'Expand all',
+    collapseAll: 'Collapse all',
+    taskCount: '{{count}}',
+    dragHint: 'Drag to reorder resources',
+    listAriaLabel: 'Resource list',
     // Canvas info & interaction (plan §3.5 / §3.6 / §5.3).
     canvasAriaLabel:
       'Resource load chart. Click to select, double-click a task bar to open details.',

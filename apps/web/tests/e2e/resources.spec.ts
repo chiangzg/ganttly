@@ -58,8 +58,9 @@ test.describe('resource view', () => {
     await page.getByRole('button', { name: '资源视图' }).click();
     // ResourceList header "资源名称" should now be visible, Alice listed.
     await expect(page.getByText('资源名称').first()).toBeVisible();
-    // Alice is now in an <input value="Alice"> — match by CSS attribute.
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' }),
+    ).toBeVisible();
   });
 
   test('keeps task-only toolbar controls in place and disables them in resource view', async ({
@@ -104,23 +105,32 @@ test.describe('resource view', () => {
 
   test('adds a resource via the list footer button', async ({ page }) => {
     await page.getByRole('button', { name: '资源视图' }).click();
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' }),
+    ).toBeVisible();
     await page.getByRole('button', { name: '新增资源' }).click();
-    // Two resources now (Alice + the new placeholder).
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    // Two resources now: Alice + the new placeholder (its name cell starts in
+    // the F2-style inline editor).
+    await expect(page.locator('[data-resource-id]')).toHaveCount(2);
+    await expect(page.locator('[data-testid="resource-name-input"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(
+      page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' }),
+    ).toBeVisible();
   });
 
   test('removes a resource via the row × button', async ({ page }) => {
     await page.getByRole('button', { name: '资源视图' }).click();
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    const aliceName = page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' });
+    await expect(aliceName).toBeVisible();
     // Click the × button inside Alice's row.
-    const aliceRow = page
-      .locator('[role="row"]')
-      .filter({ has: page.locator('input[value="Alice"]') });
-    await aliceRow.locator('button', { hasText: '×' }).click();
+    const aliceRow = page.locator('[data-resource-id="r1"]');
+    await aliceRow.locator('[data-testid="resource-delete"]').click();
     // Confirm deletion in the in-app dialog.
     await page.getByRole('button', { name: '删除资源' }).click();
-    await expect(page.locator('input[value="Alice"]')).toHaveCount(0);
+    await expect(
+      page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' }),
+    ).toHaveCount(0);
   });
 
   test('load chart canvas renders in resource view', async ({ page }) => {
@@ -137,7 +147,9 @@ test.describe('resource view', () => {
 
   test('switching back to task view restores the task table', async ({ page }) => {
     await page.getByRole('button', { name: '资源视图' }).click();
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' }),
+    ).toBeVisible();
     await page.getByRole('button', { name: '任务视图' }).click();
     // Task view header returns.
     await expect(page.getByText('WBS').first()).toBeVisible();
@@ -205,24 +217,29 @@ test.describe('resource view', () => {
 
   test('drilling down a resource reveals its task lanes and selects on click', async ({ page }) => {
     // The fixture injects one task "设计" assigned to Alice (r1) at 50% load,
-    // so Alice's row should have an expand arrow (▶) once in resource view.
+    // so Alice's row should have an expand chevron once in resource view.
     await page.getByRole('button', { name: '资源视图' }).click();
-    await expect(page.locator('input[value="Alice"]')).toBeVisible();
+    const aliceName = page.locator('[data-testid="resource-name"]').filter({ hasText: 'Alice' });
+    await expect(aliceName).toBeVisible();
 
     // Initially: only the resource row exists (1 row), and the task "设计" is
-    // NOT visible in the resource list yet.
+    // NOT visible in the resource list yet. The collapsed row quantifies its
+    // hidden tasks with a count chip.
     await expect(page.getByText('设计')).toHaveCount(0);
+    const aliceRow = page.locator('[data-resource-id="r1"]');
+    await expect(aliceRow.locator('[data-testid="task-count"]')).toHaveText('1 项');
 
-    // Click the expand arrow (▶) inside Alice's row.
-    const aliceRow = page
-      .locator('[role="row"]')
-      .filter({ has: page.locator('input[value="Alice"]') });
-    await aliceRow.locator('button', { hasText: '▶' }).click();
+    // Click the expand chevron inside Alice's row.
+    const toggle = aliceRow.locator('[data-testid="expand-toggle"]');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
 
     // The task lane "设计" now appears beneath Alice's row.
     await expect(page.getByText('设计')).toBeVisible();
-    // The arrow flipped to the expanded glyph (▼).
-    await expect(aliceRow.locator('button', { hasText: '▼' })).toBeVisible();
+    // The chevron flipped to expanded.
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // Expanded rows don't repeat the count chip.
+    await expect(aliceRow.locator('[data-testid="task-count"]')).toHaveCount(0);
 
     // Clicking the task lane selects it (G19: writes selectedTaskIdInResource).
     await page.getByText('设计').click();
@@ -236,7 +253,7 @@ test.describe('resource view', () => {
     expect(selectedLane).toBe('t1');
 
     // Collapsing hides the task lane again.
-    await aliceRow.locator('button', { hasText: '▼' }).click();
+    await toggle.click();
     await expect(page.getByText('设计')).toHaveCount(0);
   });
 });
