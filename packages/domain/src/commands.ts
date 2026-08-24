@@ -102,6 +102,7 @@ export type ProjectCommand =
   | { kind: 'addResource'; resource: Resource }
   | { kind: 'updateResource'; resourceId: string; patch: Partial<Resource> }
   | { kind: 'deleteResource'; resourceId: string }
+  | { kind: 'moveResource'; resourceId: string; toIndex: number }
   | { kind: 'assignResource'; taskId: string; assignment: TaskAssignment }
   | { kind: 'batchAssignResource'; taskIds: readonly string[]; assignment: TaskAssignment }
   | { kind: 'unassignResource'; taskId: string; resourceId: string }
@@ -771,6 +772,19 @@ function applyDeleteResource(
   );
 }
 
+function applyMoveResource(
+  file: GanttlyFile,
+  cmd: Extract<ProjectCommand, { kind: 'moveResource' }>,
+): ApplyProjectCommandResult {
+  const from = file.resources.findIndex((r) => r.id === cmd.resourceId);
+  if (from === -1) return ok(file, { kind: 'resource' });
+  const without = file.resources.filter((_, i) => i !== from);
+  const to = Math.max(0, Math.min(cmd.toIndex, without.length));
+  if (to === from) return ok(file, { kind: 'resource' });
+  const next = [...without.slice(0, to), file.resources[from]!, ...without.slice(to)];
+  return ok({ ...file, resources: next }, { kind: 'resource' });
+}
+
 function applyAssignResource(
   file: GanttlyFile,
   cmd: Extract<ProjectCommand, { kind: 'assignResource' }>,
@@ -927,6 +941,8 @@ export function applyProjectCommand(
       return applyUpdateResource(file, command);
     case 'deleteResource':
       return applyDeleteResource(file, command);
+    case 'moveResource':
+      return applyMoveResource(file, command);
     case 'assignResource':
       return applyAssignResource(file, command);
     case 'batchAssignResource':

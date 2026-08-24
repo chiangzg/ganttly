@@ -651,6 +651,14 @@ export function deleteResourceCommand(resourceId: string): Command {
   return toUndoable({ kind: 'deleteResource', resourceId }, '删除资源');
 }
 
+/**
+ * Reorder a resource within the flat resources list (grip drag in the
+ * resource view). One command = one undo entry; same-index moves no-op.
+ */
+export function moveResourceCommand(resourceId: string, toIndex: number): Command {
+  return toUndoable({ kind: 'moveResource', resourceId, toIndex }, '移动资源');
+}
+
 export function assignResourceCommand(taskId: string, assignment: TaskAssignment): Command {
   return toUndoable({ kind: 'assignResource', taskId, assignment }, '分配资源');
 }

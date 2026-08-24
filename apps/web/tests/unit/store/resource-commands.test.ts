@@ -3,6 +3,7 @@ import {
   addResourceCommand,
   updateResourceCommand,
   deleteResourceCommand,
+  moveResourceCommand,
   assignResourceCommand,
   unassignResourceCommand,
 } from '@/store/useProjectStore';
@@ -132,6 +133,45 @@ describe('deleteResourceCommand', () => {
     expect(restoredAgain.tasks.map((task) => task.assignments)).toEqual(
       file.tasks.map((task) => task.assignments),
     );
+  });
+});
+
+describe('moveResourceCommand', () => {
+  it('moves a resource to the target index', () => {
+    const file = makeFile({ resources: [alice, bob, carol] });
+    const next = moveResourceCommand('r1', 2).apply(file);
+    expect(next.resources.map((r) => r.id)).toEqual(['r2', 'r3', 'r1']);
+  });
+
+  it('supports moving up', () => {
+    const file = makeFile({ resources: [alice, bob, carol] });
+    const next = moveResourceCommand('r3', 0).apply(file);
+    expect(next.resources.map((r) => r.id)).toEqual(['r3', 'r1', 'r2']);
+  });
+
+  it('is a no-op when the effective position is unchanged', () => {
+    const file = makeFile({ resources: [alice, bob, carol] });
+    expect(moveResourceCommand('r2', 1).apply(file)).toBe(file);
+  });
+
+  it('clamps an out-of-range index', () => {
+    const file = makeFile({ resources: [alice, bob, carol] });
+    const next = moveResourceCommand('r1', 99).apply(file);
+    expect(next.resources.map((r) => r.id)).toEqual(['r2', 'r3', 'r1']);
+  });
+
+  it('is a no-op when the resource does not exist', () => {
+    const file = makeFile({ resources: [alice] });
+    expect(moveResourceCommand('nope', 0).apply(file)).toBe(file);
+  });
+
+  it('restores the original order on invert (undo)', () => {
+    const file = makeFile({ resources: [alice, bob, carol] });
+    const cmd = moveResourceCommand('r1', 2);
+    const next = cmd.apply(file);
+    expect(next.resources.map((r) => r.id)).toEqual(['r2', 'r3', 'r1']);
+    const restored = cmd.invert(next);
+    expect(restored.resources).toEqual(file.resources);
   });
 });
 

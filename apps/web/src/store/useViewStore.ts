@@ -44,9 +44,17 @@ interface ViewStoreState {
   drawerWidth: number;
   setDrawerWidth(width: number): void;
 
-  /** Context menu state (right-click on a task). */
-  contextMenu: { taskId: string; x: number; y: number } | null;
+  /**
+   * Context menu state (right-click on a task row/bar OR a resource row in
+   * the resource view). One shell (ContextMenu.tsx) renders task or resource
+   * items depending on `kind`.
+   */
+  contextMenu:
+    | { kind: 'task'; taskId: string; x: number; y: number }
+    | { kind: 'resource'; resourceId: string; x: number; y: number }
+    | null;
   openContextMenu(taskId: string, x: number, y: number): void;
+  openResourceContextMenu(resourceId: string, x: number, y: number): void;
   closeContextMenu(): void;
 
   /**
@@ -59,6 +67,15 @@ interface ViewStoreState {
   renameRequest: { taskId: string; nonce: number } | null;
   requestRename(taskId: string): void;
   clearRenameRequest(): void;
+
+  /**
+   * Resource-view twin of `renameRequest`: the context menu asks
+   * ResourceList to start editing a resource's name. Same one-shot
+   * nonce pattern; cleared by ResourceList once handled.
+   */
+  resourceRenameRequest: { resourceId: string; nonce: number } | null;
+  requestResourceRename(resourceId: string): void;
+  clearResourceRenameRequest(): void;
 
   /** Active view: task (Gantt) ↔ resource (load chart). G11: ephemeral. */
   viewMode: ViewMode;
@@ -169,13 +186,22 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   },
 
   contextMenu: null,
-  openContextMenu: (taskId, x, y) => set({ contextMenu: { taskId, x, y } }),
+  openContextMenu: (taskId, x, y) => set({ contextMenu: { kind: 'task', taskId, x, y } }),
+  openResourceContextMenu: (resourceId, x, y) =>
+    set({ contextMenu: { kind: 'resource', resourceId, x, y } }),
   closeContextMenu: () => set({ contextMenu: null }),
 
   renameRequest: null,
   requestRename: (taskId) =>
     set((s) => ({ renameRequest: { taskId, nonce: (s.renameRequest?.nonce ?? 0) + 1 } })),
   clearRenameRequest: () => set({ renameRequest: null }),
+
+  resourceRenameRequest: null,
+  requestResourceRename: (resourceId) =>
+    set((s) => ({
+      resourceRenameRequest: { resourceId, nonce: (s.resourceRenameRequest?.nonce ?? 0) + 1 },
+    })),
+  clearResourceRenameRequest: () => set({ resourceRenameRequest: null }),
 
   viewMode: 'task',
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -261,6 +287,7 @@ export const useViewStore = create<ViewStoreState>((set) => ({
       drawer: 'closed',
       contextMenu: null,
       renameRequest: null,
+      resourceRenameRequest: null,
       resourceScrollTop: 0,
       selectedResourceId: null,
       expandedResourceIds: new Set<string>(),

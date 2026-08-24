@@ -3,7 +3,7 @@
 | 字段     | 内容                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------ |
 | 文档状态 | Implemented(PR #14,2026-08-20,分支 `feature/wbs-tree-ui-modernize`)                        |
-| 适用范围 | 编辑器左侧任务列表(WBS 任务树)                                                             |
+| 适用范围 | 编辑器左侧任务列表(WBS 任务树)及姊妹面板「资源明细栏」(§11)                                |
 | 目标     | 提升可读性、降低误操作、交互规则单一可预期                                                 |
 | 关联实现 | `TaskTable.tsx`、`ContextMenu.tsx`、`useViewStore.ts`、`tests/e2e/wbs-tree-layout.spec.ts` |
 
@@ -184,3 +184,43 @@
 3. 只有把手能拖动任务,单击/双击不会误触拖拽或选中。✅
 4. 双击行任意普通区域得到一致的详情结果。✅
 5. 重命名有可见入口(F2 hint 出现在右键菜单),不依赖隐藏规则。✅
+
+## 11. 姊妹面板:资源明细栏(2026-08-20 追加)
+
+资源视图左侧 `ResourceList.tsx` 按同一套规则完成现代化(分支
+`feature/resource-list-modernize`,堆叠于 PR #14 之上),差异点源于
+「任务视图以任务为主,资源视图以人为主」。
+
+**复用的规则(与任务树一一对应)**:
+
+| 任务树                                 | 资源明细栏                                           |
+| -------------------------------------- | ---------------------------------------------------- |
+| 18px 把手槽,hover 淡入,仅把手可拖      | 同;拖拽 = 扁平重排(`moveResourceCommand`)            |
+| lucide 箭头 + 槽位全行保留             | 同(`ChevronRight/Down`,无任务资源留空槽)             |
+| 折叠父任务「N 项」徽标                 | 折叠资源「N 项」(名下叶子任务数)                     |
+| 双击行 = 打开详情抽屉                  | 双击行 = 展开/收起该资源的任务下钻(人的详情)         |
+| F2/Tab(name→duration→progress)行内编辑 | F2/Tab(name→role→capacity);一次提交一条命令          |
+| 右键菜单「重命名 F2」(renameRequest)   | 同(resourceRenameRequest + kind:'resource' 菜单分支) |
+| 搜索栏全部展开/收起                    | 表头第一格右侧两个图标按钮                           |
+| treegrid + aria-level/aria-expanded    | 同(资源 =1 级,任务 lane =2 级)                       |
+| 只许改 opacity 的零位移红线            | 同(把手/删除按钮)                                    |
+
+**差异点(有意为之)**:
+
+- **身份标识**:任务树用「父任务箭头+半粗+参考线」区分层级;资源是扁平
+  名单,用**姓名 hash 配色的头像圆标**(孟/ZS/AC)承载"以人为主"的身份。
+- **编辑模型**:原实现是三个常驻 `<input>`(每敲一键一条 undo 记录),
+  现改为静态文本 + 点击后编辑,单命令提交修复 undo 污染。
+- **双击语义**:资源没有详情抽屉,双击 = 下钻开合;任务 lane 保留
+  双击 = 打开任务抽屉(与任务视图一致)。
+- **常驻 `×` 删除按钮**改为 hover 淡入(任务树删除走右键/Delete,资源
+  保留行内入口但去视觉噪音);`Delete` 键同样弹确认。
+- 下钻任务 lane 保持只读,视觉对齐任务树叶子行(空箭头槽 + tabular WBS)。
+
+**实现落点**:`ResourceList.tsx`(行重构/编辑/拖拽)、`ContextMenu.tsx`
+(`contextMenu` 扩为 task|resource 判别联合,共用外壳)、
+`useViewStore.ts`(`resourceRenameRequest`)、domain
+`moveResourceCommand`(快照式 undo)。验收:`tests/e2e/resource-list-interactions.spec.ts`
+(10 例:零位移、F2 单命令 undo、Tab/Esc、双击下钻徽标、右键全链路、
+Delete 确认、把手拖拽单 undo、全部展开/收起、treegrid aria)+ 存量
+`resources/panel-width/resource-canvas-info/effort-constraints` 同步。

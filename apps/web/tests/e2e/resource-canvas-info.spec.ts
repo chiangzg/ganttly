@@ -347,10 +347,7 @@ test.describe('resource canvas info & interaction', () => {
       resources: [{ id: 'r1', name: 'Alice', capacity: 1.0 }],
     });
     // Expand Alice to reveal the task lane.
-    const aliceRow = page
-      .locator('[role="row"]')
-      .filter({ has: page.locator('input[value="Alice"]') });
-    await aliceRow.locator('button', { hasText: '▶' }).click();
+    await page.locator('[data-resource-id="r1"] [data-testid="expand-toggle"]').click();
     await page.waitForTimeout(100);
     // Lane sits at resourceIndex 0 + header(1) + laneOffset 0.
     const pt = await lanePoint(page, '2026-02-04', 0, 0);
@@ -382,10 +379,8 @@ test.describe('resource canvas info & interaction', () => {
       ],
       resources: [{ id: 'r1', name: 'Alice', capacity: 1.0 }],
     });
-    const aliceRow = page
-      .locator('[role="row"]')
-      .filter({ has: page.locator('input[value="Alice"]') });
-    await aliceRow.locator('button', { hasText: '▶' }).click();
+    // Expand Alice to reveal the task lane.
+    await page.locator('[data-resource-id="r1"] [data-testid="expand-toggle"]').click();
     await page.waitForTimeout(100);
     const pt = await lanePoint(page, '2026-02-04', 0, 0);
     await page.mouse.click(pt.x, pt.y, { clickCount: 2 });
@@ -415,10 +410,8 @@ test.describe('resource canvas info & interaction', () => {
       ],
       resources: [{ id: 'r1', name: 'Alice', capacity: 1.0 }],
     });
-    const aliceRow = page
-      .locator('[role="row"]')
-      .filter({ has: page.locator('input[value="Alice"]') });
-    await aliceRow.locator('button', { hasText: '▶' }).click();
+    // Expand Alice to reveal the task lane.
+    await page.locator('[data-resource-id="r1"] [data-testid="expand-toggle"]').click();
     await page.waitForTimeout(100);
     const pt = await lanePoint(page, '2026-02-04', 0, 0);
     await page.mouse.move(pt.x, pt.y);
