@@ -116,10 +116,12 @@ async function rowCenter(page: Page, name: string): Promise<{ x: number; y: numb
  * Drive a table-row drag end-to-end via synthetic HTML5 DragEvents.
  *
  * Playwright's `mouse` API fires MouseEvents only — it does NOT synthesize the
- * `dragstart` / `dragover` / `drop` events that `draggable` rows rely on. So
- * we dispatch them ourselves with a real `DataTransfer`, which React picks up
- * through its delegated event listeners. `offsetRatio` selects the drop band:
- * <0.25 → before, >0.75 → after, middle → inside (matches computeDropPosition).
+ * `dragstart` / `dragover` / `drop` events the grip relies on. So we dispatch
+ * them ourselves with a real `DataTransfer`, which React picks up through its
+ * delegated event listeners. Only the grip slot (`row-drag-handle`) is
+ * draggable — dragstart/dragend target it; dragover/drop target the drop rows.
+ * `offsetRatio` selects the drop band: <0.25 → before, >0.75 → after, middle →
+ * inside (matches computeDropPosition).
  */
 async function dragRow(page: Page, fromName: string, toName: string, offsetRatio: number) {
   const from = await rowCenter(page, fromName);
@@ -131,9 +133,11 @@ async function dragRow(page: Page, fromName: string, toName: string, offsetRatio
       const fromEl = document.elementFromPoint(fromX, fromY) as HTMLElement | null;
       const toEl = document.elementFromPoint(toX, toY) as HTMLElement | null;
       if (!fromEl || !toEl) throw new Error('drag source/target element not found');
-      const source = fromEl.closest('[role="row"]') as HTMLElement | null;
+      const sourceRow = fromEl.closest('[role="row"]') as HTMLElement | null;
       const target = toEl.closest('[role="row"]') as HTMLElement | null;
-      if (!source || !target) throw new Error('row not found under pointer');
+      if (!sourceRow || !target) throw new Error('row not found under pointer');
+      const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]');
+      if (!source) throw new Error('drag grip not found in source row');
 
       const dt = new DataTransfer();
       const fire = (
@@ -250,6 +254,52 @@ test('dragging a parent onto its own descendant is forbidden (no move)', async (
   expect(after).toEqual(before);
 });
 
+test('the row body is not draggable — only the grip slot starts a drag', async ({ page }) => {
+  await injectTasks(page, [
+    makeTask('a', '任务A', { order: 0 }),
+    makeTask('b', '任务B', { order: 1 }),
+  ]);
+  const before = await readTasks(page);
+
+  // The row element itself carries no draggable attribute; the grip does.
+  expect(await page.locator('[data-task-id="a"]').getAttribute('draggable')).toBeNull();
+  const grip = page.locator('[data-task-id="a"] [data-testid="row-drag-handle"]');
+  await expect(grip).toHaveAttribute('draggable', 'true');
+
+  // Dispatching dragstart on the ROW (not the grip) never starts a drag, so
+  // the subsequent dragover/drop are no-ops and the order is unchanged.
+  const from = await rowCenter(page, '任务B');
+  const to = await rowCenter(page, '任务A');
+  await page.evaluate(
+    ({ fromX, fromY, toX, toY }) => {
+      const source = document
+        .elementFromPoint(fromX, fromY)!
+        .closest('[role="row"]') as HTMLElement;
+      const target = document.elementFromPoint(toX, toY)!.closest('[role="row"]') as HTMLElement;
+      const dt = new DataTransfer();
+      const fire = (type: string, el: HTMLElement) => {
+        const rect = el.getBoundingClientRect();
+        el.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }),
+        );
+      };
+      fire('dragstart', source);
+      fire('dragover', target);
+      fire('drop', target);
+    },
+    { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y },
+  );
+
+  const after = await readTasks(page);
+  expect(after, 'no move without the grip as the drag source').toEqual(before);
+});
+
 test('a single undo restores hierarchy and order after a reparent', async ({ page }) => {
   await injectTasks(page, [
     makeTask('a', '任务A', { order: 0 }),
@@ -293,8 +343,9 @@ test('Escape cancels an in-flight drag (no dispatch)', async ({ page }) => {
       const fromEl = document.elementFromPoint(fromX, fromY) as HTMLElement | null;
       const toEl = document.elementFromPoint(toX, toY) as HTMLElement | null;
       if (!fromEl || !toEl) throw new Error('element not found');
-      const source = fromEl.closest('[role="row"]') as HTMLElement;
+      const sourceRow = fromEl.closest('[role="row"]') as HTMLElement;
       const target = toEl.closest('[role="row"]') as HTMLElement;
+      const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]')!;
       const dt = new DataTransfer();
       const fire = (type: string, el: HTMLElement, x: number, y: number) => {
         const rect = el.getBoundingClientRect();
@@ -315,11 +366,13 @@ test('Escape cancels an in-flight drag (no dispatch)', async ({ page }) => {
   );
   await page.keyboard.press('Escape');
   await page.waitForTimeout(30);
-  // dragend fires on the source after Escape.
+  // dragend fires on the source grip after Escape.
   await page.evaluate(
     async ({ fromX, fromY }) => {
       const fromEl = document.elementFromPoint(fromX, fromY) as HTMLElement | null;
-      const source = fromEl?.closest('[role="row"]') as HTMLElement | null;
+      const sourceRow = fromEl?.closest('[role="row"]') as HTMLElement | null;
+      if (!sourceRow) return;
+      const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]');
       if (!source) return;
       const rect = source.getBoundingClientRect();
       source.dispatchEvent(
@@ -356,13 +409,15 @@ test('holding a drag after leaving a row does not crash the task table', async (
   const to = await rowCenter(page, '任务A');
   await page.evaluate(
     async ({ fromX, fromY, toX, toY }) => {
-      const source = document
+      const sourceRow = document
         .elementFromPoint(fromX, fromY)
         ?.closest('[role="row"]') as HTMLElement | null;
       const target = document
         .elementFromPoint(toX, toY)
         ?.closest('[role="row"]') as HTMLElement | null;
-      if (!source || !target) throw new Error('drag source/target row not found');
+      if (!sourceRow || !target) throw new Error('drag source/target row not found');
+      const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]');
+      if (!source) throw new Error('drag grip not found in source row');
 
       const dataTransfer = new DataTransfer();
       const fire = (type: string, element: HTMLElement, x: number, y: number) => {

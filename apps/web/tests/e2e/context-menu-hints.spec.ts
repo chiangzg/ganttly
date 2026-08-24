@@ -65,6 +65,7 @@ test.describe('context menu shortcut hints', () => {
     );
 
     // Each labelled item should carry its shortcut hint.
+    await expect(menu.locator('button', { hasText: '重命名' })).toContainText('F2');
     await expect(menu.locator('button', { hasText: '复制' })).toContainText(expectedMod);
     await expect(menu.locator('button', { hasText: '复制' })).toContainText('C');
     await expect(menu.locator('button', { hasText: '剪切' })).toContainText('X');

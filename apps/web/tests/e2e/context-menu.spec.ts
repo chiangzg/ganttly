@@ -98,11 +98,15 @@ test.describe('§5.4 context menu keyboard & accessibility', () => {
     await openMenuOnRow(page, 'a');
     const menu = page.locator('.fixed.z-30').last();
 
-    // Opening focuses the first item (编辑). ArrowDown → 复制, Enter → copy.
+    // Opening focuses the first item (编辑). ArrowDown → 重命名 (F2 hint),
+    // ArrowDown again → 复制, Enter → copy.
     await page.keyboard.press('ArrowDown');
-    const focusedText = await page.evaluate(
-      () => document.activeElement?.textContent?.trim() ?? '',
-    );
+    let focusedText = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? '');
+    expect(focusedText).toContain('重命名');
+    expect(focusedText).toContain('F2');
+
+    await page.keyboard.press('ArrowDown');
+    focusedText = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? '');
     // Shortcut hint format is `${mod}+C` (⌘+C on macOS, Ctrl+C elsewhere).
     expect(focusedText).toContain('复制');
     expect(focusedText).toContain('+C');
@@ -115,6 +119,28 @@ test.describe('§5.4 context menu keyboard & accessibility', () => {
       return store.getState().file.tasks.length;
     });
     expect(clipHas).toBe(1); // copy is non-destructive
+  });
+
+  test('menu 重命名 enters the inline name editor and Enter commits', async ({ page }) => {
+    await injectTasks(page, [makeTask('a', { name: '任务A' })]);
+    await openMenuOnRow(page, 'a');
+    const menu = page.locator('.fixed.z-30').last();
+
+    await menu.locator('button', { hasText: '重命名' }).click();
+
+    // The inline name editor opens on the row (double-click now opens the
+    // drawer, so this menu item + F2 are the explicit rename entries).
+    const input = page.locator('[data-task-id="a"] [data-field="name"] input');
+    await expect(input).toBeVisible({ timeout: 3000 });
+    await input.fill('任务A改');
+    await input.press('Enter');
+    await page.waitForTimeout(150);
+
+    const name = await page.evaluate(() => {
+      const store = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
+      return store.getState().file.tasks.find((x) => x.id === 'a')?.name;
+    });
+    expect(name).toBe('任务A改');
   });
 
   test('inapplicable actions are disabled (lone root: no move/indent/outdent)', async ({
