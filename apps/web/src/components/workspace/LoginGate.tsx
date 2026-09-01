@@ -15,7 +15,18 @@ import { fetchInstanceDiscovery, useInstanceStore } from '@/store/useInstanceSto
 import { useScopeStore } from '@/store/useScopeStore';
 import { buildScopePath, LOCAL_SCOPE } from '@/lib/routing';
 
-export function LoginGate() {
+export function LoginGate({
+  instanceId: instanceIdProp,
+  returnTo,
+}: {
+  /** Target instance; defaults to the active scope. The editor deep-link route
+   * must pass this explicitly — on a fresh reload the scope store still sits
+   * on the local workspace while the URL points at a remote instance. */
+  instanceId?: string;
+  /** Where to return after login; defaults to the active scope's project
+   * center path (editor route passes the deep-linked project path). */
+  returnTo?: string;
+} = {}) {
   const activeScope = useScopeStore((s) => s.activeScope);
   const findInstance = useInstanceStore((s) => s.findInstance);
   const navigate = useNavigate();
@@ -23,8 +34,8 @@ export function LoginGate() {
   const [devCapable, setDevCapable] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
 
-  const instance = findInstance(activeScope.instanceId);
-  const instanceId = activeScope.instanceId;
+  const instanceId = instanceIdProp ?? activeScope.instanceId;
+  const instance = findInstance(instanceId);
   const instanceUrl = instance?.baseUrl ?? '';
 
   useEffect(() => {
@@ -62,6 +73,10 @@ export function LoginGate() {
         setLoginError('开发登录失败，请确认服务状态');
         return;
       }
+      if (returnTo) {
+        navigate(returnTo, { replace: true });
+        return;
+      }
       const workspaces = await useScopeStore.getState().loadWorkspaces(instance);
       const first = workspaces[0];
       navigate(
@@ -81,7 +96,8 @@ export function LoginGate() {
       .getState()
       .login(
         instance,
-        buildScopePath({ instanceId: instance.id, workspaceId: activeScope.workspaceId }),
+        returnTo ??
+          buildScopePath({ instanceId: instance.id, workspaceId: activeScope.workspaceId }),
       );
     if (!started) {
       setLoginError(`无法连接 ${instance.displayName}，请确认服务已启动`);

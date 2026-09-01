@@ -11,6 +11,7 @@ import {
 } from 'react-router-dom';
 import { AlertTriangle, LoaderCircle } from 'lucide-react';
 import { GanttView } from './components/GanttView';
+import { LoginGate } from './components/workspace/LoginGate';
 import { ProjectCenter } from './components/projects/ProjectCenter';
 import { PatSettings } from './components/settings/PatSettings';
 import { getRepository } from './data/createRepository';
@@ -113,6 +114,13 @@ function PostLoginRedirect({ info }: { info: { instanceId: string; path: string 
         setPhase('failed');
         return;
       }
+      // Honor the stashed deep link (project editor path, workspace center)
+      // so logging in from a deep page returns there; bare "/" keeps the
+      // legacy first-workspace fallback below.
+      if (info.path && info.path !== '/') {
+        navigate(info.path, { replace: true });
+        return;
+      }
       const workspaces = await useScopeStore.getState().loadWorkspaces(instance);
       const first = workspaces[0];
       navigate(
@@ -202,11 +210,45 @@ function ProjectEditorRoute() {
   const activeProjectRef = useProjectStore((state) => state.activeProjectRef);
   const loadState = useProjectStore((state) => state.loadState);
   const saveError = useProjectStore((state) => state.lastSaveError);
+  // Tri-state auth for remote refs: undefined = no checkAuth resolved yet in
+  // this session (the auth store is memory-only), null = checked but logged
+  // out, object = signed in. Subscribe to authByInstance rather than
+  // `checked` — the 401 path mutates that Set in place, so a `checked`
+  // selector would miss the update.
+  const remoteProfile = useAuthStore((state) =>
+    ref && !isLocalRef(ref) ? state.authByInstance[ref.instanceId] : null,
+  );
   const [attemptedRef, setAttemptedRef] = useState<string | null>(null);
+  const [instanceMissing, setInstanceMissing] = useState(false);
   const refKey = ref ? `${ref.instanceId}/${ref.workspaceId}/${ref.projectId}` : null;
+  const isRemote = Boolean(ref && !isLocalRef(ref));
 
   useEffect(() => {
     if (!ref || status !== 'ready') return;
+    if (isLocalRef(ref)) {
+      let cancelled = false;
+      void activateProject(ref).finally(() => {
+        if (!cancelled && refKey) setAttemptedRef(refKey);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    const instance = useInstanceStore.getState().findInstance(ref.instanceId);
+    if (!instance) {
+      setInstanceMissing(true);
+      return;
+    }
+    // A deep link skips the project center's LoginGate, and the auth store is
+    // memory-only — so on a fresh reload the session must be re-checked here
+    // before the first load attempt, otherwise loadProject resolves no
+    // repository and this route would spin forever. The store update flips
+    // `remoteProfile`, which re-runs this effect.
+    if (remoteProfile === undefined) {
+      void useAuthStore.getState().checkAuth(instance);
+      return;
+    }
+    if (!remoteProfile) return; // checked and logged out — render LoginGate below
     let cancelled = false;
     void activateProject(ref).finally(() => {
       if (!cancelled && refKey) setAttemptedRef(refKey);
@@ -214,12 +256,30 @@ function ProjectEditorRoute() {
     return () => {
       cancelled = true;
     };
-  }, [activateProject, refKey, status]);
+  }, [activateProject, refKey, status, remoteProfile]);
 
   if (status === 'idle' || status === 'loading' || loadState === 'loading') {
     return <FullPageLoading />;
   }
   if (!ref) return <Navigate to={buildScopePath(LOCAL_SCOPE)} replace />;
+  if (isRemote && instanceMissing) {
+    return (
+      <MessagePage
+        title="实例不可用"
+        message="链接指向的远端服务不在实例列表中，请从项目中心重新进入。"
+      />
+    );
+  }
+  if (isRemote && remoteProfile === undefined) {
+    return <FullPageLoading />;
+  }
+  if (isRemote && remoteProfile === null) {
+    return (
+      <div className="flex h-full flex-col">
+        <LoginGate instanceId={ref.instanceId} returnTo={buildProjectPath(ref)} />
+      </div>
+    );
+  }
   const projectId = ref.projectId;
   // The catalog list/trash reflect the *active* scope (usually local on a
   // fresh load). For remote deep links they are irrelevant — and checking a
