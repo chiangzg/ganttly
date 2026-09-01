@@ -34,6 +34,7 @@ import {
 } from '@/data/repository';
 import { isLocalRef, localRef, refEqual, type ProjectRef } from '@/data/projectRef';
 import { resolveProjectRepository } from '@/data/resolveRepository';
+import { AuthRequiredError } from '@/data/remoteErrors';
 import { saveViewState } from '@/data/viewStateStore';
 import { cascadeSchedule, countDependencyViolations } from '@/lib/schedule';
 import { resolveCalendar } from '@/lib/calendar';
@@ -217,7 +218,21 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   async loadProject(ref) {
     const localRepo = get().repo;
     const repo = resolveRepoForRef(ref, localRepo);
-    if (!repo) return false;
+    if (!repo) {
+      // Land in a terminal state so the editor route never idles on an
+      // unresolved ref. Only when no project view is up — a background load
+      // for some other ref must not clobber the open project.
+      const state = get();
+      if (!state.activeProjectRef || state.loadState !== 'ready') {
+        set({
+          loadState: 'error',
+          lastSaveError: isLocalRef(ref)
+            ? '本地存储不可用'
+            : '远端实例未登录或不可用，请重新登录后再试',
+        });
+      }
+      return false;
+    }
     if (
       get().activeProjectRef &&
       refEqual(get().activeProjectRef!, ref) &&
@@ -252,7 +267,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       return true;
     } catch (error) {
       if (generation === loadGeneration) {
-        const message = (error as Error).message;
+        const message =
+          error instanceof AuthRequiredError
+            ? '登录已过期，请重新登录后再试'
+            : (error as Error).message;
         set({ loadState: 'error', lastSaveError: message });
       }
       return false;
