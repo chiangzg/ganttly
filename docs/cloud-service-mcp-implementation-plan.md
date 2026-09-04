@@ -698,8 +698,9 @@ GET /.well-known/ganttly-instance
 1. 用户点"用 GitHub 登录"→ 服务端生成 `state`（+nonce），重定向到 `https://github.com/login/oauth/authorize?client_id=...&redirect_uri=...&state=...&scope=read:user`（需取私有邮箱时加 `user:email`）。
 2. GitHub 回跳带 `code` + `state` → 服务端校验 `state`，`POST https://github.com/login/oauth/access_token`（带 `client_secret`）换取 access_token。
 3. `GET https://api.github.com/user` 取 `{ id, login, name, email, avatar_url }`。
-4. upsert `users(provider='https://github.com', subject=String(id))`；首次登录自动创建一个 `kind=personal` 个人工作区和 owner membership。首版只开放个人工作区 UI，但数据库和授权按多工作区建模。
-5. 建立服务端 Session（sessionId → userId），下发安全 Cookie。
+4. **登录白名单（可选，`ALLOWED_GITHUB_USER_IDS`）**：配置后，`id` 不在名单内的用户在此步被拒——重定向回 Web `?login_error=not_allowed`，不落库、不建 Session。名单为逗号分隔的 GitHub 数字 ID；留空 = 开放登录。只拦截新登录，存量会话靠 Cookie TTL（7 天）过期，存量 PAT 由运维按 runbook 审计吊销。
+5. upsert `users(provider='https://github.com', subject=String(id))`；首次登录自动创建一个 `kind=personal` 个人工作区和 owner membership。首版只开放个人工作区 UI，但数据库和授权按多工作区建模。
+6. 建立服务端 Session（sessionId → userId），下发安全 Cookie。
 
 部署模式：
 
@@ -1188,6 +1189,7 @@ GITHUB_OAUTH_CLIENT_SECRET
 SESSION_SECRET
 TOKEN_PEPPER
 ALLOWED_WEB_ORIGINS
+ALLOWED_GITHUB_USER_IDS       # 登录白名单（可选，GitHub 数字 ID，留空 = 开放登录）
 LOG_LEVEL
 MAX_PROJECT_BYTES
 MAX_PROJECT_TASKS

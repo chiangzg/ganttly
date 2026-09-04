@@ -26,12 +26,22 @@ import { isLocalRef } from './data/projectRef';
 import { useProjectCatalogStore } from './store/useProjectCatalogStore';
 import { useProjectStore } from './store/useProjectStore';
 import { useInstanceStore } from './store/useInstanceStore';
-import { useAuthStore, consumePostLoginRedirect } from './store/useAuthStore';
+import { useAuthStore, consumePostLoginRedirect, loginErrorMessage } from './store/useAuthStore';
 import { useScopeStore } from './store/useScopeStore';
 
 export function App() {
   const init = useProjectCatalogStore((state) => state.init);
   const dirty = useProjectStore((state) => state.dirty);
+
+  // Consume `?login_error=` during the first render, before any route mounts:
+  // OAuth failures land on `/` and RootRedirect/PostLoginRedirect navigate
+  // away in their own effects, which would rewrite the URL first. The lazy
+  // initializer runs once per App mount, mirroring RootRedirect's
+  // `useRef(consumePostLoginRedirect())` pattern.
+  useState(() => {
+    useAuthStore.getState().captureLoginError();
+    return null;
+  });
 
   useEffect(() => {
     // Guard on the repository rather than `status === 'idle'`: a refresh that
@@ -101,6 +111,9 @@ function LegacyProjectRedirect() {
 function PostLoginRedirect({ info }: { info: { instanceId: string; path: string } }) {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<'checking' | 'failed'>('checking');
+  // Specific reason when the server reported one via `?login_error=`
+  // (e.g. an allowlist denial); null keeps the generic retry copy.
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const instance = useInstanceStore.getState().findInstance(info.instanceId);
@@ -111,6 +124,9 @@ function PostLoginRedirect({ info }: { info: { instanceId: string; path: string 
     void (async () => {
       const profile = await useAuthStore.getState().checkAuth(instance);
       if (!profile) {
+        // Consume the stashed code so a stale reason doesn't resurface in a
+        // later LoginGate mount.
+        setFailedMessage(loginErrorMessage(useAuthStore.getState().consumeLoginError()));
         setPhase('failed');
         return;
       }
@@ -136,7 +152,7 @@ function PostLoginRedirect({ info }: { info: { instanceId: string; path: string 
     return (
       <MessagePage
         title="登录失败"
-        message="GitHub 授权未成功，请重试。"
+        message={failedMessage ?? 'GitHub 授权未成功，请重试。'}
         action={
           <button
             type="button"

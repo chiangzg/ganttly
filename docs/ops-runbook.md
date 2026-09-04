@@ -142,3 +142,40 @@ location /api/v1/events {
 - **DB 迁移是显式发布步骤**：进程启动不自动迁移。发布流程：停旧版 → `pnpm --filter @ganttly/server migrate`（应用 `drizzle/*.sql`）→ 启新版。
 - 迁移文件提交入库（`apps/server/drizzle/`）；`pnpm --filter @ganttly/server db:generate` 仅在改 `src/db/schema.ts` 后运行，确认无 diff 即 schema 与代码一致。
 - 升级后冒烟：`/health/ready` 200 → 登录 → 列项目 → MCP `create_tasks` → Web SSE 收到刷新。
+
+---
+
+## 8. 登录白名单启用审计
+
+`ALLOWED_GITHUB_USER_IDS` 只拦截新登录。对启用白名单**之前**已注册的存量用户，应做一次性核对（他们最多靠会话 Cookie 再活跃 7 天，但 PAT 不过期）：
+
+```sql
+-- 1. 列出全部用户及登录标识（provider='https://github.com' 时 subject 即 GitHub 数字 ID）
+SELECT id, provider, subject, email, display_name, created_at
+FROM users ORDER BY created_at;
+
+-- 2. 找出白名单外的账号（把 12345678,87654321 换成你的白名单）
+SELECT id, subject, email, display_name, created_at
+FROM users
+WHERE provider = 'https://github.com'
+  AND subject NOT IN ('12345678', '87654321');
+
+-- 3. 吊销上述账号的 PAT（先跑 2 核对结果，再替换 <陌生用户id 列表> 执行）
+UPDATE personal_access_tokens
+SET revoked_at = now()
+WHERE revoked_at IS NULL
+  AND user_id IN (
+    SELECT id FROM users
+    WHERE provider = 'https://github.com'
+      AND subject NOT IN ('12345678', '87654321')
+  );
+
+-- 4. 确认无未撤销的陌生 PAT（应返回 0 行）
+SELECT pat.id, pat.user_id, u.subject
+FROM personal_access_tokens pat JOIN users u ON u.id = pat.user_id
+WHERE pat.revoked_at IS NULL
+  AND u.provider = 'https://github.com'
+  AND u.subject NOT IN ('12345678', '87654321');
+```
+
+白名单外的存量用户无需删行：会话 7 天内自然失效、PAT 吊销后即不可用，其个人工作区数据保留与否可自行决定。

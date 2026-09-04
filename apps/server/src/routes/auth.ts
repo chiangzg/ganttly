@@ -102,6 +102,16 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (
       }
       const accessToken = await githubDeps.exchangeCode(query.code, callbackUrl(config));
       const ghUser = await githubDeps.fetchUser(accessToken);
+      // Login allowlist (spec §8.2): when configured, only the listed GitHub
+      // ids may sign in. Checked before provisioning so a denied user leaves
+      // no users row, workspace, or session behind.
+      if (config.allowedGitHubUserIds && !config.allowedGitHubUserIds.has(String(ghUser.id))) {
+        request.log.warn(
+          { githubLogin: ghUser.login, githubId: String(ghUser.id) },
+          'github login denied: not in ALLOWED_GITHUB_USER_IDS',
+        );
+        return reply.redirect(loginErrorUrl(config.webAppUrl, 'not_allowed'));
+      }
       const result = await provisionUser(app.db, {
         provider: GITHUB_PROVIDER,
         subject: String(ghUser.id),

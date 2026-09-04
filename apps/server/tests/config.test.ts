@@ -148,6 +148,35 @@ describe('loadConfig — fail-fast', () => {
   });
 });
 
+describe('loadConfig — GitHub login allowlist', () => {
+  it('defaults to open login (null) when unset', () => {
+    expect(loadConfig(validDevEnv()).allowedGitHubUserIds).toBeNull();
+  });
+
+  it('parses a comma-separated numeric id list, trimming blanks and de-duplicating', () => {
+    const cfg = loadConfig({ ...validDevEnv(), ALLOWED_GITHUB_USER_IDS: ' 123 , ,456,123 ' });
+    expect(cfg.allowedGitHubUserIds).toEqual(new Set(['123', '456']));
+  });
+
+  it('treats a whitespace-only value as open login', () => {
+    expect(
+      loadConfig({ ...validDevEnv(), ALLOWED_GITHUB_USER_IDS: '  ' }).allowedGitHubUserIds,
+    ).toBeNull();
+  });
+
+  it('rejects non-numeric entries at boot', () => {
+    let err: ConfigError | null = null;
+    try {
+      loadConfig({ ...validDevEnv(), ALLOWED_GITHUB_USER_IDS: 'octocat,123' });
+    } catch (e) {
+      err = e as ConfigError;
+    }
+    expect(err).not.toBeNull();
+    expect(err!.message).toMatch(/ALLOWED_GITHUB_USER_IDS/);
+    expect(err!.details).toContain('octocat');
+  });
+});
+
 describe('loadConfig — self-hosted deployment knobs', () => {
   it('defaults WEB_DIST_DIR to empty (API-only mode)', () => {
     const cfg = loadConfig(validDevEnv());
