@@ -33,10 +33,23 @@ interface AuthState {
   authByInstance: Record<string, UserProfile | null>;
   /** True once at least one checkAuth has resolved (not necessarily logged in). */
   checked: Set<string>;
+  /**
+   * Failure code delivered back from the server via `?login_error=` (e.g.
+   * OAuth denial). Captured once at app start before navigation rewrites the
+   * URL; consumed by PostLoginRedirect / LoginGate to render the reason.
+   */
+  lastLoginError: string | null;
 
   isAuthenticated(instanceId: string): boolean;
   getProfile(instanceId: string): UserProfile | null;
   checkAuth(instance: InstanceConfig): Promise<UserProfile | null>;
+  /**
+   * Read `?login_error=` from the URL and stash it in {@link lastLoginError}.
+   * Idempotent: a second call finds no param and leaves state untouched.
+   */
+  captureLoginError(): void;
+  /** Return and clear {@link lastLoginError} (consume-on-read). */
+  consumeLoginError(): string | null;
   /**
    * Start the GitHub OAuth web flow. Resolves `false` when the instance is
    * unreachable (server down, CORS/network failure) so callers can surface a
@@ -56,6 +69,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   authByInstance: {},
   checked: new Set<string>(),
+  lastLoginError: null,
 
   isAuthenticated(instanceId) {
     const profile = get().authByInstance[instanceId];
@@ -64,6 +78,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   getProfile(instanceId) {
     return get().authByInstance[instanceId] ?? null;
+  },
+
+  captureLoginError() {
+    const code = peekLoginError();
+    if (code) set({ lastLoginError: code });
+  },
+
+  consumeLoginError() {
+    const code = get().lastLoginError;
+    if (code !== null) set({ lastLoginError: null });
+    return code;
   },
 
   async checkAuth(instance) {
@@ -192,4 +217,20 @@ export function peekLoginError(): string | null {
   url.searchParams.delete('login_error');
   window.history.replaceState(null, '', url.toString());
   return code;
+}
+
+/** Map a server `login_error` code to a user-facing message. */
+export function loginErrorMessage(code: string | null): string | null {
+  switch (code) {
+    case 'not_allowed':
+      return '该实例仅允许白名单内的用户登录。如需使用，请联系实例管理员，或参考 self-hosting 文档自行部署。';
+    case 'dev_mode_no_github':
+      return '该实例运行在开发模式，请使用开发登录。';
+    case 'github_login_failed':
+      return 'GitHub 登录失败，请重试。';
+    case null:
+      return null;
+    default:
+      return `登录失败（${code}）`;
+  }
 }

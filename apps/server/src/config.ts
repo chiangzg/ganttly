@@ -37,6 +37,12 @@ const rawConfigSchema = z.object({
   SESSION_SECRET: z.string().optional(),
   TOKEN_PEPPER: z.string().optional(),
   ALLOWED_WEB_ORIGINS: z.string().default(''),
+  /**
+   * Comma-separated GitHub numeric user ids allowed to sign in via OAuth.
+   * Empty/unset = open login (any GitHub account). Entries must be numeric —
+   * the default matcher is the stable `id`, not the mutable `login`.
+   */
+  ALLOWED_GITHUB_USER_IDS: z.string().default(''),
 
   MAX_PROJECT_BYTES: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectBytes),
   MAX_PROJECT_TASKS: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectTasks),
@@ -105,6 +111,11 @@ export interface AppConfig {
   tokenPepper: string;
   /** Parsed, de-duplicated CORS origin list (empty = no origins allowed). */
   allowedWebOrigins: string[];
+  /**
+   * GitHub numeric ids allowed to log in (`ALLOWED_GITHUB_USER_IDS`);
+   * `null` = no restriction (open login).
+   */
+  allowedGitHubUserIds: ReadonlySet<string> | null;
   /** Hostnames accepted by the /mcp endpoint (DNS-rebinding defence). */
   allowedMcpHosts: ReadonlySet<string>;
 
@@ -200,6 +211,21 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
+  // Login allowlist: comma-separated numeric GitHub user ids. Empty = open
+  // login (null). Entries are validated here so a typo'd config fails at
+  // boot instead of silently locking everyone out (or letting someone in).
+  let allowedGitHubUserIds: ReadonlySet<string> | null = null;
+  {
+    const entries = r.ALLOWED_GITHUB_USER_IDS.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const invalid = entries.filter((s) => !/^\d+$/.test(s));
+    if (invalid.length > 0) {
+      throw new ConfigError('Invalid ALLOWED_GITHUB_USER_IDS entries.', invalid);
+    }
+    if (entries.length > 0) allowedGitHubUserIds = new Set(entries);
+  }
+
   // Session cookie Secure flag: explicit override wins, otherwise automatic
   // (Secure only in production). Parsed manually — `z.coerce.boolean()` would
   // treat the string "false" as truthy (spec §14.2 self-host trade-off).
@@ -229,6 +255,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionSecret,
     tokenPepper,
     allowedWebOrigins,
+    allowedGitHubUserIds,
     allowedMcpHosts,
     maxProjectBytes: r.MAX_PROJECT_BYTES,
     maxProjectTasks: r.MAX_PROJECT_TASKS,

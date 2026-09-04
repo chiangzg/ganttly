@@ -99,6 +99,25 @@ server {
    - 鉴权：`Authorization: Bearer <PAT 明文>`
 3. 可用工具：`list_workspaces` / `list_projects` / `get_project` / `search_tasks` / `get_task` / `create_task` / `create_tasks` / `update_task` / `move_task` / `add_dependency` / `remove_dependency`
 
+### 限制可登录用户（白名单）
+
+默认任何 GitHub 账号完成 OAuth 即可在实例上获得个人工作区。若只想允许指定用户登录，在 `.env` 配置 `ALLOWED_GITHUB_USER_IDS`（逗号分隔的 GitHub **数字 ID**，不是用户名——用户名可改，数字 ID 终身不变）：
+
+```bash
+# 查某用户的数字 ID（看返回 JSON 里的 "id" 字段）：
+curl https://api.github.com/users/<github用户名>
+
+# .env
+ALLOWED_GITHUB_USER_IDS=12345678,87654321
+docker compose up -d   # 重启生效
+```
+
+- 留空/未配置 = 不限制（开放登录），不影响已有部署的升级
+- 名单外的用户在登录时被拒，Web 端显示"仅允许白名单内的用户登录"，不会在数据库留下任何记录
+- 非数字条目会导致服务启动失败（fail-fast，防止配置笔误把所有人挡在门外）
+
+**注意：白名单只拦截新登录。** 启用前已登录过的用户，其会话 Cookie 最长 7 天自然失效；若他们在开放期内创建过 PAT（MCP 令牌），PAT 不会自动过期——启用后应按 ops-runbook 的「登录白名单启用审计」核对存量用户并吊销陌生账号的 PAT。
+
 ## 6. 升级
 
 ```bash
@@ -131,6 +150,7 @@ docker compose exec -T postgres psql -U postgres ganttly < ganttly-2026-08-14.sq
 - `/metrics` 无鉴权：公网部署建议在反代屏蔽该路径，或 `.env` 设 `METRICS_ENABLED=false`
 - `TOKEN_PEPPER` 与 `SESSION_SECRET` 不要复用同一个值；更换 pepper 会使所有 PAT 失效（需重新签发）
 - 数据库仅在 compose 内网可达，未映射宿主机端口
+- 多人使用的公网实例建议配置 `ALLOWED_GITHUB_USER_IDS` 登录白名单（见 §5）
 
 ## 9. 验收冒烟清单（全新机器）
 

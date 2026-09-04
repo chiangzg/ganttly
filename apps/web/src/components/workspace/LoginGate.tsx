@@ -10,7 +10,7 @@
 import { Cloud, LogIn } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '@/store/useAuthStore';
+import { useAuthStore, loginErrorMessage } from '@/store/useAuthStore';
 import { fetchInstanceDiscovery, useInstanceStore } from '@/store/useInstanceStore';
 import { useScopeStore } from '@/store/useScopeStore';
 import { buildScopePath, LOCAL_SCOPE } from '@/lib/routing';
@@ -37,6 +37,15 @@ export function LoginGate({
   const instanceId = instanceIdProp ?? activeScope.instanceId;
   const instance = findInstance(instanceId);
   const instanceUrl = instance?.baseUrl ?? '';
+
+  useEffect(() => {
+    // Surface the server-reported `?login_error=` reason (e.g. an allowlist
+    // denial) in the error slot below. Consumed once; PostLoginRedirect
+    // normally shows it first on the OAuth round-trip path — this covers
+    // mounts that skip that route.
+    const code = useAuthStore.getState().consumeLoginError();
+    if (code) setLoginError(loginErrorMessage(code));
+  }, []);
 
   useEffect(() => {
     // Keyed on primitives: officialInstance() builds a fresh object per

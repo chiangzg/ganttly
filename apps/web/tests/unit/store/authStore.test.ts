@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { consumePostLoginRedirect, peekLoginError, useAuthStore } from '@/store/useAuthStore';
+import {
+  consumePostLoginRedirect,
+  loginErrorMessage,
+  peekLoginError,
+  useAuthStore,
+} from '@/store/useAuthStore';
 import type { InstanceConfig } from '@/store/useInstanceStore';
 
 const official: InstanceConfig = {
@@ -25,7 +30,7 @@ describe('useAuthStore', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
-    useAuthStore.setState({ authByInstance: {}, checked: new Set() });
+    useAuthStore.setState({ authByInstance: {}, checked: new Set(), lastLoginError: null });
     fetchSpy.mockReset();
   });
   afterEach(() => fetchSpy.mockReset());
@@ -190,6 +195,39 @@ describe('useAuthStore', () => {
       window.history.replaceState(null, '', '/');
       expect(peekLoginError()).toBeNull();
       window.history.replaceState(null, '', original);
+    });
+  });
+
+  describe('login error capture', () => {
+    const originalHref = window.location.href;
+    afterEach(() => window.history.replaceState(null, '', originalHref));
+
+    it('captureLoginError stashes the code and cleans the URL', () => {
+      window.history.replaceState(null, '', '/?login_error=not_allowed');
+      useAuthStore.getState().captureLoginError();
+      expect(useAuthStore.getState().lastLoginError).toBe('not_allowed');
+      expect(window.location.search).toBe('');
+    });
+
+    it('captureLoginError leaves state untouched when no param is present', () => {
+      window.history.replaceState(null, '', '/');
+      useAuthStore.getState().captureLoginError();
+      expect(useAuthStore.getState().lastLoginError).toBeNull();
+    });
+
+    it('consumeLoginError returns and clears (consume-on-read)', () => {
+      useAuthStore.setState({ lastLoginError: 'github_login_failed' });
+      expect(useAuthStore.getState().consumeLoginError()).toBe('github_login_failed');
+      expect(useAuthStore.getState().lastLoginError).toBeNull();
+      expect(useAuthStore.getState().consumeLoginError()).toBeNull();
+    });
+
+    it('loginErrorMessage maps known codes and falls back for unknown ones', () => {
+      expect(loginErrorMessage('not_allowed')).toMatch(/白名单/);
+      expect(loginErrorMessage('dev_mode_no_github')).toMatch(/开发模式/);
+      expect(loginErrorMessage('github_login_failed')).toMatch(/重试/);
+      expect(loginErrorMessage('mystery')).toMatch(/mystery/);
+      expect(loginErrorMessage(null)).toBeNull();
     });
   });
 });
