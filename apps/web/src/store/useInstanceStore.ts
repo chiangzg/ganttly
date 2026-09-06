@@ -140,7 +140,19 @@ export const useInstanceStore = create<InstanceState>((set, get) => ({
       discovery = parsed.data;
     } catch (err) {
       if (err instanceof InstanceDiscoveryError) throw err;
-      throw new InstanceDiscoveryError('无法连接到该地址，请检查 URL');
+      // A TypeError here is either a genuine network failure or the browser
+      // blocking the cross-origin response — fetch cannot tell them apart.
+      // A no-cors probe resolves whenever the host is reachable at all, so it
+      // separates "wrong URL / server down" from "reachable but the response
+      // was CORS-blocked" (old ganttly version or missing ALLOWED_WEB_ORIGINS).
+      try {
+        await fetch(`${normalized}/.well-known/ganttly-instance`, { mode: 'no-cors' });
+      } catch {
+        throw new InstanceDiscoveryError('无法连接到该地址，请检查 URL');
+      }
+      throw new InstanceDiscoveryError(
+        `该地址可达，但浏览器拦截了它的跨域响应。请确认其运行最新版 ganttly，并将当前页面来源 ${window.location.origin} 加入其 ALLOWED_WEB_ORIGINS`,
+      );
     }
 
     // De-duplicate: if the same instanceId is already registered, reject.

@@ -30,18 +30,28 @@ describe('useInstanceStore', () => {
   const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
   /**
-   * Route the fetch mock by URL: discovery reads hit the well-known endpoint,
-   * the credentialed CORS probe hits `<apiBaseUrl>/me`. `probe: 'blocked'`
-   * simulates the browser rejecting the cross-origin response (missing
-   * Access-Control-Allow-Origin).
+   * Route the fetch mock by URL + request shape: the discovery read carries an
+   * `Accept` header, the reachability probe is `mode: 'no-cors'` (same URL),
+   * and the credentialed CORS probe hits `<apiBaseUrl>/me`. Throwing simulates
+   * the browser rejecting the response (CORS block / network failure).
    */
   function mockDiscoveryAndProbe(
     payload: Record<string, unknown> = discoveryPayload(),
-    probe: 'ok' | 'blocked' = 'ok',
+    opts: {
+      discovery?: 'ok' | 'blocked';
+      reachability?: 'ok' | 'down';
+      probe?: 'ok' | 'blocked';
+    } = {},
   ): void {
-    fetchSpy.mockImplementation(async (input) => {
+    const { discovery = 'ok', reachability = 'ok', probe = 'ok' } = opts;
+    fetchSpy.mockImplementation(async (input, init) => {
       const url = typeof input === 'string' ? input : String(input);
       if (url.endsWith('/.well-known/ganttly-instance')) {
+        if (init?.mode === 'no-cors') {
+          if (reachability === 'down') throw new TypeError('Failed to fetch');
+          return new Response(null);
+        }
+        if (discovery === 'blocked') throw new TypeError('Failed to fetch');
         return new Response(JSON.stringify(payload), { status: 200 });
       }
       if (probe === 'blocked') throw new TypeError('Failed to fetch');
@@ -117,11 +127,27 @@ describe('useInstanceStore', () => {
     });
 
     it('rejects when the credentialed CORS probe is blocked', async () => {
-      mockDiscoveryAndProbe(discoveryPayload(), 'blocked');
+      mockDiscoveryAndProbe(discoveryPayload(), { probe: 'blocked' });
       await expect(
         useInstanceStore.getState().addCustomInstance('https://gan.internal'),
       ).rejects.toThrow(/ALLOWED_WEB_ORIGINS/);
       // Nothing is registered — the instance would be unusable.
+      expect(useInstanceStore.getState().customInstances).toHaveLength(0);
+    });
+
+    it('tells a reachable-but-CORS-blocked instance apart from an unreachable one', async () => {
+      // Old ganttly server (or missing ALLOWED_WEB_ORIGINS): the discovery
+      // response is CORS-blocked, but the host itself answers.
+      mockDiscoveryAndProbe(discoveryPayload(), { discovery: 'blocked' });
+      await expect(
+        useInstanceStore.getState().addCustomInstance('https://gan.internal'),
+      ).rejects.toThrow(/拦截了它的跨域响应/);
+
+      // Genuinely unreachable: the no-cors reachability probe fails too.
+      mockDiscoveryAndProbe(discoveryPayload(), { discovery: 'blocked', reachability: 'down' });
+      await expect(
+        useInstanceStore.getState().addCustomInstance('https://gan.internal'),
+      ).rejects.toThrow('无法连接到该地址，请检查 URL');
       expect(useInstanceStore.getState().customInstances).toHaveLength(0);
     });
 

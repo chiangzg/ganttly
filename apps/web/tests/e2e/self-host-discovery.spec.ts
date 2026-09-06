@@ -115,6 +115,42 @@ test('rejects adding when the credentialed CORS probe is blocked', async ({ page
   expect(stored).toBeNull();
 });
 
+test('explains a reachable instance whose discovery response is CORS-blocked', async ({ page }) => {
+  // Registered first (later routes win): abort everything, then override the
+  // well-known URL — the CORS-mode discovery read (sec-fetch-mode: cors) is
+  // aborted while the no-cors reachability probe is served, which is exactly
+  // what an old ganttly server without open discovery CORS looks like.
+  await page.route('http://localhost:9617/**', (route) => route.abort());
+  await page.route('**/.well-known/ganttly-instance', (route) => {
+    // The CORS-mode discovery read carries our Accept: application/json; the
+    // no-cors reachability probe gets the browser-default Accept: */*
+    // (sec-fetch-mode is not visible to route interception).
+    if (route.request().headers()['accept'] === 'application/json') {
+      return route.abort();
+    }
+    return route.fulfill({ status: 200 });
+  });
+
+  await openAddDialog(page);
+  await page.getByPlaceholder('https://gan.your-company.com').fill('http://localhost:9617');
+  await page.getByRole('button', { name: '添加' }).click();
+
+  await expect(page.getByText(/拦截了它的跨域响应/)).toBeVisible();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  const stored = await page.evaluate(() => localStorage.getItem('ganttly:instances'));
+  expect(stored).toBeNull();
+});
+
+test('keeps the unreachable-URL message when the host is down', async ({ page }) => {
+  await page.route('http://localhost:9617/**', (route) => route.abort());
+
+  await openAddDialog(page);
+  await page.getByPlaceholder('https://gan.your-company.com').fill('http://localhost:9617');
+  await page.getByRole('button', { name: '添加' }).click();
+
+  await expect(page.getByText('无法连接到该地址，请检查 URL')).toBeVisible();
+});
+
 test('rejects adding an already-registered instance', async ({ page }) => {
   await page.route('**/.well-known/ganttly-instance', (route) =>
     route.fulfill({ json: descriptor() }),

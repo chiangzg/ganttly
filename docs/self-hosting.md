@@ -128,7 +128,7 @@ ALLOWED_WEB_ORIGINS=http://localhost:5173,https://jiang.github.io
 docker compose up -d   # 重启生效
 ```
 
-- `/.well-known/ganttly-instance` 发现端点是公开只读元数据，服务端已对任意来源开放只读跨域，无需配置即可被"验证服务协议"
+- `/.well-known/ganttly-instance` 发现端点是公开只读元数据，服务端已对任意来源开放只读跨域，无需配置即可被"验证服务协议"（旧版本部署仍会拦截该端点的跨域读取，前端会提示"拦截了跨域响应"，升级服务端即可）
 - 添加实例时前端会额外发一次带凭据的探测请求：若该 origin 不在 `ALLOWED_WEB_ORIGINS`，会明确提示"该实例未允许来自 … 的跨域访问"，而不是把实例加进去后请求全部失败
 - 同源部署（server 托管 `WEB_DIST_DIR`）不涉及 CORS，`ALLOWED_WEB_ORIGINS` 留空即可（默认，最小暴露面）
 - 反向代理（nginx）默认透传上游响应头，CORS 无需在代理层配置
