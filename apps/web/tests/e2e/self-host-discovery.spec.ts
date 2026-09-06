@@ -2,13 +2,15 @@ import { expect, test, type Page } from '@playwright/test';
 
 /**
  * Self-hosted instance onboarding (spec §2.2, PR7 E2E): adding a self-hosted
- * instance must go through `/.well-known/ganttly-instance` discovery and reject
- * non-HTTPS URLs, protocol-incompatible responses and duplicate instances
- * BEFORE any login flow starts.
+ * instance must go through `/.well-known/ganttly-instance` discovery, a
+ * credentialed CORS probe against `<apiBaseUrl>/me`, and reject non-HTTPS
+ * URLs, protocol-incompatible responses and duplicate instances BEFORE any
+ * login flow starts.
  *
- * Discovery responses are mocked with page.route — the first route-mocked spec
- * in this suite — because a real self-hosted server is not available to the
- * browser test environment.
+ * Discovery/probe responses are mocked with page.route — the first
+ * route-mocked spec in this suite — because a real self-hosted server is not
+ * available to the browser test environment. A probe `abort()` simulates the
+ * browser rejecting a cross-origin response (missing Access-Control-Allow-Origin).
  */
 
 /** A discovery document shaped exactly like a real self-hosted server's. */
@@ -45,6 +47,9 @@ test('a valid discovery document registers the self-hosted instance', async ({ p
   await page.route('**/.well-known/ganttly-instance', (route) =>
     route.fulfill({ json: descriptor() }),
   );
+  // The credentialed CORS probe — a 401 response means the instance's
+  // ALLOWED_WEB_ORIGINS lets this page's origin through.
+  await page.route('http://localhost:9617/api/v1/me', (route) => route.fulfill({ status: 401 }));
 
   await openAddDialog(page);
   // Loopback over HTTP is the documented dev exception to the HTTPS rule.
@@ -92,10 +97,29 @@ test('rejects a protocol-incompatible discovery response', async ({ page }) => {
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
+test('rejects adding when the credentialed CORS probe is blocked', async ({ page }) => {
+  await page.route('**/.well-known/ganttly-instance', (route) =>
+    route.fulfill({ json: descriptor() }),
+  );
+  // The instance is reachable but does not allowlist this page's origin —
+  // the browser blocks the credentialed response and fetch rejects.
+  await page.route('http://localhost:9617/api/v1/me', (route) => route.abort());
+
+  await openAddDialog(page);
+  await page.getByPlaceholder('https://gan.your-company.com').fill('http://localhost:9617');
+  await page.getByRole('button', { name: '添加' }).click();
+
+  await expect(page.getByText(/ALLOWED_WEB_ORIGINS/)).toBeVisible();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  const stored = await page.evaluate(() => localStorage.getItem('ganttly:instances'));
+  expect(stored).toBeNull();
+});
+
 test('rejects adding an already-registered instance', async ({ page }) => {
   await page.route('**/.well-known/ganttly-instance', (route) =>
     route.fulfill({ json: descriptor() }),
   );
+  await page.route('http://localhost:9617/api/v1/me', (route) => route.fulfill({ status: 401 }));
 
   await openAddDialog(page);
   await page.getByPlaceholder('https://gan.your-company.com').fill('http://localhost:9617');

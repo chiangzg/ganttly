@@ -29,6 +29,26 @@ function discoveryPayload(
 describe('useInstanceStore', () => {
   const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
+  /**
+   * Route the fetch mock by URL: discovery reads hit the well-known endpoint,
+   * the credentialed CORS probe hits `<apiBaseUrl>/me`. `probe: 'blocked'`
+   * simulates the browser rejecting the cross-origin response (missing
+   * Access-Control-Allow-Origin).
+   */
+  function mockDiscoveryAndProbe(
+    payload: Record<string, unknown> = discoveryPayload(),
+    probe: 'ok' | 'blocked' = 'ok',
+  ): void {
+    fetchSpy.mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.endsWith('/.well-known/ganttly-instance')) {
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }
+      if (probe === 'blocked') throw new TypeError('Failed to fetch');
+      return new Response(null, { status: 401 });
+    });
+  }
+
   beforeEach(() => {
     localStorage.clear();
     useInstanceStore.setState({ customInstances: [] });
@@ -56,11 +76,17 @@ describe('useInstanceStore', () => {
   });
 
   describe('addCustomInstance', () => {
-    it('fetches discovery, validates, and stores the instance', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify(discoveryPayload()), { status: 200 }));
+    it('fetches discovery, probes credentialed CORS, and stores the instance', async () => {
+      mockDiscoveryAndProbe();
       const config = await useInstanceStore.getState().addCustomInstance('https://gan.internal/');
       expect(config.id).toBe('inst_custom1');
       expect(config.displayName).toBe('Self-hosted');
+      // Second call is the credentialed probe against the advertised apiBaseUrl.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[1]).toEqual([
+        'https://gan.internal/api/v1/me',
+        { credentials: 'include' },
+      ]);
       expect(useInstanceStore.getState().customInstances).toHaveLength(1);
       // Persisted to localStorage.
       const stored = JSON.parse(localStorage.getItem('ganttly:instances')!) as Array<{
@@ -76,11 +102,7 @@ describe('useInstanceStore', () => {
     });
 
     it('allows localhost over HTTP (dev exception)', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify(discoveryPayload({ instanceId: 'inst_local' })), {
-          status: 200,
-        }),
-      );
+      mockDiscoveryAndProbe(discoveryPayload({ instanceId: 'inst_local' }));
       const config = await useInstanceStore.getState().addCustomInstance('http://localhost:3000');
       expect(config.id).toBe('inst_local');
     });
@@ -94,18 +116,28 @@ describe('useInstanceStore', () => {
       ).rejects.toThrow(InstanceDiscoveryError);
     });
 
-    it('rejects duplicates', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify(discoveryPayload()), { status: 200 }));
+    it('rejects when the credentialed CORS probe is blocked', async () => {
+      mockDiscoveryAndProbe(discoveryPayload(), 'blocked');
+      await expect(
+        useInstanceStore.getState().addCustomInstance('https://gan.internal'),
+      ).rejects.toThrow(/ALLOWED_WEB_ORIGINS/);
+      // Nothing is registered — the instance would be unusable.
+      expect(useInstanceStore.getState().customInstances).toHaveLength(0);
+    });
+
+    it('rejects duplicates before probing again', async () => {
+      mockDiscoveryAndProbe();
       await useInstanceStore.getState().addCustomInstance('https://gan.internal');
       await expect(
         useInstanceStore.getState().addCustomInstance('https://gan2.internal'),
       ).rejects.toThrow(InstanceDiscoveryError);
+      expect(fetchSpy).toHaveBeenCalledTimes(2 + 1);
     });
   });
 
   describe('removeCustomInstance', () => {
     it('removes by id', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify(discoveryPayload()), { status: 200 }));
+      mockDiscoveryAndProbe();
       await useInstanceStore.getState().addCustomInstance('https://gan.internal');
       useInstanceStore.getState().removeCustomInstance('inst_custom1');
       expect(useInstanceStore.getState().customInstances).toHaveLength(0);

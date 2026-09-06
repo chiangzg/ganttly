@@ -118,6 +118,21 @@ docker compose up -d   # 重启生效
 
 **注意：白名单只拦截新登录。** 启用前已登录过的用户，其会话 Cookie 最长 7 天自然失效；若他们在开放期内创建过 PAT（MCP 令牌），PAT 不会自动过期——启用后应按 ops-runbook 的「登录白名单启用审计」核对存量用户并吊销陌生账号的 PAT。
 
+### 跨域 Web 前端连接（添加远端服务）
+
+"添加远端服务"的典型场景：Web 前端与实例**不同源**——托管在 GitHub Pages 的前端、本地 `http://localhost:5173` 开发服，或一套实例挂多个前端。这类部署必须在实例 `.env` 中把前端 origin（协议+域名+端口，精确匹配）加入 `ALLOWED_WEB_ORIGINS`，否则登录后的所有浏览器请求都会被浏览器 CORS 拦截（会话 Cookie 属凭据跨域，服务端不能返回 `*`，只能精确回显白名单内的 origin）：
+
+```bash
+# .env
+ALLOWED_WEB_ORIGINS=http://localhost:5173,https://jiang.github.io
+docker compose up -d   # 重启生效
+```
+
+- `/.well-known/ganttly-instance` 发现端点是公开只读元数据，服务端已对任意来源开放只读跨域，无需配置即可被"验证服务协议"
+- 添加实例时前端会额外发一次带凭据的探测请求：若该 origin 不在 `ALLOWED_WEB_ORIGINS`，会明确提示"该实例未允许来自 … 的跨域访问"，而不是把实例加进去后请求全部失败
+- 同源部署（server 托管 `WEB_DIST_DIR`）不涉及 CORS，`ALLOWED_WEB_ORIGINS` 留空即可（默认，最小暴露面）
+- 反向代理（nginx）默认透传上游响应头，CORS 无需在代理层配置
+
 ## 6. 升级
 
 ```bash
