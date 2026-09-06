@@ -122,15 +122,15 @@ test.describe('person-days column', () => {
     await expect(drawer.getByText('3', { exact: true })).toBeVisible();
 
     const dateInputs = drawer.locator('input[type="date"]');
+    // Overtime commits on date selection — the "添加" button was removed in
+    // the 2026-09 drawer interaction redesign.
     await dateInputs.nth(2).fill('2026-02-07'); // Saturday inside the task range
-    await drawer.getByRole('button', { name: '添加' }).click();
     const removeOvertime = drawer.getByRole('button', { name: '删除加班日 2026-02-07' });
     await expect(removeOvertime).toBeVisible();
     await expect(drawer.getByText('3.5', { exact: true })).toBeVisible();
 
     // A normal working day cannot be marked as an extra full overtime day.
     await dateInputs.nth(2).fill('2026-02-06');
-    await drawer.getByRole('button', { name: '添加' }).click();
     await expect(drawer.getByText('只能将项目日历中的休息日标记为加班日')).toBeVisible();
 
     // Moving the end before the overtime date prunes the marker immediately.

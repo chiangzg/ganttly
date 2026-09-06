@@ -64,3 +64,69 @@ describe('GET /.well-known/ganttly-instance', () => {
     expect(res.headers['x-request-id']).toBeTruthy();
   });
 });
+
+describe('discovery CORS', () => {
+  // buildTestConfig allowlists only http://localhost:5173 — a foreign origin
+  // must still read the public descriptor, while /api/v1 keeps the strict
+  // credentialed allowlist.
+  it('reflects any Origin on the discovery endpoint even when the allowlist misses', async () => {
+    const app = await buildServer(buildTestConfig(), { registerDatabase: false });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/.well-known/ganttly-instance',
+        headers: { origin: 'https://web.example.com' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['access-control-allow-origin']).toBe('https://web.example.com');
+      // Public metadata read — no credentialed CORS on this endpoint.
+      expect(res.headers['access-control-allow-credentials']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('answers CORS preflight on the discovery endpoint', async () => {
+    const app = await buildServer(buildTestConfig(), { registerDatabase: false });
+    try {
+      const res = await app.inject({
+        method: 'OPTIONS',
+        url: '/.well-known/ganttly-instance',
+        headers: {
+          origin: 'https://web.example.com',
+          'access-control-request-method': 'GET',
+        },
+      });
+      expect(res.statusCode).toBe(204);
+      expect(res.headers['access-control-allow-origin']).toBe('https://web.example.com');
+      expect(String(res.headers['access-control-allow-methods'])).toMatch(/GET/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps the credentialed allowlist policy for /api/v1 when ALLOWED_WEB_ORIGINS is empty', async () => {
+    const app = await buildServer(buildTestConfig({ ALLOWED_WEB_ORIGINS: '' }), {
+      registerDatabase: false,
+    });
+    try {
+      const discovery = await app.inject({
+        method: 'GET',
+        url: '/.well-known/ganttly-instance',
+        headers: { origin: 'https://web.example.com' },
+      });
+      expect(discovery.statusCode).toBe(200);
+      expect(discovery.headers['access-control-allow-origin']).toBe('https://web.example.com');
+
+      const api = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me',
+        headers: { origin: 'https://web.example.com' },
+      });
+      expect(api.statusCode).toBe(401);
+      expect(api.headers['access-control-allow-origin']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+});

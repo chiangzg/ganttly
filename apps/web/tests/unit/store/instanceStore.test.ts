@@ -29,6 +29,36 @@ function discoveryPayload(
 describe('useInstanceStore', () => {
   const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
+  /**
+   * Route the fetch mock by URL + request shape: the discovery read carries an
+   * `Accept` header, the reachability probe is `mode: 'no-cors'` (same URL),
+   * and the credentialed CORS probe hits `<apiBaseUrl>/me`. Throwing simulates
+   * the browser rejecting the response (CORS block / network failure).
+   */
+  function mockDiscoveryAndProbe(
+    payload: Record<string, unknown> = discoveryPayload(),
+    opts: {
+      discovery?: 'ok' | 'blocked';
+      reachability?: 'ok' | 'down';
+      probe?: 'ok' | 'blocked';
+    } = {},
+  ): void {
+    const { discovery = 'ok', reachability = 'ok', probe = 'ok' } = opts;
+    fetchSpy.mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.endsWith('/.well-known/ganttly-instance')) {
+        if (init?.mode === 'no-cors') {
+          if (reachability === 'down') throw new TypeError('Failed to fetch');
+          return new Response(null);
+        }
+        if (discovery === 'blocked') throw new TypeError('Failed to fetch');
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }
+      if (probe === 'blocked') throw new TypeError('Failed to fetch');
+      return new Response(null, { status: 401 });
+    });
+  }
+
   beforeEach(() => {
     localStorage.clear();
     useInstanceStore.setState({ customInstances: [] });
@@ -56,11 +86,17 @@ describe('useInstanceStore', () => {
   });
 
   describe('addCustomInstance', () => {
-    it('fetches discovery, validates, and stores the instance', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify(discoveryPayload()), { status: 200 }));
+    it('fetches discovery, probes credentialed CORS, and stores the instance', async () => {
+      mockDiscoveryAndProbe();
       const config = await useInstanceStore.getState().addCustomInstance('https://gan.internal/');
       expect(config.id).toBe('inst_custom1');
       expect(config.displayName).toBe('Self-hosted');
+      // Second call is the credentialed probe against the advertised apiBaseUrl.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[1]).toEqual([
+        'https://gan.internal/api/v1/me',
+        { credentials: 'include' },
+      ]);
       expect(useInstanceStore.getState().customInstances).toHaveLength(1);
       // Persisted to localStorage.
       const stored = JSON.parse(localStorage.getItem('ganttly:instances')!) as Array<{
@@ -76,11 +112,7 @@ describe('useInstanceStore', () => {
     });
 
     it('allows localhost over HTTP (dev exception)', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify(discoveryPayload({ instanceId: 'inst_local' })), {
-          status: 200,
-        }),
-      );
+      mockDiscoveryAndProbe(discoveryPayload({ instanceId: 'inst_local' }));
       const config = await useInstanceStore.getState().addCustomInstance('http://localhost:3000');
       expect(config.id).toBe('inst_local');
     });
@@ -94,18 +126,44 @@ describe('useInstanceStore', () => {
       ).rejects.toThrow(InstanceDiscoveryError);
     });
 
-    it('rejects duplicates', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify(discoveryPayload()), { status: 200 }));
+    it('rejects when the credentialed CORS probe is blocked', async () => {
+      mockDiscoveryAndProbe(discoveryPayload(), { probe: 'blocked' });
+      await expect(
+        useInstanceStore.getState().addCustomInstance('https://gan.internal'),
+      ).rejects.toThrow(/ALLOWED_WEB_ORIGINS/);
+      // Nothing is registered — the instance would be unusable.
+      expect(useInstanceStore.getState().customInstances).toHaveLength(0);
+    });
+
+    it('tells a reachable-but-CORS-blocked instance apart from an unreachable one', async () => {
+      // Old ganttly server (or missing ALLOWED_WEB_ORIGINS): the discovery
+      // response is CORS-blocked, but the host itself answers.
+      mockDiscoveryAndProbe(discoveryPayload(), { discovery: 'blocked' });
+      await expect(
+        useInstanceStore.getState().addCustomInstance('https://gan.internal'),
+      ).rejects.toThrow(/拦截了它的跨域响应/);
+
+      // Genuinely unreachable: the no-cors reachability probe fails too.
+      mockDiscoveryAndProbe(discoveryPayload(), { discovery: 'blocked', reachability: 'down' });
+      await expect(
+        useInstanceStore.getState().addCustomInstance('https://gan.internal'),
+      ).rejects.toThrow('无法连接到该地址，请检查 URL');
+      expect(useInstanceStore.getState().customInstances).toHaveLength(0);
+    });
+
+    it('rejects duplicates before probing again', async () => {
+      mockDiscoveryAndProbe();
       await useInstanceStore.getState().addCustomInstance('https://gan.internal');
       await expect(
         useInstanceStore.getState().addCustomInstance('https://gan2.internal'),
       ).rejects.toThrow(InstanceDiscoveryError);
+      expect(fetchSpy).toHaveBeenCalledTimes(2 + 1);
     });
   });
 
   describe('removeCustomInstance', () => {
     it('removes by id', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify(discoveryPayload()), { status: 200 }));
+      mockDiscoveryAndProbe();
       await useInstanceStore.getState().addCustomInstance('https://gan.internal');
       useInstanceStore.getState().removeCustomInstance('inst_custom1');
       expect(useInstanceStore.getState().customInstances).toHaveLength(0);

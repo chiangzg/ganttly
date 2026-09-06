@@ -142,11 +142,11 @@ test('deleting a dependency via the task drawer removes it after Save', async ({
   await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
   await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
 
-  // The drawer lists each dependency with a ✕ delete button. Removing it only
-  // mutates the draft (transactional semantics — editor-interaction plan §2.2);
-  // the store is updated on explicit Save.
-  const depRow = page.locator('text=Task A').locator('..');
-  await depRow.locator('button').click();
+  // The drawer lists each dependency row with a ✕ delete button. Removing it
+  // only mutates the draft (transactional semantics — editor-interaction plan
+  // §2.2); the store is updated on explicit Save.
+  const drawer = page.locator('aside');
+  await drawer.getByTestId('dependency-row').getByRole('button').click();
   await page.waitForTimeout(150);
 
   // Before Save, the store still holds the dependency (draft only changed).
@@ -190,17 +190,53 @@ test('dependency picker and selected dependency show WBS with the full task path
 
   const drawer = page.locator('aside');
   await expect(drawer.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
-  const dependencyField = drawer.locator('label', { hasText: '依赖' });
-  const picker = dependencyField.locator('select').first();
+  const dependencySection = drawer.locator('section', { hasText: '依赖' });
 
-  await expect(picker.locator('option[value="project-a"]')).toHaveText('1 项目甲');
-  await expect(picker.locator('option[value="release-a"]')).toHaveText(
-    '1.1.1 项目甲 / 后端开发 / 发布',
-  );
-  await expect(picker.locator('option[value="release-b"]')).toHaveText('2.1 项目乙 / 发布');
+  // Open the searchable picker (2026-09 redesign: a Combobox replaced the
+  // select + "+" two-step flow).
+  await dependencySection.getByRole('button', { name: '添加依赖' }).click();
 
-  await picker.selectOption('release-b');
-  await dependencyField.getByRole('button', { name: '+' }).click();
+  // Each option shows the task name plus the WBS full path as description
+  // (accessible name = "名称 WBS 路径", hence the anchored regexes).
+  await expect(page.getByRole('option', { name: /^项目甲 1 项目甲$/ })).toBeVisible();
+  await expect(
+    page.getByRole('option', { name: /^后端开发 1\.1 项目甲 \/ 后端开发$/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('option', { name: /^发布 1\.1\.1 项目甲 \/ 后端开发 \/ 发布$/ }),
+  ).toBeVisible();
+  await expect(page.getByRole('option', { name: /^发布 2\.1 项目乙 \/ 发布$/ })).toBeVisible();
 
-  await expect(dependencyField).toContainText('2.1 项目乙 / 发布');
+  // Selecting an option commits the dependency immediately (no "+" step).
+  await page.getByRole('option', { name: /^发布 2\.1 项目乙 \/ 发布$/ }).click();
+
+  await expect(drawer.getByTestId('dependency-row')).toContainText('2.1 项目乙 / 发布');
+});
+
+test('picking a dependency that closes a cycle flags it inline and blocks Save', async ({
+  page,
+}) => {
+  await loadChain(page, 'FS');
+
+  // Task B depends on Task A; adding A ← B's predecessor B to A's drawer
+  // closes the cycle A → B → A.
+  const rowA = page.locator('[role="row"]', { hasText: 'Task A' }).first();
+  await rowA.click({ button: 'right' });
+  await page.locator('.fixed.z-30 button', { hasText: '编辑' }).first().click();
+  await expect(page.getByText('编辑任务')).toBeVisible({ timeout: 3000 });
+
+  const drawer = page.locator('aside');
+  const dependencySection = drawer.locator('section', { hasText: '依赖' });
+  await dependencySection.getByRole('button', { name: '添加依赖' }).click();
+  await page.getByPlaceholder('输入任务名或 WBS…').fill('Task B');
+  await page.getByRole('option', { name: /Task B/ }).click();
+
+  // The row is added (select = commit) but flagged as a cycle inline.
+  await expect(drawer.getByTestId('dependency-row')).toContainText('该依赖会形成循环');
+  await expect(drawer.getByRole('button', { name: '保存' })).toBeDisabled();
+
+  // Removing the flagged row re-enables Save.
+  await drawer.getByTestId('dependency-row').getByRole('button').click();
+  await expect(drawer.getByTestId('dependency-row')).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: '保存' })).toBeDisabled();
 });

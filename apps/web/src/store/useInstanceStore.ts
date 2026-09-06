@@ -4,7 +4,7 @@
  * The official instance is built-in (same-origin, not removable). Self-hosted
  * instances are added by the user via the workspace switcher: the URL is
  * confirmed against the public `/.well-known/ganttly-instance` discovery
- * descriptor before it enters the registry.
+ * descriptor plus a credentialed CORS probe before it enters the registry.
  *
  * Persisted to `localStorage` under `ganttly:instances`.
  */
@@ -140,13 +140,39 @@ export const useInstanceStore = create<InstanceState>((set, get) => ({
       discovery = parsed.data;
     } catch (err) {
       if (err instanceof InstanceDiscoveryError) throw err;
-      throw new InstanceDiscoveryError('无法连接到该地址，请检查 URL');
+      // A TypeError here is either a genuine network failure or the browser
+      // blocking the cross-origin response — fetch cannot tell them apart.
+      // A no-cors probe resolves whenever the host is reachable at all, so it
+      // separates "wrong URL / server down" from "reachable but the response
+      // was CORS-blocked" (old ganttly version or missing ALLOWED_WEB_ORIGINS).
+      try {
+        await fetch(`${normalized}/.well-known/ganttly-instance`, { mode: 'no-cors' });
+      } catch {
+        throw new InstanceDiscoveryError('无法连接到该地址，请检查 URL');
+      }
+      throw new InstanceDiscoveryError(
+        `该地址可达，但浏览器拦截了它的跨域响应。请确认其运行最新版 ganttly，并将当前页面来源 ${window.location.origin} 加入其 ALLOWED_WEB_ORIGINS`,
+      );
     }
 
     // De-duplicate: if the same instanceId is already registered, reject.
     const existing = get().instances();
     if (existing.some((i) => i.id === discovery.instanceId)) {
       throw new InstanceDiscoveryError('该实例已添加');
+    }
+
+    // The discovery doc is publicly readable (server-side open CORS), but every
+    // subsequent call carries session cookies — that traffic only works when
+    // this page's origin is in the instance's ALLOWED_WEB_ORIGINS. Probe a
+    // credentialed request now: any response (even 401) proves the CORS
+    // allowlist lets us through, while a rejection is the browser blocking the
+    // response. Adding anyway would leave the instance unusable.
+    try {
+      await fetch(`${discovery.apiBaseUrl}/me`, { credentials: 'include' });
+    } catch {
+      throw new InstanceDiscoveryError(
+        `已发现服务，但该实例未允许来自 ${window.location.origin} 的跨域访问。请在该实例服务端将此来源加入 ALLOWED_WEB_ORIGINS 后重试`,
+      );
     }
 
     const config: InstanceConfig = {
