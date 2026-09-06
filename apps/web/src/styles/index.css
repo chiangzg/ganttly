@@ -86,3 +86,53 @@
     border-radius: 4px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Drawer form helpers — migrated from TaskDrawer's inline <style> tag so the
+ * classes exist whether or not the drawer is mounted. Only the drawer (and
+ * its Combobox trigger) uses them.
+ * ------------------------------------------------------------------------- */
+@layer components {
+  .input {
+    width: 100%;
+    padding: 6px 8px;
+    background: rgb(var(--color-bg));
+    border: 1px solid rgb(var(--color-border));
+    border-radius: 4px;
+    color: rgb(var(--color-fg));
+    font-size: 13px;
+  }
+  .btn {
+    padding: 6px 12px;
+    background: rgb(var(--color-bg));
+    border: 1px solid rgb(var(--color-border));
+    border-radius: 4px;
+    color: rgb(var(--color-fg));
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn:hover {
+    background: rgb(var(--color-bg-elevated));
+  }
+  .btn-danger {
+    padding: 6px 12px;
+    background: rgb(var(--color-danger));
+    border: 1px solid rgb(var(--color-danger));
+    border-radius: 4px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-primary {
+    padding: 6px 12px;
+    background: rgb(var(--color-primary));
+    border: 1px solid rgb(var(--color-primary));
+    border-radius: 4px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-primary:hover {
+    filter: brightness(0.95);
+  }
+}

@@ -226,12 +226,15 @@ test.describe('drawer docked inspector', () => {
     expect(box!.x).toBeGreaterThanOrEqual(0);
   });
 
-  test('§3.7 the advanced section is visible (open by default)', async ({ page }) => {
+  test('§3.7 the drawer renders its five sections flat (no collapsed group)', async ({ page }) => {
     await injectTask(page);
     await openDrawer(page);
-    // The "高级" summary is visible, and since it's open by default the
-    // constraint field below it is also visible (no expand click needed).
-    await expect(page.getByText('高级')).toBeVisible();
+    // Since the 2026-09 redesign the drawer has five flat sections — no
+    // <details> group to expand; every section title is immediately visible.
+    await expect(page.getByText('基本信息')).toBeVisible();
+    await expect(page.getByText('资源分配')).toBeVisible();
+    await expect(page.getByText('依赖', { exact: true })).toBeVisible();
     await expect(page.getByText('约束')).toBeVisible();
+    await expect(page.getByText('样式与备注')).toBeVisible();
   });
 });
