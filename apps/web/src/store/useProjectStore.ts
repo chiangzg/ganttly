@@ -315,7 +315,13 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         set({ loadState: 'missing', remoteUpdateAvailable: false });
         return false;
       }
-      const normalized = withCalendar(snapshot.file);
+      // loadProject() overlays the per-device localStorage cache, which lags
+      // the live scroll position (scrolling never writes the cache) — keep the
+      // live viewState so a remote reload doesn't jump the view to the top.
+      const normalized = withCalendar({
+        ...snapshot.file,
+        viewState: get().file.viewState,
+      });
       set({
         activeProjectRef: ref,
         revision: snapshot.revision,
@@ -477,6 +483,9 @@ async function performSave(
   if (!activeProjectRef || revision === null) return;
   const repo = resolveRepoForRef(activeProjectRef, get().repo);
   if (!repo) return;
+  // Clean Cmd+S must be a no-op: a redundant PUT would rebind `file` to the
+  // server snapshot below for no benefit (see the viewState note there).
+  if (!get().dirty) return;
   clearSaveTimer();
   set({ saveState: { status: 'saving' } });
   try {
@@ -491,7 +500,13 @@ async function performSave(
     if (!current.activeProjectRef || !refEqual(current.activeProjectRef, activeProjectRef)) return;
     const changedWhileSaving = current.file !== file;
     set({
-      file: changedWhileSaving ? current.file : snapshot.file,
+      // The server snapshot carries a neutral viewState (spec §5.2) and
+      // mergeViewState can only recover a stale localStorage cache, so adopt
+      // the snapshot's data but keep the live viewState — otherwise the
+      // synced scroll containers snap back to the top on every save.
+      file: changedWhileSaving
+        ? current.file
+        : { ...snapshot.file, viewState: current.file.viewState },
       revision: snapshot.revision,
       dirty: changedWhileSaving,
       saveState: { status: changedWhileSaving ? 'saving' : 'saved' },
