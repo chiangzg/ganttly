@@ -213,6 +213,7 @@ export const en = {
     collapseAll: 'Collapse all',
     taskCount: '{{count}}',
     dragHint: 'Drag to reorder resources',
+    doubleClickToEdit: 'Double-click to edit',
     listAriaLabel: 'Resource list',
     // Canvas info & interaction (plan §3.5 / §3.6 / §5.3).
     canvasAriaLabel:

@@ -228,11 +228,14 @@ test('capacity cell shows the % unit (plan §5.3)', async ({ page }) => {
   await page.getByRole('button', { name: '资源视图' }).click();
 
   // The capacity cell renders static text with an explicit % suffix; the
-  // number input only appears in F2/Tab inline-edit mode.
+  // number input appears in F2/Tab inline-edit mode — or on a cell
+  // double-click (the capacity cell's direct mouse entry point).
   const cell = page.locator('[data-resource-id="r1"] [data-testid="resource-capacity"]');
   await expect(cell).toHaveText('50%');
   await cell.dblclick();
-  // Double-click never opens the editor directly — editing is F2/Tab only
-  // (this task isn't assigned to r1, so the row dblclick is also a no-op).
-  await expect(page.locator('[data-resource-id="r1"] input[type="number"]')).toHaveCount(0);
+  await expect(
+    page.locator('[data-resource-id="r1"] input[type="number"]'),
+    'cell dblclick opens the capacity editor',
+  ).toHaveCount(1);
+  await page.keyboard.press('Escape');
 });

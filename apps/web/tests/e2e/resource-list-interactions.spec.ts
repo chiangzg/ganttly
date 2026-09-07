@@ -8,7 +8,8 @@ import { expect, test, type Page } from '@playwright/test';
  *  - F2/Tab/Enter/Escape inline editing — ONE updateResourceCommand per
  *    committed edit (the old always-on inputs polluted undo per keystroke)
  *  - double-click row = expand/collapse drill-down; collapsed rows carry a
- *    task-count chip
+ *    task-count chip — but double-click on the role/capacity cell edits that
+ *    field directly (their only mouse entry point)
  *  - context menu (重命名 F2 / 展开收起 / 新增 / 删除) and the Delete key
  *  - grip-only drag reorder — a single moveResourceCommand, one undo entry
  *  - header expand-all / collapse-all + treegrid aria
@@ -178,6 +179,32 @@ test.describe('resource list interactions', () => {
     await expect(
       page.locator('[data-resource-id="r1"] [data-testid="resource-capacity"]'),
     ).toHaveText('50%');
+    expect(await readUndoDepth(page)).toBe(2);
+  });
+
+  test('double-click role/capacity cell edits that field directly, no drill-down', async ({
+    page,
+  }) => {
+    const row = page.locator('[data-resource-id="r1"]');
+
+    const roleCell = row.locator('[data-testid="resource-role"]');
+    await roleCell.dblclick();
+    const roleInput = page.locator('[data-testid="resource-role-input"]');
+    await expect(roleInput).toBeFocused();
+    // The cell-level dblclick must not fall through to the row drill-down.
+    await expect(page.getByText('设计')).toHaveCount(0);
+    await roleInput.fill('后端');
+    await roleInput.press('Enter');
+    await expect(roleCell).toHaveText('后端');
+    expect(await readUndoDepth(page), 'single committed command').toBe(1);
+
+    const capCell = row.locator('[data-testid="resource-capacity"]');
+    await capCell.dblclick();
+    const capInput = page.locator('[data-testid="resource-capacity-input"]');
+    await expect(capInput).toBeFocused();
+    await capInput.fill('60');
+    await capInput.press('Enter');
+    await expect(capCell).toHaveText('60%');
     expect(await readUndoDepth(page)).toBe(2);
   });
 

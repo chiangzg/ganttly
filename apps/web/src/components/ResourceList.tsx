@@ -19,11 +19,13 @@
  * Interaction model (mirrors the modernized TaskTable, adapted to a
  * person-centric flat list):
  * - Click row = select; double-click row = expand/collapse the drill-down
- *   (a person's "detail" is the list of their tasks).
+ *   (a person's "detail" is the list of their tasks) — except the role and
+ *   capacity cells, where double-click starts editing that field (these two
+ *   have no other mouse entry point, unlike name's F2/context-menu rename).
  * - Name/role/capacity render as static text; F2 (or the context menu's
- *   重命名) starts inline editing, Tab hops name → role → capacity. Each
- *   committed edit dispatches ONE updateResourceCommand (no per-keystroke
- *   undo pollution, unlike the old always-on inputs).
+ *   重命名) starts inline editing at name, Tab hops name → role → capacity.
+ *   Each committed edit dispatches ONE updateResourceCommand (no
+ *   per-keystroke undo pollution, unlike the old always-on inputs).
  * - Row order is changed by dragging the hover-revealed grip (the only drag
  *   source) — drop dispatches a single moveResourceCommand.
  * - Hover affordances (grip, delete) only animate opacity inside reserved
@@ -829,8 +831,18 @@ export function ResourceList() {
                       ) : (
                         <div
                           data-testid="resource-role"
-                          className="truncate border-r border-border px-2 text-fg-muted"
-                          title={r.role ?? undefined}
+                          className="cursor-text truncate border-r border-border px-2 text-fg-muted"
+                          title={[r.role, t('resource.doubleClickToEdit')]
+                            .filter(Boolean)
+                            .join(' · ')}
+                          onDoubleClick={(e) => {
+                            // This cell edits instead of drilling down: role
+                            // has no other mouse entry (name owns F2 and the
+                            // context menu's 重命名).
+                            e.stopPropagation();
+                            setSelectedResourceId(r.id);
+                            startEditing(r.id, 'role');
+                          }}
                         >
                           {r.role || '—'}
                         </div>
@@ -867,7 +879,15 @@ export function ResourceList() {
                       ) : (
                         <div
                           data-testid="resource-capacity"
-                          className="border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                          className="cursor-text border-r border-border px-2 text-right tabular-nums text-fg-muted"
+                          title={t('resource.doubleClickToEdit')}
+                          onDoubleClick={(e) => {
+                            // Same rule as role: edit the field, skip the row
+                            // drill-down.
+                            e.stopPropagation();
+                            setSelectedResourceId(r.id);
+                            startEditing(r.id, 'capacity');
+                          }}
                         >
                           {Math.round((r.capacity ?? 1) * 100)}%
                         </div>

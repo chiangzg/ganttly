@@ -207,6 +207,7 @@ export const zhCN = {
     collapseAll: '全部收起',
     taskCount: '{{count}} 项',
     dragHint: '拖拽调整顺序',
+    doubleClickToEdit: '双击编辑',
     listAriaLabel: '资源列表',
     // Canvas info & interaction (plan §3.5 / §3.6 / §5.3).
     canvasAriaLabel: '资源负载图区域，单击选中，双击任务条打开详情',
