@@ -34,7 +34,12 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
     await app.db.delete(projects);
     session = await devLogin(app);
 
-    // Seed a project.
+    // Seed a project with two resources so search_resources has data.
+    const file = createEmptyFile({ name: 'MCP E2E' });
+    file.resources.push(
+      { id: 'res-zhang', name: '张三', role: '前端' },
+      { id: 'res-li', name: '李四', role: '设计' },
+    );
     const projectRes = await app.inject({
       method: 'POST',
       url: `/api/v1/workspaces/${session.workspaceId}/projects`,
@@ -42,7 +47,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         'idempotency-key': 'mcp-it-seed',
         cookie: `ganttly_session=${session.cookie}`,
       },
-      payload: { file: createEmptyFile({ name: 'MCP E2E' }) },
+      payload: { file },
     });
     projectId = (projectRes.json() as { summary: { id: string } }).summary.id;
 
@@ -104,7 +109,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('lists all eleven tools', async () => {
+  it('lists all twelve tools', async () => {
     const res = await mcp(1, 'tools/list');
     expect(res.result?.tools).toBeDefined();
     const names = res.result!.tools!.map((t) => t.name);
@@ -114,6 +119,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         'list_projects',
         'get_project',
         'search_tasks',
+        'search_resources',
         'get_task',
         'create_task',
         'create_tasks',
@@ -123,7 +129,7 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         'remove_dependency',
       ]),
     );
-    expect(names).toHaveLength(11);
+    expect(names).toHaveLength(12);
   });
 
   it('creates tasks via create_tasks and finds them via search_tasks', async () => {
@@ -133,7 +139,10 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
         workspaceId: session.workspaceId,
         projectId,
         idempotencyKey: 'mcp-it-batch',
-        tasks: [{ name: 'E2E task A' }, { name: 'E2E task B' }],
+        tasks: [
+          { name: 'E2E task A', assignments: [{ resourceId: 'res-zhang', load: 80 }] },
+          { name: 'E2E task B' },
+        ],
       },
     });
     expect(created.result?.content?.[0]?.text).toBeDefined();
@@ -148,6 +157,50 @@ describe.skipIf(!dbUrl)('MCP /mcp endpoint integration', () => {
     const searchOut = JSON.parse(searched.result!.content![0]!.text);
     const names = searchOut.tasks.map((t: { name: string }) => t.name);
     expect(names).toEqual(expect.arrayContaining(['E2E task A', 'E2E task B']));
+  });
+
+  it('search_resources resolves a name to a resourceId usable in search_tasks', async () => {
+    const found = await mcp(6, 'tools/call', {
+      name: 'search_resources',
+      arguments: { workspaceId: session.workspaceId, projectId, name: '张' },
+    });
+    const out = JSON.parse(found.result!.content![0]!.text);
+    expect(out.resources).toHaveLength(1);
+    expect(out.resources[0]).toMatchObject({ id: 'res-zhang', role: '前端', assignedTaskCount: 1 });
+
+    const byRole = await mcp(7, 'tools/call', {
+      name: 'search_resources',
+      arguments: { workspaceId: session.workspaceId, projectId, role: '设计' },
+    });
+    const roleOut = JSON.parse(byRole.result!.content![0]!.text);
+    expect(roleOut.resources.map((r: { id: string }) => r.id)).toEqual(['res-li']);
+
+    const tasksOfZhang = await mcp(8, 'tools/call', {
+      name: 'search_tasks',
+      arguments: {
+        workspaceId: session.workspaceId,
+        projectId,
+        assigneeResourceId: out.resources[0].id as string,
+      },
+    });
+    const tasksOut = JSON.parse(tasksOfZhang.result!.content![0]!.text);
+    expect(tasksOut.tasks.map((t: { name: string }) => t.name)).toEqual(['E2E task A']);
+  });
+
+  it('list_projects honours the query filter', async () => {
+    const hit = await mcp(9, 'tools/call', {
+      name: 'list_projects',
+      arguments: { workspaceId: session.workspaceId, query: 'e2e' },
+    });
+    const hitOut = JSON.parse(hit.result!.content![0]!.text);
+    expect(hitOut.projects.map((p: { id: string }) => p.id)).toContain(projectId);
+
+    const miss = await mcp(10, 'tools/call', {
+      name: 'list_projects',
+      arguments: { workspaceId: session.workspaceId, query: 'no-such-project' },
+    });
+    const missOut = JSON.parse(miss.result!.content![0]!.text);
+    expect(missOut.projects).toEqual([]);
   });
 
   it('returns a soft isError for a read-only token calling a write tool', async () => {

@@ -97,7 +97,7 @@ server {
 2. MCP Host（如 MCP Inspector / Claude Desktop 等）配置：
    - URL：`https://ganttly.example.com/mcp`
    - 鉴权：`Authorization: Bearer <PAT 明文>`
-3. 可用工具：`list_workspaces` / `list_projects` / `get_project` / `search_tasks` / `get_task` / `create_task` / `create_tasks` / `update_task` / `move_task` / `add_dependency` / `remove_dependency`
+3. 可用工具：`list_workspaces` / `list_projects` / `get_project` / `search_tasks` / `search_resources` / `get_task` / `create_task` / `create_tasks` / `update_task` / `move_task` / `add_dependency` / `remove_dependency`
 
 ### 限制可登录用户（白名单）
 
