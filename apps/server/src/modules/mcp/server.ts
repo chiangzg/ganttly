@@ -1,5 +1,5 @@
 /**
- * MCP server factory (spec §10) — registers the eleven first-version tools on a
+ * MCP server factory (spec §10) — registers the twelve first-version tools on a
  * stateless {@link McpServer} backed by the Streamable HTTP transport.
  *
  * Tools resolve the caller from `extra.authInfo` (set by the `/mcp` route from
@@ -23,6 +23,7 @@ import {
   listProjectsInput,
   moveTaskInput,
   removeDependencyInput,
+  searchResourcesInput,
   searchTasksInput,
   updateTaskInput,
 } from '@ganttly/api-contract';
@@ -34,7 +35,7 @@ import { HttpError } from '../errors';
 import type { ProjectApplicationService } from '../projects/service';
 import { getProjectRow, listProjectRows, type ProjectRow } from '../projects/repository';
 import { buildSummary } from '../projects/summary';
-import { getTaskDetail, searchTasksInFile } from '../projects/read';
+import { getTaskDetail, searchResourcesInFile, searchTasksInFile } from '../projects/read';
 
 interface CreateMcpServerDeps {
   db: Db;
@@ -96,7 +97,7 @@ export interface McpHandle {
 }
 
 /**
- * Register the eleven first-version tools onto a (fresh) {@link McpServer}.
+ * Register the twelve first-version tools onto a (fresh) {@link McpServer}.
  */
 function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
   const { db, service } = deps;
@@ -126,7 +127,7 @@ function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
     'list_projects',
     {
       description:
-        'List projects in a workspace. Returns summaries (id/name/stats), not full documents.',
+        'List projects in a workspace. Returns summaries (id/name/stats), not full documents. `query` filters case-insensitively by name.',
       inputSchema: listProjectsInput,
     },
     (args, extra) =>
@@ -134,7 +135,7 @@ function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
         requireScope(p, 'project:read');
         const { workspaceId } = args;
         await requireMembership(db, p, workspaceId, 'viewer');
-        const rows = await listProjectRows(db, workspaceId, {});
+        const rows = await listProjectRows(db, workspaceId, { query: args.query });
         return { projects: rows.map((r) => buildSummary(r)) };
       }),
   );
@@ -171,6 +172,23 @@ function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
         const row = await getProjectRow(db, args.workspaceId, args.projectId);
         if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
         return searchTasksInFile(row.fileJsonb as never, args);
+      }),
+  );
+
+  server.registerTool(
+    'search_resources',
+    {
+      description:
+        'Search resources within a project by name or role label. Use it to resolve a resource name to its resourceId before search_tasks(assigneeResourceId=…) or assignment inputs. Paginated.',
+      inputSchema: searchResourcesInput,
+    },
+    (args, extra) =>
+      toolResult(extra.authInfo, async (p) => {
+        requireScope(p, 'project:read');
+        await requireMembership(db, p, args.workspaceId, 'viewer', args.projectId);
+        const row = await getProjectRow(db, args.workspaceId, args.projectId);
+        if (!row) throw new HttpError(ApiErrorCode.NOT_FOUND, 'Project not found');
+        return searchResourcesInFile(row.fileJsonb as never, args);
       }),
   );
 

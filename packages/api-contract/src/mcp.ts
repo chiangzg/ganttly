@@ -1,7 +1,7 @@
 /**
  * MCP v1 tool input contract (spec §10).
  *
- * Zod raw shapes for the eleven first-version MCP tools. These are the single
+ * Zod raw shapes for the twelve first-version MCP tools. These are the single
  * source of truth for tool input validation: the server registers them via
  * `McpServer.registerTool` and the contract tests assert accept/reject
  * behaviour, so Web, MCP Host and tests all agree on the exact field set.
@@ -83,6 +83,21 @@ export const searchTasksInput = z.object({
   cursor: z.string().optional(),
 });
 export type SearchTasksInput = z.infer<typeof searchTasksInput>;
+
+/**
+ * `search_resources` resolves a resource NAME to its `resourceId` so callers
+ * can feed `search_tasks.assigneeResourceId` or assignment inputs. Matches
+ * case-insensitively on `name` and the optional `role` label.
+ */
+export const searchResourcesInput = z.object({
+  workspaceId: z.string().min(1),
+  projectId: z.string().min(1),
+  name: z.string().optional(),
+  role: z.string().optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  cursor: z.string().optional(),
+});
+export type SearchResourcesInput = z.infer<typeof searchResourcesInput>;
 
 export const getTaskInput = z.object({
   workspaceId: z.string().min(1),

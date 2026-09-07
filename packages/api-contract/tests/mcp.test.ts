@@ -11,6 +11,7 @@ import {
   movePositionSchema,
   moveTaskInput,
   removeDependencyInput,
+  searchResourcesInput,
   searchTasksInput,
   updateTaskInput,
 } from '../src';
@@ -76,6 +77,30 @@ describe('searchTasksInput', () => {
   it('rejects a malformed date', () => {
     expect(() =>
       searchTasksInput.parse({ workspaceId: 'ws', projectId: 'prj', startFrom: '2026/01/01' }),
+    ).toThrow();
+  });
+});
+
+describe('searchResourcesInput', () => {
+  it('applies the default limit of 50', () => {
+    const parsed = searchResourcesInput.parse({ workspaceId: 'ws', projectId: 'prj' });
+    expect(parsed.limit).toBe(50);
+  });
+
+  it('accepts optional name/role filters', () => {
+    const parsed = searchResourcesInput.parse({
+      workspaceId: 'ws',
+      projectId: 'prj',
+      name: '张',
+      role: '前端',
+    });
+    expect(parsed.name).toBe('张');
+    expect(parsed.role).toBe('前端');
+  });
+
+  it('rejects an over-limit value (>200)', () => {
+    expect(() =>
+      searchResourcesInput.parse({ workspaceId: 'ws', projectId: 'prj', limit: 201 }),
     ).toThrow();
   });
 });

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultTask, createEmptyFile } from '@ganttly/schema';
 import type { GanttlyFile } from '@ganttly/schema';
-import { getTaskDetail, searchTasksInFile } from '../../../src/modules/projects/read';
+import {
+  getTaskDetail,
+  searchResourcesInFile,
+  searchTasksInFile,
+} from '../../../src/modules/projects/read';
 
 function buildFile(): GanttlyFile {
   const file = createEmptyFile({ name: 'MCP read tests' });
@@ -92,6 +96,57 @@ describe('searchTasksInFile', () => {
   it('returns an empty page when nothing matches', () => {
     const { tasks, nextCursor } = searchTasksInFile(file, { name: 'nope', limit: 50 });
     expect(tasks).toEqual([]);
+    expect(nextCursor).toBeNull();
+  });
+});
+
+describe('searchResourcesInFile', () => {
+  const file: GanttlyFile = {
+    ...buildFile(),
+    resources: [
+      { id: 'r1', name: '张三', role: '前端' },
+      { id: 'r2', name: 'Zhang San', role: '设计', capacity: 0.5 },
+      { id: 'r3', name: '李四' },
+    ],
+  };
+
+  it('lists all resources with their assignment counts', () => {
+    const { resources, nextCursor } = searchResourcesInFile(file, { limit: 50 });
+    expect(resources.map((r) => r.id)).toEqual(['r1', 'r2', 'r3']);
+    expect(resources.map((r) => r.assignedTaskCount)).toEqual([1, 0, 0]);
+    expect(nextCursor).toBeNull();
+  });
+
+  it('filters by case-insensitive name substring', () => {
+    expect(
+      searchResourcesInFile(file, { name: '张', limit: 50 }).resources.map((r) => r.id),
+    ).toEqual(['r1']);
+    expect(
+      searchResourcesInFile(file, { name: 'zhang', limit: 50 }).resources.map((r) => r.id),
+    ).toEqual(['r2']);
+  });
+
+  it('filters by role and skips resources without a role', () => {
+    expect(
+      searchResourcesInFile(file, { role: '设计', limit: 50 }).resources.map((r) => r.id),
+    ).toEqual(['r2']);
+    expect(
+      searchResourcesInFile(file, { role: '端', limit: 50 }).resources.map((r) => r.id),
+    ).toEqual(['r1']);
+  });
+
+  it('paginates with a cursor and limit', () => {
+    const page1 = searchResourcesInFile(file, { limit: 2 });
+    expect(page1.resources.map((r) => r.id)).toEqual(['r1', 'r2']);
+    expect(page1.nextCursor).toBe('r2');
+    const page2 = searchResourcesInFile(file, { limit: 2, cursor: page1.nextCursor ?? undefined });
+    expect(page2.resources.map((r) => r.id)).toEqual(['r3']);
+    expect(page2.nextCursor).toBeNull();
+  });
+
+  it('returns an empty page when nothing matches', () => {
+    const { resources, nextCursor } = searchResourcesInFile(file, { name: 'nope', limit: 50 });
+    expect(resources).toEqual([]);
     expect(nextCursor).toBeNull();
   });
 });

@@ -1,12 +1,12 @@
 /**
- * Pure task read queries for MCP (spec §10.2).
+ * Pure task/resource read queries for MCP (spec §10.2).
  *
  * These operate on a loaded {@link GanttlyFile} in memory — no database. The
  * spec notes first-version MCP search is per-project O(n) over the task list,
  * which keeps the query surface simple and dependency-free.
  */
-import type { GanttlyFile, Task } from '@ganttly/schema';
-import type { SearchTasksInput } from '@ganttly/api-contract';
+import type { GanttlyFile, Resource, Task } from '@ganttly/schema';
+import type { SearchResourcesInput, SearchTasksInput } from '@ganttly/api-contract';
 
 export interface TaskSummary {
   id: string;
@@ -125,4 +125,62 @@ export function getTaskDetail(file: GanttlyFile, taskId: string): TaskDetail | n
     .map(toSummary);
 
   return { task, parent, predecessors, children };
+}
+
+export interface ResourceSummary {
+  id: string;
+  name: string;
+  role?: string;
+  capacity?: number;
+  color?: string;
+  /** How many tasks in the file assign this resource. */
+  assignedTaskCount: number;
+}
+
+/**
+ * Search resources within a project — lets MCP callers resolve a resource NAME
+ * to its `resourceId` for `search_tasks.assigneeResourceId` or assignment
+ * inputs. Resources have no `order` field, so pages follow file array order
+ * and the cursor is the id of the last resource on the previous page.
+ */
+export function searchResourcesInFile(
+  file: GanttlyFile,
+  input: Pick<SearchResourcesInput, 'name' | 'role' | 'limit' | 'cursor'>,
+): { resources: ResourceSummary[]; nextCursor: string | null } {
+  const assignedCounts = new Map<string, number>();
+  for (const task of file.tasks) {
+    for (const assignment of task.assignments) {
+      assignedCounts.set(
+        assignment.resourceId,
+        (assignedCounts.get(assignment.resourceId) ?? 0) + 1,
+      );
+    }
+  }
+
+  const startIndex = input.cursor ? file.resources.findIndex((r) => r.id === input.cursor) + 1 : 0;
+
+  const toSummary = (resource: Resource): ResourceSummary => ({
+    id: resource.id,
+    name: resource.name,
+    role: resource.role,
+    capacity: resource.capacity,
+    color: resource.color,
+    assignedTaskCount: assignedCounts.get(resource.id) ?? 0,
+  });
+
+  const filtered: ResourceSummary[] = [];
+  for (const resource of file.resources.slice(startIndex)) {
+    if (filtered.length >= input.limit) break;
+    if (!contains(resource.name, input.name)) continue;
+    if (!contains(resource.role, input.role)) continue;
+    filtered.push(toSummary(resource));
+  }
+
+  const last = filtered[filtered.length - 1];
+  const nextCursor =
+    filtered.length === input.limit && last && file.resources.length > startIndex + input.limit
+      ? last.id
+      : null;
+
+  return { resources: filtered, nextCursor };
 }
