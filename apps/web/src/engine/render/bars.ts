@@ -95,8 +95,14 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
 
   const barColor =
     env.showCriticalPath && row.isCritical ? env.theme.critical : (row.color ?? env.theme.taskBar);
+  // Progress fill follows the task color (darkened ×0.8, same rule as the
+  // critical-path variant); only uncolored tasks fall back to the theme token.
   const progressColor =
-    env.showCriticalPath && row.isCritical ? darken(env.theme.critical) : env.theme.taskProgress;
+    env.showCriticalPath && row.isCritical
+      ? darken(env.theme.critical)
+      : row.color
+        ? darken(row.color)
+        : env.theme.taskProgress;
 
   // Baseline comparison layout (spec §5.9): when active, the baseline track is
   // drawn FIRST (lower visual layer) at the bottom of the row, then the live
@@ -321,8 +327,13 @@ function drawSummaryBar(
 ): void {
   const barColor =
     env.showCriticalPath && row.isCritical ? env.theme.critical : (row.color ?? env.theme.taskBar);
+  // The summary body is darken(barColor), so the progress fill uses the BASE
+  // color (lighter than the body) instead of darkening again, which would be
+  // invisible on top of it. Uncolored summaries keep the theme token.
   const progressColor =
-    env.showCriticalPath && row.isCritical ? darken(env.theme.critical) : env.theme.taskProgress;
+    env.showCriticalPath && row.isCritical
+      ? darken(env.theme.critical)
+      : (row.color ?? env.theme.taskProgress);
 
   const summaryBarH = Math.round((ROW_HEIGHT - 2 * BAR_INSET_Y) * 0.45);
   // In compare mode, nudge the live summary bar up so the baseline track fits
