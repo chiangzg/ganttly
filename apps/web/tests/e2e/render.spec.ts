@@ -214,6 +214,66 @@ test('milestone renders as a diamond', async ({ page }) => {
   });
 });
 
+test('custom task colors drive the progress fill (same-hue darkened)', async ({ page }) => {
+  // Colored tasks: progress fill = darken(task color); uncolored task keeps
+  // the theme token. Colored summary: progress = BASE color over the
+  // darkened body. Locks the "progress follows the task color" rule.
+  await loadFixture(page, {
+    tasks: [
+      {
+        id: 'p',
+        name: 'Parent summary',
+        parentId: null,
+        order: 0,
+        start: '2026-02-02',
+        end: '2026-02-10',
+        duration: 7,
+        progress: 0,
+        isMilestone: false,
+        color: '#fb923c',
+        dependencies: [],
+        constraints: {},
+        assignments: [],
+        customFields: {},
+      },
+      {
+        id: 'c1',
+        name: 'Colored leaf',
+        parentId: 'p',
+        order: 0,
+        start: '2026-02-02',
+        end: '2026-02-06',
+        duration: 5,
+        progress: 60,
+        isMilestone: false,
+        color: '#fb7185',
+        dependencies: [],
+        constraints: {},
+        assignments: [],
+        customFields: {},
+      },
+      {
+        id: 'c2',
+        name: 'Uncolored leaf',
+        parentId: 'p',
+        order: 1,
+        start: '2026-02-05',
+        end: '2026-02-10',
+        duration: 4,
+        progress: 30,
+        isMilestone: false,
+        dependencies: [],
+        constraints: {},
+        assignments: [],
+        customFields: {},
+      },
+    ],
+  });
+  await expect(page.locator('canvas')).toHaveScreenshot('canvas-custom-color.png', {
+    maxDiffPixelRatio: 0.01,
+  });
+});
+
 test('100 tasks render without visual breakage', async ({ page }) => {
   const tasks = Array.from({ length: 100 }, (_, i) => ({
     id: `t${i}`,
