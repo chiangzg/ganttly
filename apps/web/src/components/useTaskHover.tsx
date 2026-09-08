@@ -194,12 +194,16 @@ function TaskTooltip({
         {row.wbsNumber && (
           <span className="shrink-0 tabular-nums text-fg-muted">{row.wbsNumber}</span>
         )}
-        <span className="truncate font-medium">{row.name || t('table.placeholderName')}</span>
+        <span className="min-w-0 truncate font-medium">
+          {row.name || t('table.placeholderName')}
+        </span>
       </div>
-      <table className="mt-1 border-collapse">
+      <table className="mt-1 w-full border-collapse">
         <tbody>
           <tr>
-            <td className="pr-3 align-top text-fg-muted">{t('canvas.tooltipAssignees')}</td>
+            <td className="pr-3 align-top whitespace-nowrap text-fg-muted">
+              {t('canvas.tooltipAssignees')}
+            </td>
             <td className="tabular-nums">
               {assignees.length === 0 ? (
                 <span className="text-fg-muted">{t('canvas.tooltipNoAssignee')}</span>
@@ -209,34 +213,42 @@ function TaskTooltip({
             </td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('canvas.tooltipDateRange')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('canvas.tooltipDateRange')}</td>
             <td className="tabular-nums">
               {row.start.slice(5)} → {row.end.slice(5)}
             </td>
           </tr>
           {duration !== null && (
             <tr>
-              <td className="pr-3 text-fg-muted">{t('canvas.tooltipDuration')}</td>
+              <td className="pr-3 whitespace-nowrap text-fg-muted">
+                {t('canvas.tooltipDuration')}
+              </td>
               <td className="tabular-nums">
                 {row.isMilestone ? '—' : t('canvas.durationDays', { count: duration })}
               </td>
             </tr>
           )}
           <tr>
-            <td className="pr-3 text-fg-muted">{t('canvas.tooltipProgress')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('canvas.tooltipProgress')}</td>
             <td className="tabular-nums">{row.progress}%</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('canvas.tooltipPredecessors')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">
+              {t('canvas.tooltipPredecessors')}
+            </td>
             <td className="tabular-nums">{row.predecessorCount ?? 0}</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('canvas.tooltipSuccessors')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">
+              {t('canvas.tooltipSuccessors')}
+            </td>
             <td className="tabular-nums">{row.successorCount ?? 0}</td>
           </tr>
           {constraintText && (
             <tr>
-              <td className="pr-3 align-top text-fg-muted">{t('canvas.tooltipConstraint')}</td>
+              <td className="pr-3 align-top whitespace-nowrap text-fg-muted">
+                {t('canvas.tooltipConstraint')}
+              </td>
               <td
                 className={row.hasConstraintConflict ? 'font-medium text-danger' : 'tabular-nums'}
               >
@@ -251,7 +263,9 @@ function TaskTooltip({
           )}
           {deviationText !== null && (
             <tr>
-              <td className="pr-3 text-fg-muted">{t('canvas.tooltipBaselineDeviation')}</td>
+              <td className="pr-3 whitespace-nowrap text-fg-muted">
+                {t('canvas.tooltipBaselineDeviation')}
+              </td>
               <td className="tabular-nums font-medium">{deviationText}</td>
             </tr>
           )}
