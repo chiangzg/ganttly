@@ -7,13 +7,16 @@
  * text labels. It also makes the "%" capacity unit explicit (the renderer
  * stores capacity as 0-1; the list shows a bare number).
  *
- * Rendered as an overlay inside ResourceLoadCanvas (top-right), kept
- * pointer-events-none so it never intercepts canvas clicks/drags. The swatches
+ * Rendered as an overlay inside ResourceLoadCanvas, kept
+ * pointer-events-none so it never intercepts canvas clicks/drags. Anchored
+ * just below HEADER_HEIGHT because the date header is painted into the canvas
+ * bitmap — any DOM overlay above it would cover the date labels. The swatches
  * reuse the renderer's literal fill colors so the legend matches the bars
  * exactly in both light and dark themes (the bar colors are theme-independent
  * constants by design — see resourceLoad.ts GREEN/RED).
  */
 import { useTranslation } from 'react-i18next';
+import { HEADER_HEIGHT } from '@/engine/layout';
 
 /** Bar fill colors — kept in sync with resourceLoad.ts GREEN/RED. */
 const GREEN = '#22c55e';
@@ -25,7 +28,8 @@ export function ResourceLegend() {
     <div
       role="note"
       aria-label={t('resource.legendLabel')}
-      className="pointer-events-none absolute right-2 top-2 z-20 flex flex-col gap-1 rounded-md border border-border bg-bg-elevated/90 px-2 py-1.5 text-[10px] text-fg shadow-sm backdrop-blur-sm"
+      className="pointer-events-none absolute right-2 z-20 flex flex-col gap-1 rounded-md border border-border bg-bg-elevated/90 px-2 py-1.5 text-[10px] text-fg shadow-sm backdrop-blur-sm"
+      style={{ top: HEADER_HEIGHT + 8 }}
     >
       <div className="flex items-center gap-1.5">
         <span

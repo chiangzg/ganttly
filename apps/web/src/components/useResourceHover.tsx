@@ -232,25 +232,31 @@ function ResourceDayTooltip({
       style={{ left, top }}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate font-medium">{name || t('resource.placeholderName')}</span>
+        <span className="min-w-0 truncate font-medium">
+          {name || t('resource.placeholderName')}
+        </span>
         {role && <span className="shrink-0 text-fg-muted">{role}</span>}
       </div>
-      <table className="mt-1 border-collapse">
+      <table className="mt-1 w-full border-collapse">
         <tbody>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('resource.tooltipDate')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('resource.tooltipDate')}</td>
             <td className="tabular-nums">{bar.date}</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('resource.tooltipLoad')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('resource.tooltipLoad')}</td>
             <td className="tabular-nums font-medium">{Math.round(bar.load)}%</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('resource.tooltipCapacity')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">
+              {t('resource.tooltipCapacity')}
+            </td>
             <td className="tabular-nums">{capacityPct}%</td>
           </tr>
           <tr>
-            <td className="pr-3 align-top text-fg-muted">{t('resource.tooltipStatus')}</td>
+            <td className="pr-3 align-top whitespace-nowrap text-fg-muted">
+              {t('resource.tooltipStatus')}
+            </td>
             <td className={overload ? 'font-medium text-danger' : 'font-medium text-taskBar'}>
               {overload
                 ? t('resource.tooltipOverload', { excess: Math.round(bar.load - capacityPct) })
@@ -259,12 +265,16 @@ function ResourceDayTooltip({
           </tr>
           {contributions.length > 0 && (
             <tr>
-              <td className="pr-3 align-top text-fg-muted">{t('resource.tooltipContributing')}</td>
-              <td className="tabular-nums">
+              <td className="pr-3 align-top whitespace-nowrap text-fg-muted">
+                {t('resource.tooltipContributing')}
+              </td>
+              <td className="max-w-[176px] tabular-nums">
                 <ul className="space-y-0.5">
                   {contributions.map((c) => (
                     <li key={c.taskId} className="flex justify-between gap-2">
-                      <span className="truncate">{c.name || t('table.placeholderName')}</span>
+                      <span className="min-w-0 truncate">
+                        {c.name || t('table.placeholderName')}
+                      </span>
                       <span className="shrink-0 text-fg-muted">{Math.round(c.load)}%</span>
                     </li>
                   ))}
@@ -312,22 +322,26 @@ function TaskLaneTooltip({
         {row.wbsNumber && (
           <span className="shrink-0 tabular-nums text-fg-muted">{row.wbsNumber}</span>
         )}
-        <span className="truncate font-medium">{row.name || t('table.placeholderName')}</span>
+        <span className="min-w-0 truncate font-medium">
+          {row.name || t('table.placeholderName')}
+        </span>
       </div>
-      <table className="mt-1 border-collapse">
+      <table className="mt-1 w-full border-collapse">
         <tbody>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('resource.tooltipResource')}</td>
-            <td className="truncate">{resource?.name ?? ''}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">
+              {t('resource.tooltipResource')}
+            </td>
+            <td className="max-w-[176px] truncate">{resource?.name ?? ''}</td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('canvas.tooltipDateRange')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('canvas.tooltipDateRange')}</td>
             <td className="tabular-nums">
               {row.start.slice(5)} → {row.end.slice(5)}
             </td>
           </tr>
           <tr>
-            <td className="pr-3 text-fg-muted">{t('resource.tooltipLoad')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('resource.tooltipLoad')}</td>
             <td className="tabular-nums">
               {Math.round(row.load)}%
               {overload && (
@@ -339,12 +353,14 @@ function TaskLaneTooltip({
           </tr>
           {!row.isMilestone && (
             <tr>
-              <td className="pr-3 text-fg-muted">{t('resource.tooltipPersonDays')}</td>
+              <td className="pr-3 whitespace-nowrap text-fg-muted">
+                {t('resource.tooltipPersonDays')}
+              </td>
               <td className="tabular-nums">{personDays}</td>
             </tr>
           )}
           <tr>
-            <td className="pr-3 text-fg-muted">{t('canvas.tooltipProgress')}</td>
+            <td className="pr-3 whitespace-nowrap text-fg-muted">{t('canvas.tooltipProgress')}</td>
             <td className="tabular-nums">{row.progress}%</td>
           </tr>
         </tbody>
