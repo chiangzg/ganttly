@@ -429,8 +429,20 @@ export function TaskDrawer() {
     matchPinyin(item.label, query) ||
     (item.description ? matchPinyin(item.description, query) : false);
 
+  // Dependency candidates: exclude self, already-linked predecessors, and
+  // SUMMARY tasks. A summary's rollup duration is summed child effort rather
+  // than a time span, so a summary-level link never enters the CPM graph
+  // (lib/criticalPath.ts) and would silently do nothing. Block new ones here;
+  // existing rows stay listed so they can be reviewed/removed.
+  const parentIds = new Set<string>();
+  for (const x of file.tasks) if (x.parentId) parentIds.add(x.parentId);
   const dependencyItems: ComboboxItem[] = file.tasks
-    .filter((x) => x.id !== task.id && !draft.dependencies.some((d) => d.targetId === x.id))
+    .filter(
+      (x) =>
+        !parentIds.has(x.id) &&
+        x.id !== task.id &&
+        !draft.dependencies.some((d) => d.targetId === x.id),
+    )
     .map((x) => ({ value: x.id, label: x.name || x.id, description: dependencyLabels.get(x.id) }));
 
   const saveDisabledReason = !isDirty
@@ -688,7 +700,9 @@ export function TaskDrawer() {
                   </div>
                 );
               })}
-              {dependencyItems.length > 0 ? (
+              {hasChildren ? (
+                <p className="text-xs text-fg-muted">{t('drawer.summaryDependencyHint')}</p>
+              ) : dependencyItems.length > 0 ? (
                 <Combobox
                   items={dependencyItems}
                   placeholder={t('drawer.addDependency')}

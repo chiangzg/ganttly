@@ -24,7 +24,7 @@
  */
 import type { GanttlyFile, Task } from '@ganttly/schema';
 import { buildTree, flattenAll, flattenVisible, type TreeNode } from '@/engine/scene';
-import { computeCriticalPath } from '@/lib/cpm';
+import { computeProjectCriticalPath } from '@/lib/criticalPath';
 import { todayISO } from '@/engine/layout';
 
 /** Available quick-filters. `'none'` = no filter active. */
@@ -113,9 +113,10 @@ export function buildFilterPredicate(
   }
 
   if (filter === 'criticalPath') {
-    const cpm = computeCriticalPath(file.tasks, file.calendar);
-    const critical = cpm.criticalTaskIds;
-    return (t: Task) => isLeaf(t) && critical.has(t.id);
+    // Shared entry point with the canvas highlighting — feeding raw tasks to
+    // the CPM here diverged from the rendered red bars (summaries/rollups).
+    const { leafCriticalIds } = computeProjectCriticalPath(file.tasks, file.calendar);
+    return (t: Task) => isLeaf(t) && leafCriticalIds.has(t.id);
   }
 
   // overdue

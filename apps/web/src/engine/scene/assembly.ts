@@ -23,7 +23,7 @@ import {
   pixelsPerDay,
 } from '../layout';
 import { buildTree, flattenVisible } from './tree';
-import { computeCriticalPath } from '@/lib/cpm';
+import { computeProjectCriticalPath } from '@/lib/criticalPath';
 import { computeAllRollups } from '@/lib/summary';
 import { checkConstraintConflicts } from '@/lib/schedule';
 import { resolveCalendar, effectiveTaskDays } from '@/lib/calendar';
@@ -76,10 +76,11 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   // Resolve the project's persisted calendar once for constraints and effort.
   const cal = resolveCalendar(file.calendar);
 
-  // Pre-compute rollup values for all summary tasks. Used for both CPM input
-  // (so critical-path sees a summary's true aggregated start/duration) and for
-  // canvas row rendering (especially important during drag mid-states where
-  // the underlying Task data may be momentarily stale).
+  // Pre-compute rollup values for all summary tasks. Used for canvas row
+  // rendering (especially important during drag mid-states where the
+  // underlying Task data may be momentarily stale) and baseline effective
+  // values. NOT used for CPM — summaries are excluded from the graph
+  // (lib/criticalPath.ts).
   const allRollups = computeAllRollups(file.tasks, file.resources, cal);
 
   // Pre-build a resource lookup ONCE (plan §3.3) so per-row assignee
@@ -103,17 +104,11 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
 
   // Compute the critical path once per assembly. Cheap (<1ms for hundreds of
   // tasks) and gives every row the `isCritical` flag for highlighting.
-  // Summary tasks are fed their rolled-up start/duration so CPM uses the
-  // aggregated span (computeCriticalPath only reads start + duration, not end).
-  const cpm = opts.criticalTaskIds
-    ? null
-    : computeCriticalPath(
-        file.tasks.map((t) => {
-          const r = allRollups.get(t.id);
-          return r ? { ...t, start: r.start, duration: r.duration } : t;
-        }),
-        file.calendar,
-      );
+  // Summaries never enter the CPM graph — their rollup duration is summed
+  // effort, not a time span, and treating one as a task inflated the project
+  // end by months (see lib/criticalPath.ts). Summary rows derive criticality
+  // from their descendants inside the shared helper.
+  const cpm = opts.criticalTaskIds ? null : computeProjectCriticalPath(file.tasks, file.calendar);
   const criticalIds = opts.criticalTaskIds ?? cpm?.criticalTaskIds ?? new Set<string>();
 
   // Detect constraint-vs-dependency conflicts (G4 — for arrow/row highlighting).
