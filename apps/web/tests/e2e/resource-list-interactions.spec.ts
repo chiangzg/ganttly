@@ -331,6 +331,97 @@ test.describe('resource list interactions', () => {
     expect(await readResources(page)).toEqual(['r1', 'r2', 'r3']);
   });
 
+  test('holding a resource drag in a scrolled-to-bottom list does not auto-scroll upward', async ({
+    page,
+  }) => {
+    // Mirror of the task-tree regression: the auto-scroll loop must track the
+    // pointer via `dragover` (native drag suppresses `mousemove`), so a parked
+    // pointer holds the list still instead of racing to the top.
+    await page.evaluate(() => {
+      const s = (window as unknown as { __ganttlyStore?: unknown }).__ganttlyStore as StoreApi;
+      const f = s.getState().file;
+      const extra = Array.from({ length: 40 }, (_, i) => ({
+        id: `vx${i}`,
+        name: `成员${i}`,
+        capacity: 1.0,
+        role: null,
+      }));
+      s.setState({ file: { ...f, resources: [...f.resources, ...extra] } });
+    });
+    await page.waitForTimeout(200);
+
+    const initialScrollTop = await page.evaluate(() => {
+      const el = document.querySelector('[data-resource-scroll]') as HTMLElement;
+      el.scrollTop = el.scrollHeight;
+      return el.scrollTop;
+    });
+    expect(
+      initialScrollTop,
+      'resource list must be scrollable for this regression',
+    ).toBeGreaterThan(0);
+
+    // Drag the last row's grip and park the pointer mid-container ~400ms.
+    await page.evaluate(
+      async ({ fromId }) => {
+        const el = document.querySelector('[data-resource-scroll]') as HTMLElement;
+        const sourceRow = el.querySelector(`[data-resource-id="${fromId}"]`) as HTMLElement;
+        const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]')!;
+        const dt = new DataTransfer();
+        const fire = (type: string, target: HTMLElement, clientY: number) => {
+          const r = target.getBoundingClientRect();
+          target.dispatchEvent(
+            new DragEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dt,
+              clientX: r.left + r.width / 2,
+              clientY,
+            }),
+          );
+        };
+        const g = source.getBoundingClientRect();
+        fire('dragstart', source, g.top + g.height / 2);
+        const rect = el.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        for (let i = 0; i < 8; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+          fire('dragover', sourceRow, midY);
+        }
+      },
+      { fromId: 'vx39' },
+    );
+    await page.waitForTimeout(200);
+
+    const afterScrollTop = await page.evaluate(() => {
+      const el = document.querySelector('[data-resource-scroll]') as HTMLElement;
+      return el.scrollTop;
+    });
+    expect(
+      Math.abs(afterScrollTop - initialScrollTop),
+      'a held resource drag with a parked pointer must not scroll the list',
+    ).toBeLessThanOrEqual(ROW_HEIGHT * 2);
+
+    // Clean up: end the drag on the source grip.
+    await page.evaluate(
+      ({ fromId }) => {
+        const el = document.querySelector('[data-resource-scroll]') as HTMLElement;
+        const sourceRow = el.querySelector(`[data-resource-id="${fromId}"]`) as HTMLElement;
+        const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]')!;
+        const rect = source.getBoundingClientRect();
+        source.dispatchEvent(
+          new DragEvent('dragend', {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: new DataTransfer(),
+            clientX: rect.left,
+            clientY: rect.top,
+          }),
+        );
+      },
+      { fromId: 'vx39' },
+    );
+  });
+
   test('header expand-all / collapse-all drive every drill-down', async ({ page }) => {
     const rows = page.locator('[data-resource-list] [role="row"]');
     await expect(rows).toHaveCount(3);

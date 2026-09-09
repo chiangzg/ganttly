@@ -407,6 +407,9 @@ export function ResourceList() {
   const dragCancelled = useRef(false);
   const dragEscapeHandler = useRef<((e: globalThis.KeyboardEvent) => void) | null>(null);
   const autoScrollRaf = useRef<number | null>(null);
+  // Live pointer Y for the auto-scroll loop, in a ref to avoid re-rendering
+  // per drag event. Seeded at dragstart and refreshed by `dragover` — native
+  // drag suppresses `mousemove`, so that event cannot drive it.
   const pointerY = useRef(0);
   // Refs mirroring the latest drag state for handlers that close over stale
   // renders (window listeners, native drop events).
@@ -427,6 +430,9 @@ export function ResourceList() {
   const onGripDragStart = (e: React.DragEvent<HTMLDivElement>, resourceId: string) => {
     e.dataTransfer.setData('text/plain', resourceId);
     e.dataTransfer.effectAllowed = 'move';
+    // Seed the auto-scroll pointer so the rAF loop starts from the real grab
+    // position instead of defaulting to 0 (viewport top) and scrolling up.
+    pointerY.current = e.clientY;
     // A transparent drag image lets us show our own insertion-line feedback
     // instead of the browser's faded row ghost. Escape cancels mid-drag.
     dragCancelled.current = false;
@@ -491,13 +497,16 @@ export function ResourceList() {
 
   // Auto-scroll: while a drag is in flight and the pointer is near the top or
   // bottom edge of the scroll container, scroll continuously. One rAF loop
-  // per drag (mirrors TaskTable).
+  // per drag (mirrors TaskTable). Pointer position comes from `dragover`:
+  // native HTML5 drag suppresses `mousemove` entirely, so a mousemove
+  // listener never fires mid-drag and the loop would keep scrolling from a
+  // stale position.
   useEffect(() => {
     if (!draggedResourceId) return;
-    const onMove = (e: MouseEvent) => {
+    const onDragOver = (e: DragEvent) => {
       pointerY.current = e.clientY;
     };
-    window.addEventListener('mousemove', onMove);
+    window.addEventListener('dragover', onDragOver);
 
     const tick = () => {
       const el = scrollRef.current;
@@ -518,7 +527,7 @@ export function ResourceList() {
     autoScrollRaf.current = requestAnimationFrame(tick);
 
     return () => {
-      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('dragover', onDragOver);
       if (autoScrollRaf.current !== null) {
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
@@ -629,7 +638,12 @@ export function ResourceList() {
             </div>
           </div>
         </div>
-        <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onScroll}>
+        <div
+          ref={scrollRef}
+          data-resource-scroll
+          className="relative flex-1 overflow-y-auto"
+          onScroll={onScroll}
+        >
           {/* §5.2: zero-resource hint inside the list body. The bottom "+ 新增资源"
               button is always visible and is the real CTA; this panel just
               explains the state so the blank list isn't confusing. The right
