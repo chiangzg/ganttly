@@ -29,7 +29,7 @@ import type {
   Baseline,
 } from '@ganttly/schema';
 import { getCalendar } from '@ganttly/calendar-data';
-import { resolveCalendar } from './calendar';
+import { resolveCalendar, type ResolvedCalendar } from './calendar';
 import { computeCascadeRollup, recomputeSelfAndAncestors } from './summary';
 import {
   cascadeSchedule,
@@ -296,8 +296,20 @@ function ok<TResult extends CommandResult>(
   return { file, result, affectedTaskIds, adjustments };
 }
 
-function resolveCal(file: GanttlyFile) {
+/**
+ * Resolve the effective calendar for a project file: prefer the file's own
+ * (possibly user-customized) holidays; fall back to the bundled regional
+ * dataset when the file carries an empty list — matching the web app's
+ * `normalizeFile` backfill rule, so server-side scheduling agrees with what
+ * the UI displays.
+ */
+export function resolveProjectCalendar(file: GanttlyFile): ResolvedCalendar {
+  if (file.calendar.holidays.length > 0) return resolveCalendar(file.calendar);
   return resolveCalendar(getCalendar(file.calendar.id));
+}
+
+function resolveCal(file: GanttlyFile) {
+  return resolveProjectCalendar(file);
 }
 
 // --- Task commands ---------------------------------------------------------

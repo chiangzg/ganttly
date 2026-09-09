@@ -34,7 +34,15 @@ import {
   normalizeFile,
   validateGanttlyFile,
 } from '@ganttly/schema';
-import { applyProjectCommand, wouldCreateCycle, type ProjectCommand } from '@ganttly/domain';
+import {
+  applyProjectCommand,
+  computeCascadeRollup,
+  endDateFromDuration,
+  nextWorkingDay,
+  resolveProjectCalendar,
+  wouldCreateCycle,
+  type ProjectCommand,
+} from '@ganttly/domain';
 import { type AuthPrincipal, operationActorType } from '../../auth/principal';
 import type { Db, Tx } from '../../db/client';
 import { outboxEvents, projectOperations, projects } from '../../db/schema';
@@ -488,9 +496,29 @@ export class ProjectApplicationService {
         if (input.overtimeDates !== undefined) patch.overtimeDates = input.overtimeDates;
         if (input.constraints !== undefined) patch.constraints = input.constraints;
         if (input.assignments !== undefined) patch.assignments = input.assignments;
+        // §4.2: keep start/duration/end consistent with the project calendar,
+        // mirroring the TaskDrawer semantics (milestone → duration 0 and
+        // start===end; otherwise end derives from start+duration).
+        if (
+          input.start !== undefined ||
+          input.duration !== undefined ||
+          input.isMilestone !== undefined
+        ) {
+          const before = current.tasks.find((t) => t.id === input.taskId);
+          if (before) {
+            const start = input.start ?? before.start;
+            if (input.isMilestone ?? before.isMilestone) {
+              patch.duration = 0;
+              patch.end = start;
+            } else {
+              const duration = input.duration ?? before.duration;
+              patch.end = endDateFromDuration(start, duration, resolveProjectCalendar(current));
+            }
+          }
+        }
         const outcome = applyProjectCommand(
           current,
-          { kind: 'updateTask', taskId: input.taskId, patch },
+          { kind: 'updateTaskWithRollup', taskId: input.taskId, patch },
           ctx,
         );
         return {
@@ -1030,8 +1058,14 @@ export class ProjectApplicationService {
   }
 }
 
+/**
+ * Today's date in the project timezone (§4.2). The server runs in UTC, where
+ * `toISOString()` lags Asia/Shanghai by 8 hours — a task created before 8am
+ * local time would otherwise default to yesterday. Override via APP_TIMEZONE.
+ */
 function todayString(): string {
-  return new Date().toISOString().slice(0, 10);
+  const timeZone = process.env.APP_TIMEZONE ?? 'Asia/Shanghai';
+  return new Date().toLocaleDateString('en-CA', { timeZone });
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,16 +1204,25 @@ async function applyCreateToFileSync(
   };
 
   const taskId = newTaskId();
+  // §4.2: dates derive from the project calendar — snap a non-working start
+  // forward and compute `end` from start+duration so the stored triple
+  // (start/duration/end) is never self-contradictory.
+  const cal = resolveProjectCalendar(file);
+  const rawStart = item.start ?? ctx.today;
+  const start = nextWorkingDay(rawStart, cal);
   const base = createDefaultTask({
     id: taskId,
     name: item.name,
-    start: item.start ?? ctx.today,
+    start,
     parentId,
     order: plan.order,
   });
+  const duration = item.isMilestone ? 0 : (item.duration ?? base.duration);
+  const end = endDateFromDuration(start, duration, cal);
   const newTask: Task = {
     ...base,
-    duration: item.duration ?? base.duration,
+    duration,
+    end,
     isMilestone: item.isMilestone ?? base.isMilestone,
     progress: item.progress ?? base.progress,
     constraints: base.constraints,
@@ -1193,6 +1236,9 @@ async function applyCreateToFileSync(
 
   const affected = new Set<string>([taskId]);
   const adjustments: Adjustment[] = [];
+  if (start !== rawStart) {
+    adjustments.push({ field: 'start', from: rawStart, to: start, reason: 'non-working-day-snap' });
+  }
 
   const addOutcome = applyProjectCommand(
     evolved,
@@ -1217,6 +1263,15 @@ async function applyCreateToFileSync(
     evolved = depOutcome.file;
     depOutcome.affectedTaskIds.forEach((id) => affected.add(id));
     adjustments.push(...depOutcome.adjustments);
+  }
+
+  // §4.2: a task added under summary parents must expand their rollup.
+  const rollupPatches = computeCascadeRollup(evolved.tasks, taskId);
+  for (const { id, patch } of rollupPatches) {
+    const outcome = applyProjectCommand(evolved, { kind: 'updateTask', taskId: id, patch }, ctx);
+    evolved = outcome.file;
+    outcome.affectedTaskIds.forEach((aid) => affected.add(aid));
+    adjustments.push(...outcome.adjustments);
   }
 
   return {
