@@ -198,10 +198,13 @@ test('dependency picker and selected dependency show WBS with the full task path
 
   // Each option shows the task name plus the WBS full path as description
   // (accessible name = "名称 WBS 路径", hence the anchored regexes).
-  await expect(page.getByRole('option', { name: /^项目甲 1 项目甲$/ })).toBeVisible();
+  // 2026-09 CPM fix: SUMMARY tasks are excluded from the candidates (a
+  // summary's rollup duration is effort, not a span — summary-level deps
+  // never enter the critical-path graph), so only leaves are offered.
+  await expect(page.getByRole('option', { name: /^项目甲 1 项目甲$/ })).toHaveCount(0);
   await expect(
     page.getByRole('option', { name: /^后端开发 1\.1 项目甲 \/ 后端开发$/ }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     page.getByRole('option', { name: /^发布 1\.1\.1 项目甲 \/ 后端开发 \/ 发布$/ }),
   ).toBeVisible();
