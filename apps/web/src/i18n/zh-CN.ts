@@ -264,6 +264,7 @@ export const zhCN = {
     searchTask: '输入任务名或 WBS…',
     noMatchingTask: '没有匹配的任务',
     noDependencyCandidates: '没有可添加的依赖任务',
+    summaryDependencyHint: '摘要任务的依赖不参与关键路径计算，请把依赖连接到具体子任务',
     dependencyType: '类型',
     dependencyLag: '滞后(工作日)',
     deleteDependency: '删除依赖',

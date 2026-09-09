@@ -271,6 +271,8 @@ export const en = {
     searchTask: 'Type a task name or WBS…',
     noMatchingTask: 'No matching tasks',
     noDependencyCandidates: 'No tasks available to depend on',
+    summaryDependencyHint:
+      'Dependencies on summary tasks are excluded from the critical path — link concrete child tasks instead',
     dependencyType: 'Type',
     dependencyLag: 'Lag (working days)',
     deleteDependency: 'Remove dependency',
