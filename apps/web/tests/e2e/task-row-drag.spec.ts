@@ -469,3 +469,90 @@ test('a move pushes exactly one undo entry labelled 移动任务(含汇总)', as
   expect(depth, 'exactly one command for one drag').toBe(undoDepthBefore + 1);
   expect(topLabel).toBe('移动任务(含汇总)');
 });
+
+test('holding a drag in a scrolled-to-bottom list does not auto-scroll upward', async ({
+  page,
+}) => {
+  // Regression: the auto-scroll loop tracked the pointer via `mousemove`,
+  // which native HTML5 drag suppresses entirely. With the pointer position
+  // stuck at its initial 0 (viewport top), the loop scrolled the list to the
+  // top for the whole duration of every drag — most visibly when grabbing a
+  // row near the bottom. The loop now listens to `dragover` and is seeded at
+  // dragstart, so a parked pointer must not move the list at all.
+  const tasks = Array.from({ length: 60 }, (_, i) => makeTask(`t${i}`, `任务${i}`, { order: i }));
+  await injectTasks(page, tasks);
+
+  // Scroll the task table to the very bottom.
+  const initialScrollTop = await page.evaluate(() => {
+    const el = document.querySelector('[data-task-scroll]') as HTMLElement;
+    el.scrollTop = el.scrollHeight;
+    return el.scrollTop;
+  });
+  expect(initialScrollTop, 'list must be scrollable for this regression').toBeGreaterThan(0);
+
+  // Drag the last row's grip and keep the pointer parked mid-viewport by
+  // dispatching dragover events (what a real held drag emits continuously).
+  await page.evaluate(
+    async ({ fromName }) => {
+      const el = document.querySelector('[data-task-scroll]') as HTMLElement;
+      const sourceRow = el.querySelector(`[data-task-id="${fromName}"]`) as HTMLElement;
+      const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]')!;
+      const dt = new DataTransfer();
+      const fire = (type: string, target: HTMLElement, clientY: number) => {
+        const rect = target.getBoundingClientRect();
+        target.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+            clientX: rect.left + rect.width / 2,
+            clientY,
+          }),
+        );
+      };
+      const gripRect = source.getBoundingClientRect();
+      fire('dragstart', source, gripRect.top + gripRect.height / 2);
+
+      // Hold the drag ~400ms with the pointer mid-container: no auto-scroll
+      // should trigger from either edge.
+      const rect = el.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const deadline = Date.now() + 400;
+      while (Date.now() < deadline) {
+        fire('dragover', sourceRow, midY);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    },
+    { fromName: 't59' },
+  );
+  await page.waitForTimeout(200);
+
+  const afterScrollTop = await page.evaluate(() => {
+    const el = document.querySelector('[data-task-scroll]') as HTMLElement;
+    return el.scrollTop;
+  });
+  expect(
+    Math.abs(afterScrollTop - initialScrollTop),
+    'a held drag with a parked pointer must not scroll the list',
+  ).toBeLessThanOrEqual(ROW_HEIGHT * 2);
+
+  // Clean up: end the drag on the source grip.
+  await page.evaluate(
+    ({ fromName }) => {
+      const el = document.querySelector('[data-task-scroll]') as HTMLElement;
+      const sourceRow = el.querySelector(`[data-task-id="${fromName}"]`) as HTMLElement;
+      const source = sourceRow.querySelector<HTMLElement>('[data-testid="row-drag-handle"]')!;
+      const rect = source.getBoundingClientRect();
+      source.dispatchEvent(
+        new DragEvent('dragend', {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: new DataTransfer(),
+          clientX: rect.left,
+          clientY: rect.top,
+        }),
+      );
+    },
+    { fromName: 't59' },
+  );
+});
