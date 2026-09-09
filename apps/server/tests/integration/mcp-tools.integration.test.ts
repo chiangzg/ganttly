@@ -479,4 +479,148 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
       }),
     ).rejects.toThrow(/not found/i);
   });
+
+  // ---- §4.2 date semantics: end derives from start+duration on the project calendar ----
+
+  it('createTask computes end from working-day duration across a weekend', async () => {
+    const outcome = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Five workdays from Friday',
+        start: '2026-09-11', // Friday
+        duration: 5,
+        idempotencyKey: 'ct-cal-weekend',
+      },
+    });
+    expect(outcome.task.start).toBe('2026-09-11');
+    expect(outcome.task.end).toBe('2026-09-17'); // Thursday next week, skipping Sat/Sun
+    expect(outcome.task.duration).toBe(5);
+  });
+
+  it('createTask snaps a non-working start forward and reports the adjustment', async () => {
+    const outcome = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Saturday start',
+        start: '2026-09-12', // Saturday
+        duration: 2,
+        idempotencyKey: 'ct-cal-snap',
+      },
+    });
+    expect(outcome.task.start).toBe('2026-09-14'); // Monday
+    expect(outcome.task.end).toBe('2026-09-15');
+    expect(outcome.adjustments).toContainEqual(
+      expect.objectContaining({ field: 'start', reason: 'non-working-day-snap' }),
+    );
+  });
+
+  it('createTask milestone forces duration 0 with start === end', async () => {
+    const outcome = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Milestone',
+        start: '2026-09-11',
+        duration: 5,
+        isMilestone: true,
+        idempotencyKey: 'ct-cal-milestone',
+      },
+    });
+    expect(outcome.task.isMilestone).toBe(true);
+    expect(outcome.task.duration).toBe(0);
+    expect(outcome.task.end).toBe(outcome.task.start);
+  });
+
+  it('updateTask recomputes end and rolls up to the parent summary', async () => {
+    const parent = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Rollup parent',
+        start: '2026-09-07',
+        duration: 1,
+        idempotencyKey: 'ct-rollup-parent',
+      },
+    });
+    const child = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Rollup child',
+        start: '2026-09-07',
+        duration: 1,
+        parentTaskId: parent.task.id,
+        idempotencyKey: 'ct-rollup-child',
+      },
+    });
+    // Child creation must already expand the parent's rollup.
+    const parentAtCreate = child.snapshot.file.tasks.find((t) => t.id === parent.task.id);
+    expect(parentAtCreate?.end).toBe('2026-09-07');
+
+    const updated = await service.updateTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        taskId: child.task.id,
+        duration: 5, // Mon 09-07 + 5 workdays → Fri 09-11
+        idempotencyKey: 'ut-rollup',
+      },
+    });
+    const updatedChild = updated.file.tasks.find((t) => t.id === child.task.id);
+    const updatedParent = updated.file.tasks.find((t) => t.id === parent.task.id);
+    expect(updatedChild?.end).toBe('2026-09-11');
+    expect(updatedParent?.end).toBe('2026-09-11');
+    expect(updatedParent?.duration).toBe(5);
+  });
+
+  it('updateTask on a predecessor cascades to its dependent successor', async () => {
+    const pred = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Cascade pred',
+        start: '2026-09-07',
+        duration: 2,
+        idempotencyKey: 'ct-cascade-pred',
+      },
+    });
+    const succ = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Cascade succ',
+        start: '2026-09-09',
+        duration: 1,
+        dependencies: [{ predecessorTaskId: pred.task.id }],
+        idempotencyKey: 'ct-cascade-succ',
+      },
+    });
+    expect(succ.task.start).toBe('2026-09-09'); // FS after pred (09-07..09-08)
+
+    const updated = await service.updateTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        taskId: pred.task.id,
+        duration: 3, // pred now ends 09-09 → successor pushed to 09-10
+        idempotencyKey: 'ut-cascade',
+      },
+    });
+    const updatedPred = updated.file.tasks.find((t) => t.id === pred.task.id);
+    const updatedSucc = updated.file.tasks.find((t) => t.id === succ.task.id);
+    expect(updatedPred?.end).toBe('2026-09-09');
+    expect(updatedSucc?.start).toBe('2026-09-10');
+    expect(updatedSucc?.end).toBe('2026-09-10');
+  });
 });

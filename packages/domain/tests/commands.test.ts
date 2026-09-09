@@ -10,9 +10,11 @@ import type {
 } from '@ganttly/schema';
 import {
   applyProjectCommand,
+  resolveProjectCalendar,
   type ProjectCommand,
   type ApplyProjectCommandContext,
 } from '../src/commands';
+import { isWorkingDay } from '../src/calendar';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -501,5 +503,30 @@ describe('applyProjectCommand — all 23 kinds covered', () => {
 
   it('covers exactly 23 command kinds', () => {
     expect(commands).toHaveLength(23);
+  });
+});
+
+describe('resolveProjectCalendar', () => {
+  it('uses the file calendar (with its own holidays) when holidays are present', () => {
+    const file = makeFile([]);
+    const custom: GanttlyFile = {
+      ...file,
+      calendar: {
+        ...file.calendar,
+        weekends: [0], // only Sunday is a weekend
+        holidays: [{ date: '2026-09-14', name: 'Custom off-day', type: 'holiday' }],
+      },
+    };
+    const cal = resolveProjectCalendar(custom);
+    expect(isWorkingDay('2026-09-14', cal)).toBe(false); // explicit holiday
+    expect(isWorkingDay('2026-09-12', cal)).toBe(true); // Saturday is working now
+  });
+
+  it('falls back to the bundled regional dataset when file holidays are empty', () => {
+    const file = makeFile([]); // createEmptyFile ships zh-CN with holidays: []
+    const cal = resolveProjectCalendar(file);
+    // zh-CN 2026: 09-25 is Mid-Autumn holiday (bundled), 09-19 is a make-up working Saturday.
+    expect(isWorkingDay('2026-09-25', cal)).toBe(false);
+    expect(isWorkingDay('2026-09-19', cal)).toBe(true);
   });
 });
