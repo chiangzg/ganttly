@@ -2,25 +2,41 @@
  * Critical Path Method (CPM) — PRD §3.6.
  *
  * Algorithm:
- * 1. Build a DAG from dependencies (predecessor → successor).
- * 2. Forward pass: each task's earliest start = max(predecessors' earliest
- *    end + lag), earliest end = earliest start + duration.
- * 3. Backward pass: each task's latest end = min(successors' latest start -
- *    lag), latest start = latest end - duration.
- * 4. Total float = latest start - earliest start. Tasks with float 0 are
- *    critical.
+ * 1. Build a DAG from dependencies (predecessor → successor). All four
+ *    precedence types (FS/SS/FF/SF) participate, with the SAME working-day
+ *    semantics as the scheduling engine in `schedule.ts` (computeImpliedStart
+ *    / computeImpliedEnd) — the scheduler keeps the drawn plan satisfying
+ *    these links, so the CPM must read them identically:
+ *      FS: succ.start ≥ pred.end   + 1 + lag      (working days)
+ *      SS: succ.start ≥ pred.start + lag
+ *      FF: succ.end   ≥ pred.end   + lag
+ *      SF: succ.end   ≥ pred.start + lag
+ *    FF/SF constrain the successor's END; with fixed duration they convert to
+ *    a start floor via back-calculation.
+ * 2. Forward pass (as-scheduled): each task's earliest start = max(its own
+ *    drawn start, every predecessor's implied start). The drawn start seeds
+ *    the pass so a manually delayed task keeps driving the project end (MS
+ *    Project behaviour); a drawn-EARLY task is still pulled forward by the
+ *    network — violations are never rewarded. Task constraints (G18) apply on
+ *    top: SNET floor, MSO/MFO hard anchors.
+ * 3. Backward pass mirrors the forward semantics per edge type: latest end =
+ *    min over successors' implied latest end.
+ * 4. Total float = latest start − earliest start (working days, clamped at
+ *    0). Tasks with float 0 are critical.
  *
  * The critical PATH is the longest chain of critical tasks linked by
  * dependencies. A task can be critical without being on the longest chain
  * (rare); we surface all zero-float tasks as critical for the highlight.
  *
- * Calendar-aware: durations are in working days; the algorithm operates on
- * day counts, not absolute dates, to keep math simple. Callers convert back.
+ * Calendar-aware: durations are in working days; all arithmetic walks the
+ * project calendar. NOTE: only LEAF tasks should be fed into this function —
+ * summary rollup duration is summed effort, not a time span (see web
+ * lib/criticalPath.ts, which is the single entry point for rendering).
  *
  * Multi-root: the graph may have multiple disconnected components (subtrees
  * without external dependencies). Each is processed independently.
  */
-import type { Task } from '@ganttly/schema';
+import type { Task, DependencyType } from '@ganttly/schema';
 import { isWorkingDay, resolveCalendar, addCalendarDays, type ResolvedCalendar } from './calendar';
 import type { Calendar } from '@ganttly/schema';
 
@@ -55,8 +71,11 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const ids = tasks.map((t) => t.id);
 
-  // Adjacency: predecessorId -> [{ successorId, lag }]
-  const successorsOf = new Map<string, Array<{ successorId: string; lag: number }>>();
+  // Adjacency: predecessorId -> [{ successorId, type, lag }]
+  const successorsOf = new Map<
+    string,
+    Array<{ successorId: string; type: DependencyType; lag: number }>
+  >();
   // In-degree: successorId -> count of predecessors
   const inDegree = new Map<string, number>();
   for (const id of ids) {
@@ -66,40 +85,39 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   for (const task of tasks) {
     for (const dep of task.dependencies) {
       if (!byId.has(dep.targetId)) continue;
-      successorsOf.get(dep.targetId)!.push({ successorId: task.id, lag: dep.lag });
+      successorsOf.get(dep.targetId)!.push({ successorId: task.id, type: dep.type, lag: dep.lag });
       inDegree.set(task.id, (inDegree.get(task.id) ?? 0) + 1);
     }
   }
 
-  // ---- Forward pass (Kahn) ----
+  // ---- Forward pass (Kahn, as-scheduled) ----
   const earliestStart = new Map<string, string>();
   const earliestEnd = new Map<string, string>();
 
-  // Initialise roots (no predecessors) with their own start date.
-  const queue: string[] = [];
+  // As-scheduled seed: EVERY task starts from its own drawn start (constraint
+  // applied), then dependency edges may only pull it LATER. A manually
+  // delayed task therefore keeps driving the project end; a drawn-early
+  // violation is pulled forward by the network instead.
   for (const id of ids) {
-    if ((inDegree.get(id) ?? 0) === 0) {
-      const task = byId.get(id)!;
-      // G18: apply constraint to the root's earliest start.
-      const { start, end } = applyForwardConstraint(task, task.start, cal);
-      earliestStart.set(id, start);
-      earliestEnd.set(id, end);
-      queue.push(id);
-    }
+    const task = byId.get(id)!;
+    const { start, end } = applyForwardConstraint(task, task.start, cal);
+    earliestStart.set(id, start);
+    earliestEnd.set(id, end);
   }
 
   // Process in topological order, mutating in-degree.
   const inDegreeCopy = new Map(inDegree);
+  const queue: string[] = ids.filter((id) => (inDegree.get(id) ?? 0) === 0);
   while (queue.length > 0) {
     const cur = queue.shift()!;
+    const curStart = earliestStart.get(cur)!;
     const curEnd = earliestEnd.get(cur)!;
-    for (const { successorId, lag } of successorsOf.get(cur) ?? []) {
+    for (const { successorId, type, lag } of successorsOf.get(cur) ?? []) {
       const successor = byId.get(successorId);
       if (!successor) continue;
-      // Earliest start of successor = max(current earliestStart, predecessor.end + 1 + lag) working days
-      const implied = addLag(curEnd, 1 + lag, cal);
-      const current = earliestStart.get(successorId);
-      if (!current || implied > current) {
+      const implied = impliedSuccessorStart(type, lag, curStart, curEnd, successor.duration, cal);
+      const current = earliestStart.get(successorId)!;
+      if (implied > current) {
         // G18: re-apply the successor's constraint against the new implied start.
         const { start, end } = applyForwardConstraint(successor, implied, cal);
         earliestStart.set(successorId, start);
@@ -111,16 +129,8 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
     }
   }
 
-  // Tasks that weren't reachable (cycle or disconnected missing refs) fall
-  // back to using their own start.
-  for (const id of ids) {
-    if (!earliestStart.has(id)) {
-      const task = byId.get(id)!;
-      const { start, end } = applyForwardConstraint(task, task.start, cal);
-      earliestStart.set(id, start);
-      earliestEnd.set(id, end);
-    }
-  }
+  // Tasks that weren't reachable (cycle) fall back to their constraint-applied
+  // seed — already set above, nothing to do.
 
   // ---- Project duration: max earliestEnd ----
   let projectEnd = '';
@@ -174,14 +184,25 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   while (backwardQueue.length > 0) {
     const cur = backwardQueue.shift()!;
     const curLatestStart = latestStart.get(cur)!;
+    const curLatestEnd = latestEnd.get(cur)!;
     for (const predId of predecessorsOf.get(cur) ?? []) {
-      // The predecessor's latest end is min(current latestEnd, successor.latestStart - lag - 1)
       const successor = byId.get(cur)!;
       const dep = successor.dependencies.find((d) => d.targetId === predId)!;
-      const implied = addLag(curLatestStart, -(1 + dep.lag), cal);
+      const pred = byId.get(predId)!;
+      // Mirror of the forward semantics per edge type, clamped at the project
+      // end — with SS/SF edges a predecessor's end may otherwise be capped
+      // only by a short successor and drift past the project horizon.
+      const rawImplied = impliedPredecessorEnd(
+        dep.type,
+        dep.lag,
+        curLatestStart,
+        curLatestEnd,
+        pred.duration,
+        cal,
+      );
+      const implied = projectEnd && rawImplied > projectEnd ? projectEnd : rawImplied;
       const current = latestEnd.get(predId);
       if (!current || implied < current) {
-        const pred = byId.get(predId)!;
         // G18: re-apply the predecessor's backward constraint against the new implied end.
         const end = applyBackwardConstraint(pred, implied, cal);
         latestEnd.set(predId, end);
@@ -195,10 +216,8 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
   // Fill any unprocessed (defensive — should match forward coverage).
   for (const id of ids) {
     if (!latestEnd.has(id)) {
-      const task = byId.get(id)!;
       latestEnd.set(id, earliestEnd.get(id)!);
       latestStart.set(id, earliestStart.get(id)!);
-      void task;
     }
   }
 
@@ -232,6 +251,61 @@ export function computeCriticalPath(tasks: ReadonlyArray<Task>, calendar: Calend
 }
 
 // ---- Calendar helpers ----
+
+/**
+ * Forward-pass edge semantics: the earliest START a dependency type allows for
+ * a successor of `duration` working days, given the predecessor's earliest
+ * start/end. Mirrors `computeImpliedStart`/`computeImpliedEnd` in schedule.ts.
+ */
+function impliedSuccessorStart(
+  type: DependencyType,
+  lag: number,
+  predEarliestStart: string,
+  predEarliestEnd: string,
+  successorDuration: number,
+  cal: ResolvedCalendar,
+): string {
+  switch (type) {
+    case 'FS':
+      return addLag(predEarliestEnd, 1 + lag, cal);
+    case 'SS':
+      return addLag(predEarliestStart, lag, cal);
+    case 'FF':
+      // succ.end ≥ pred.end + lag → back-calculate the start.
+      return startFromEnd(addLag(predEarliestEnd, lag, cal), successorDuration, cal);
+    case 'SF':
+      // succ.end ≥ pred.start + lag → back-calculate the start.
+      return startFromEnd(addLag(predEarliestStart, lag, cal), successorDuration, cal);
+  }
+}
+
+/**
+ * Backward-pass mirror: the latest END a dependency type allows for a
+ * predecessor of `duration` working days, given the successor's latest
+ * start/end.
+ */
+function impliedPredecessorEnd(
+  type: DependencyType,
+  lag: number,
+  successorLatestStart: string,
+  successorLatestEnd: string,
+  predecessorDuration: number,
+  cal: ResolvedCalendar,
+): string {
+  switch (type) {
+    case 'FS':
+      return addLag(successorLatestStart, -(1 + lag), cal);
+    case 'SS':
+      // pred.LS ≤ succ.LS − lag → a START cap, so the END cap walks FORWARD
+      // by the predecessor's duration.
+      return endFromStart(addLag(successorLatestStart, -lag, cal), predecessorDuration, cal);
+    case 'FF':
+      return addLag(successorLatestEnd, -lag, cal);
+    case 'SF':
+      // succ.end ≥ pred.start + lag → pred.LS ≤ succ.LE − lag → END cap forward.
+      return endFromStart(addLag(successorLatestEnd, -lag, cal), predecessorDuration, cal);
+  }
+}
 
 /**
  * Apply a task's constraint to its forward-pass earliest start (G18).

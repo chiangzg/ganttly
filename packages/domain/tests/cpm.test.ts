@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { computeCriticalPath } from '../src/cpm';
+import { computeImpliedStart, computeImpliedEnd } from '../src/schedule';
 import { getCalendar } from '@ganttly/calendar-data';
+import { resolveCalendar } from '../src/calendar';
 import type { Task, Dependency } from '@ganttly/schema';
 
 const calendar = getCalendar('zh-CN');
+const cal = resolveCalendar(calendar);
 
 function task(id: string, start: string, duration: number, deps: Dependency[] = []): Task {
   return {
@@ -87,18 +90,149 @@ describe('computeCriticalPath — basics', () => {
   });
 });
 
-describe('computeCriticalPath — diamond (SS+FF convergence)', () => {
-  it('handles SS / FF dependencies', () => {
-    // a (5d). b depends on a via SS lag 0 → b starts when a starts.
-    // c depends on b via FF lag 0 → c ends when b ends.
+describe('computeCriticalPath — dependency types (FS/SS/FF/SF)', () => {
+  it('SS: successor is released by the predecessor START, not its end (no inversion)', () => {
+    // a (10d, 01-05…01-16). b SS a lag 2, dur 2 → b starts 01-07, ends 01-08.
+    // a ends later → a is critical; b has 6 working days of float. The old
+    // FS-only bug computed b from a's END (01-21) and inverted the path.
     const tasks = [
-      task('a', '2026-01-05', 5),
-      task('b', '2026-01-05', 10, [{ targetId: 'a', type: 'SS', lag: 0 }]),
-      task('c', '2026-01-05', 1, [{ targetId: 'b', type: 'FF', lag: 0 }]),
+      task('a', '2026-01-05', 10),
+      task('b', '2026-01-07', 2, [{ targetId: 'a', type: 'SS', lag: 2 }]),
     ];
     const r = computeCriticalPath(tasks, calendar);
-    // The longest chain is a → b → c; all critical.
-    expect(r.criticalTaskIds.size).toBeGreaterThanOrEqual(2);
+    expect(r.earliestStart.get('b')).toBe('2026-01-07');
+    expect(r.earliestEnd.get('b')).toBe('2026-01-08');
+    expect(r.criticalTaskIds.has('a')).toBe(true);
+    expect(r.criticalTaskIds.has('b')).toBe(false);
+    expect(r.totalFloat.get('b')).toBe(6);
+  });
+
+  it('FF: successor END is pinned to predecessor END + lag', () => {
+    // a (5d, 01-05…01-09). b FF a lag 0, dur 3 → b must end 01-09 → starts 01-07.
+    const tasks = [
+      task('a', '2026-01-05', 5),
+      task('b', '2026-01-07', 3, [{ targetId: 'a', type: 'FF', lag: 0 }]),
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.earliestEnd.get('b')).toBe('2026-01-09');
+    expect(r.earliestStart.get('b')).toBe('2026-01-07');
+    // Both end 01-09 → both critical.
+    expect(r.criticalTaskIds.has('a')).toBe(true);
+    expect(r.criticalTaskIds.has('b')).toBe(true);
+  });
+
+  it('SF: successor END is released by the predecessor START + lag', () => {
+    // a (5d, starts 01-05). b SF a lag 3, dur 2 → b ends ≥ 01-08 → starts 01-07.
+    // a still ends later (01-09) → a critical, b float 1.
+    const tasks = [
+      task('a', '2026-01-05', 5),
+      task('b', '2026-01-07', 2, [{ targetId: 'a', type: 'SF', lag: 3 }]),
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.earliestStart.get('b')).toBe('2026-01-07');
+    expect(r.earliestEnd.get('b')).toBe('2026-01-08');
+    expect(r.criticalTaskIds.has('a')).toBe(true);
+    expect(r.criticalTaskIds.has('b')).toBe(false);
+    expect(r.totalFloat.get('b')).toBe(1);
+  });
+
+  it('backward pass mirrors SS: predecessor LS ≤ successor LS − lag', () => {
+    // b SS-depends on a (a is the predecessor), c FS-depends on b. c's LS
+    // (01-12) caps b's LS at 01-05, which caps a's LS at 01-05 too → the 10-day
+    // a has zero float and is critical.
+    const tasks = [
+      task('a', '2026-01-05', 10),
+      task('b', '2026-01-05', 5, [{ targetId: 'a', type: 'SS', lag: 0 }]),
+      task('c', '2026-01-12', 5, [{ targetId: 'b', type: 'FS', lag: 0 }]),
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.latestEnd.get('b')).toBe('2026-01-09');
+    expect(r.latestStart.get('a')!).toBe('2026-01-05');
+    expect(r.criticalTaskIds.has('a')).toBe(true);
+    expect(r.criticalTaskIds.has('b')).toBe(true);
+    expect(r.criticalTaskIds.has('c')).toBe(true);
+  });
+
+  it('backward pass mirrors FF: predecessor LE ≤ successor LE − lag', () => {
+    // b FF-depends on a (a is the predecessor), c FS-depends on b. c's LS
+    // (01-12) caps b's LE at 01-09, which caps a's LE at 01-09 → zero float.
+    const tasks = [
+      task('a', '2026-01-05', 5),
+      task('b', '2026-01-05', 5, [{ targetId: 'a', type: 'FF', lag: 0 }]),
+      task('c', '2026-01-12', 5, [{ targetId: 'b', type: 'FS', lag: 0 }]),
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.latestEnd.get('a')).toBe('2026-01-09');
+    expect(r.criticalTaskIds.has('a')).toBe(true);
+    expect(r.criticalTaskIds.has('b')).toBe(true);
+    expect(r.criticalTaskIds.has('c')).toBe(true);
+  });
+
+  it('implied dates agree with the scheduling engine (schedule.ts) for all four types', () => {
+    // Seed each successor far in the past so the CPM start is purely
+    // dependency-implied, then compare against computeImpliedStart/End.
+    const cases: Array<Dependency> = [
+      { targetId: 'a', type: 'FS', lag: 1 },
+      { targetId: 'a', type: 'SS', lag: 2 },
+      { targetId: 'a', type: 'FF', lag: 1 },
+      { targetId: 'a', type: 'SF', lag: 2 },
+    ];
+    for (const dep of cases) {
+      const a = task('a', '2026-01-05', 5);
+      const b = task('b', '2025-01-01', 3, [dep]);
+      const r = computeCriticalPath([a, b], calendar);
+      if (dep.type === 'FS' || dep.type === 'SS') {
+        expect(r.earliestStart.get('b'), dep.type).toBe(computeImpliedStart(a, dep, cal));
+      } else {
+        expect(r.earliestEnd.get('b'), dep.type).toBe(computeImpliedEnd(a, dep, cal));
+      }
+    }
+  });
+});
+
+describe('computeCriticalPath — as-scheduled anchoring', () => {
+  it('a manually delayed successor drives the project end and is critical', () => {
+    // a 01-05 5d; b FS a but manually drawn at 01-26 (3 weeks later). The plan
+    // as drawn ends 01-27: b is critical, a keeps 14wd float. The old forward
+    // pass ignored b's drawn start entirely.
+    const tasks = [
+      task('a', '2026-01-05', 5),
+      task('b', '2026-01-26', 2, [{ targetId: 'a', type: 'FS', lag: 0 }]),
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.earliestStart.get('b')).toBe('2026-01-26');
+    expect(r.earliestEnd.get('b')).toBe('2026-01-27');
+    expect(r.criticalTaskIds.has('b')).toBe(true);
+    expect(r.criticalTaskIds.has('a')).toBe(false);
+    // a must FINISH by 01-23 to release b on 01-26 → its latest START is
+    // 01-19 (5d duration) → float = 01-05…01-19 = 11wd − 1 = 10.
+    expect(r.totalFloat.get('a')).toBe(10);
+  });
+
+  it('a manually EARLY successor is pulled forward by the network (violations are not rewarded)', () => {
+    // b drawn at 01-05 violates its FS link (a ends 01-09 → implies 01-12).
+    // The network wins: ES(b)=01-12; the drawn-early date must not widen the
+    // project end.
+    const tasks = [
+      task('a', '2026-01-05', 5),
+      task('b', '2026-01-05', 2, [{ targetId: 'a', type: 'FS', lag: 0 }]),
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.earliestStart.get('b')).toBe('2026-01-12');
+    expect(r.earliestEnd.get('b')).toBe('2026-01-13');
+  });
+
+  it('an FNLT-violating task clamps negative float to zero and stays critical', () => {
+    // Drawn 01-05…01-09 but FNLT 01-07: latestEnd 01-07 < earliestEnd 01-09.
+    const tasks = [
+      {
+        ...task('a', '2026-01-05', 5),
+        constraints: { type: 'finishNoLaterThan' as const, date: '2026-01-07' },
+      },
+    ];
+    const r = computeCriticalPath(tasks, calendar);
+    expect(r.totalFloat.get('a')).toBe(0);
+    expect(r.criticalTaskIds.has('a')).toBe(true);
   });
 });
 
