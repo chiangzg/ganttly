@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ganttly 服务端模式系统总览",
+    "locale": "zh-CN",
+    "output": "server-mode.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "save-path",
+        "label": "保存主链路",
+        "focus": ["web-spa", "auth", "rest-api", "service-kernel", "postgres"],
+        "note": "从浏览器乐观更新到单事务落库的写路径。"
+      },
+      {
+        "id": "mcp-path",
+        "label": "MCP 接入",
+        "focus": ["mcp-client", "mcp-endpoint", "service-kernel", "postgres"],
+        "note": "PAT 直连 Streamable HTTP，写操作复用同一事务内核。"
+      },
+      {
+        "id": "sync-loop",
+        "label": "实时同步",
+        "focus": ["postgres", "outbox-sse", "web-spa"],
+        "note": "事务提交写入 outbox，经 SSE 扇出给其他客户端。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "github-oauth",
+      "type": "external",
+      "label": "GitHub OAuth",
+      "sublabel": "授权码换发后 token 即弃",
+      "pos": [124, 74],
+      "size": [172, 62]
+    },
+    {
+      "id": "web-spa",
+      "type": "frontend",
+      "label": "浏览器 Web SPA",
+      "sublabel": "乐观更新 + debounce 保存",
+      "pos": [447, 66],
+      "size": [198, 98],
+      "tag": "会话 cookie"
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "认证层",
+      "sublabel": "ganttly_session / PAT SHA-256",
+      "pos": [124, 232],
+      "size": [172, 74]
+    },
+    {
+      "id": "rest-api",
+      "type": "backend",
+      "label": "Fastify REST API",
+      "sublabel": "/api/v1 :3001 · CRUD / 归档 / 恢复",
+      "pos": [396, 272],
+      "size": [200, 94],
+      "tag": "POST 强制幂等键"
+    },
+    {
+      "id": "service-kernel",
+      "type": "backend",
+      "label": "单事务写内核",
+      "sublabel": "ProjectApplicationService",
+      "pos": [690, 256],
+      "size": [214, 104],
+      "tag": "行锁 + If-Match + 幂等重放"
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL 16",
+      "sublabel": "Drizzle ORM · JSONB 文档聚合",
+      "pos": [1014, 264],
+      "size": [178, 90]
+    },
+    {
+      "id": "mcp-client",
+      "type": "external",
+      "label": "MCP 客户端",
+      "sublabel": "ZCode 等 AI 工具",
+      "pos": [116, 434],
+      "size": [168, 64]
+    },
+    {
+      "id": "mcp-endpoint",
+      "type": "backend",
+      "label": "/mcp Streamable HTTP",
+      "sublabel": "无状态每请求 · 11 个工具",
+      "pos": [396, 420],
+      "size": [204, 86],
+      "tag": "Host 白名单"
+    },
+    {
+      "id": "outbox-sse",
+      "type": "messagebus",
+      "label": "Outbox → SSE",
+      "sublabel": "/api/v1/events 变更流",
+      "pos": [690, 402],
+      "size": [214, 92],
+      "tag": "250ms SKIP LOCKED"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Fastify 进程 :3001 · Docker 单容器（同源托管 SPA）",
+      "wraps": ["rest-api", "mcp-endpoint", "service-kernel", "outbox-sse", "auth"],
+      "pad": 30
+    },
+    {
+      "kind": "region",
+      "label": "docker-compose · 一次性 migrate 先行",
+      "wraps": ["postgres"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "c-login",
+      "from": "web-spa",
+      "to": "github-oauth",
+      "fromSide": "left",
+      "toSide": "right",
+      "label": "OAuth 登录跳转",
+      "labelAt": [370, 104]
+    },
+    {
+      "id": "c-callback",
+      "from": "github-oauth",
+      "to": "auth",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "code 换会话 cookie",
+      "labelAt": [210, 178]
+    },
+    {
+      "id": "c-save",
+      "from": "web-spa",
+      "to": "rest-api",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "variant": "emphasis",
+      "label": "HTTPS fetch · 会话 cookie"
+    },
+    {
+      "id": "c-principal",
+      "from": "auth",
+      "to": "rest-api",
+      "fromSide": "right",
+      "toSide": "left",
+      "variant": "security",
+      "label": "解密 principal"
+    },
+    {
+      "id": "c-rest-kernel",
+      "from": "rest-api",
+      "to": "service-kernel",
+      "label": "领域命令 / If-Match PUT",
+      "labelAt": [643, 234]
+    },
+    {
+      "id": "c-mcp-in",
+      "from": "mcp-client",
+      "to": "mcp-endpoint",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "Bearer PAT · Streamable HTTP",
+      "labelAt": [308, 408]
+    },
+    {
+      "id": "c-mcp-kernel",
+      "from": "mcp-endpoint",
+      "to": "service-kernel",
+      "label": "工具调用 · task:write scope"
+    },
+    {
+      "id": "c-txn",
+      "from": "service-kernel",
+      "to": "postgres",
+      "variant": "emphasis",
+      "label": "BEGIN→COMMIT 单事务写"
+    },
+    {
+      "id": "c-poll",
+      "from": "postgres",
+      "to": "outbox-sse",
+      "variant": "dashed",
+      "label": "250ms SKIP LOCKED 轮询"
+    },
+    {
+      "id": "c-sse-push",
+      "from": "outbox-sse",
+      "to": "web-spa",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "auto",
+      "via": [
+        [797, 568],
+        [36, 568],
+        [36, 36],
+        [546, 36]
+      ],
+      "variant": "dashed",
+      "label": "SSE 推送 project.updated 等"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "接入与认证",
+      "items": [
+        "浏览器仅持 HttpOnly 会话 cookie",
+        "Bearer PAT 仅用于 /mcp",
+        "OAuth 回调即弃 token，自动建工作区"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "写路径 · Web 与 MCP 同内核",
+      "items": [
+        "五个写操作强制 Idempotency-Key",
+        "FOR UPDATE 行锁 + If-Match 校验",
+        "同事务：覆写 / revision+1 / 审计"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "读路径与多端同步",
+      "items": [
+        "GET 返 ETag 快照；归档＝软删除",
+        "Outbox 250ms 轮询后 SSE 扇出",
+        "本页脏时亮横幅，净则静默重载"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "部署形态",
+      "items": ["Docker 单容器同源托管 SPA/API", "compose：postgres / migrate / server"]
+    }
+  ]
+}
