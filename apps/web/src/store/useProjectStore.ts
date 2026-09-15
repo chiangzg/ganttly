@@ -74,6 +74,17 @@ export interface SaveState {
   error?: string;
 }
 
+/**
+ * What {@link ProjectStoreState.handleRemoteChange} did with one remote change
+ * notification (spec §11.3):
+ *  - `ignored`  — already incorporated locally, so there is nothing to do. This
+ *    is the common case: the SSE echo of this client's own save;
+ *  - `reloaded` — the local copy was clean and was re-fetched (case a);
+ *  - `flagged`  — unsaved local edits were kept and the "remote has updates"
+ *    banner was raised (case b).
+ */
+export type RemoteChangeOutcome = 'ignored' | 'reloaded' | 'flagged';
+
 interface ProjectStoreState {
   file: GanttlyFile;
   repo: ProjectRepository | null;
@@ -99,6 +110,17 @@ interface ProjectStoreState {
    * "remote has updates" banner when the user explicitly reloads (case b).
    */
   reloadFromRemote(): Promise<boolean>;
+  /**
+   * Apply the spec §11.3 policy to ONE remote change notification for the open
+   * project (`ref` is the ref the caller matched, e.g. from an SSE event).
+   *
+   * The project's own save produces an SSE echo that is indistinguishable from
+   * a foreign change by `dirty` alone (it can arrive while the PUT is still in
+   * flight), so the decision waits for any in-flight save to settle and then
+   * compares the event revision with the local one. See the implementation for
+   * the full ordering.
+   */
+  handleRemoteChange(ref: ProjectRef, eventRevision?: string): Promise<RemoteChangeOutcome>;
   setRemoteUpdateAvailable(value: boolean): void;
 
   // Command dispatch (also pushes onto undo stack)
@@ -152,6 +174,18 @@ function scheduleSave(ref: ProjectRef | null): void {
     const state = useProjectStore.getState();
     if (state.activeProjectRef && refEqual(state.activeProjectRef, ref)) void state.save();
   }, 500);
+}
+
+/**
+ * Parse a revision into a comparable number. Revisions travel as strings
+ * (REST contract) but are monotonically increasing per project. `null` means
+ * "not comparable" — callers then fall back to the conservative behaviour
+ * (treat the event as a foreign change).
+ */
+function revisionNumber(value: string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /**
@@ -306,21 +340,42 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     if (!ref || isLocalRef(ref)) return false;
     const repo = resolveRepoForRef(ref, localRepo);
     if (!repo) return false;
+    // Whether the user asked for this reload while already dirty (the banner's
+    // "重新加载" button discards those edits by design). Only edits that appear
+    // WHILE the snapshot is in flight must never be dropped — see below.
+    const dirtyAtStart = get().dirty;
     const generation = ++loadGeneration;
     clearSaveTimer();
     try {
       const snapshot = await repo.loadProject(ref.projectId);
       if (generation !== loadGeneration) return false;
+      const current = get();
+      if (!current.activeProjectRef || !refEqual(current.activeProjectRef, ref)) return false;
       if (!snapshot || snapshot.summary.deletedAt) {
         set({ loadState: 'missing', remoteUpdateAvailable: false });
         return false;
       }
+      // (1) An edit landed while the snapshot was in flight: applying it would
+      // silently discard that edit and (because dirty is forced to false) never
+      // save it either. Keep the local document, re-arm the debounce we just
+      // cancelled, and raise the banner so the skipped remote change is not lost.
+      if (current.dirty && !dirtyAtStart) {
+        set({ remoteUpdateAvailable: true });
+        scheduleSave(ref);
+        return false;
+      }
+      // (2) A save landed while the snapshot was in flight: the fetched
+      // revision is already behind the local one, so adopting it would move the
+      // revision backwards and make the next PUT conflict. Keep the local copy.
+      const fetched = revisionNumber(snapshot.revision);
+      const local = revisionNumber(current.revision);
+      if (fetched !== null && local !== null && fetched < local) return false;
       // loadProject() overlays the per-device localStorage cache, which lags
       // the live scroll position (scrolling never writes the cache) — keep the
       // live viewState so a remote reload doesn't jump the view to the top.
       const normalized = withCalendar({
         ...snapshot.file,
-        viewState: get().file.viewState,
+        viewState: current.file.viewState,
       });
       set({
         activeProjectRef: ref,
@@ -341,6 +396,45 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       }
       return false;
     }
+  },
+
+  async handleRemoteChange(ref, eventRevision) {
+    // Remote-only (the SSE handler never runs for a local scope, so this guard
+    // only makes the invariant structural).
+    if (isLocalRef(ref)) return 'ignored';
+
+    // A save of ours may still be in flight, and its SSE echo can reach the
+    // browser before the PUT response is processed. At that instant `revision`
+    // has not advanced yet and the event looks exactly like a foreign change —
+    // waiting for the save to settle lets the revision comparison below
+    // recognise it. A save that failed or lost its response leaves the
+    // revision where it was, so the event is then correctly treated as remote
+    // (spec §11.3 case b).
+    const inFlight = savePromise;
+    if (inFlight) await inFlight.catch(() => undefined);
+
+    const state = get();
+    if (!state.activeProjectRef || !refEqual(state.activeProjectRef, ref)) return 'ignored';
+    // Still loading (or failed): never race/steal loadProject()'s state. The
+    // load itself delivers a snapshot at least as new as the event.
+    if (state.loadState !== 'ready') return 'ignored';
+    const incoming = revisionNumber(eventRevision);
+    const local = revisionNumber(state.revision);
+    // The local copy already covers this revision: the event is the echo of a
+    // write this client made. Nothing to reload, nothing to warn about — this
+    // is what keeps an ordinary edit from raising the banner and from wiping
+    // the undo history with a redundant full reload.
+    if (incoming !== null && local !== null && incoming <= local) return 'ignored';
+
+    if (!state.dirty) {
+      const reloaded = await get().reloadFromRemote();
+      if (reloaded) return 'reloaded';
+      // The reload may have refused to overwrite edits that landed mid-fetch —
+      // report that as `flagged`, matching the banner the store just raised.
+      return get().remoteUpdateAvailable ? 'flagged' : 'ignored';
+    }
+    state.setRemoteUpdateAvailable(true);
+    return 'flagged';
   },
 
   async flushPendingSave() {

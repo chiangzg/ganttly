@@ -3,15 +3,23 @@
  *
  * Opens one SSE stream for the active remote+authenticated scope and dispatches
  * events to the project/catalog stores:
+ *  - current project, already incorporated locally (the echo of this client's
+ *    own save) → ignored, so an ordinary edit neither raises the banner nor
+ *    triggers a redundant full reload;
  *  - current project, clean → reload snapshot + reset history (case a);
  *  - current project, dirty → raise the "remote has updates" flag (case b);
  *  - any other project → debounced catalog refresh (case c).
+ *
+ * The event/revision decision lives in
+ * {@link useProjectStore.getState().handleRemoteChange} so it is testable
+ * without a stream.
  *
  * On `resync_required` the cursor is unusable, so the stream is closed and a
  * fresh one (no `Last-Event-ID`) is reopened after the client re-fetches state.
  * Local scope and unauthenticated remote scopes keep no stream.
  */
 import { useEffect, useRef } from 'react';
+import type { ProjectEvent } from '@ganttly/api-contract';
 import { createEventStream, type RemoteEventStream } from '@/data/sseClient';
 import { isLocalRef, refEqual, type ProjectRef } from '@/data/projectRef';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -48,16 +56,22 @@ export function useRemoteEvents(): void {
       }, REFRESH_DEBOUNCE_MS);
     };
 
-    const handleEvent = (projectId: string | undefined) => {
+    const handleEvent = (event: ProjectEvent) => {
       const ps = useProjectStore.getState();
       const current = ps.activeProjectRef;
       const isCurrent =
         !!current &&
-        !!projectId &&
-        refEqual(current, { instanceId, workspaceId, projectId } satisfies ProjectRef);
+        !!event.projectId &&
+        refEqual(current, {
+          instanceId,
+          workspaceId,
+          projectId: event.projectId,
+        } satisfies ProjectRef);
       if (isCurrent) {
-        if (!ps.dirty) void ps.reloadFromRemote();
-        else ps.setRemoteUpdateAvailable(true);
+        // Revision-aware: the store ignores the echo of this client's own save
+        // (and any event the local copy already covers) instead of mistaking it
+        // for a foreign change.
+        void ps.handleRemoteChange(current, event.revision);
       } else {
         scheduleRefresh();
       }
@@ -67,7 +81,7 @@ export function useRemoteEvents(): void {
       streamRef.current = createEventStream({
         baseUrl: instance.baseUrl,
         workspaceId,
-        onEvent: (event) => handleEvent(event.projectId),
+        onEvent: handleEvent,
         onResync: () => {
           // Cursor unusable: re-fetch state, then reset the stream cursor.
           void useProjectCatalogStore.getState().refresh();
