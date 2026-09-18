@@ -24,6 +24,7 @@ import {
 } from '../layout';
 import { buildTree, flattenVisible } from './tree';
 import { computeProjectCriticalPath } from '@/lib/criticalPath';
+import { computeDependencyClosure } from '@/lib/dependencyGraph';
 import { computeAllRollups } from '@/lib/summary';
 import { checkConstraintConflicts } from '@/lib/schedule';
 import { resolveCalendar, effectiveTaskDays } from '@/lib/calendar';
@@ -114,6 +115,27 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
   // Detect constraint-vs-dependency conflicts (G4 — for arrow/row highlighting).
   const conflictIds = checkConstraintConflicts(file.tasks, cal);
 
+  // Dependency-chain highlight (chain spec §4): active only when exactly one
+  // task is selected — a multi-select must not light up one member's chain.
+  // The sole selected id IS the anchor (`selectSingle`/`toggleSelected` keep
+  // them equal), so read it from the set and never from the persisted
+  // `viewState.selectedTaskId`, which survives reloads while the ephemeral
+  // selection does not.
+  const selection = opts.selectedTaskIds ?? new Set<string>();
+  const chainOrigin = selection.size === 1 ? (selection.values().next().value ?? null) : null;
+  let depChain: Scene['depChain'];
+  if (chainOrigin) {
+    const closure = computeDependencyClosure(file.tasks, chainOrigin);
+    if (closure) {
+      depChain = {
+        originId: closure.originId,
+        upstream: closure.upstream,
+        downstream: closure.downstream,
+        relatedSummaryIds: collectAncestorSummaries(file.tasks, closure),
+      };
+    }
+  }
+
   // Baseline comparison prep (spec §6.4). Build the snapshot map ONCE (O(n))
   // and look up by id inside toTaskRow — never `baseline.tasks.find()` per row.
   // Effective current values (summary rollup applied) are shared between the
@@ -153,7 +175,7 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
     ),
   );
 
-  const arrows = computeArrows(file, opts, visible, criticalIds, conflictIds);
+  const arrows = computeArrows(file, opts, visible, criticalIds, conflictIds, depChain);
 
   return {
     zoom: file.viewState.zoom,
@@ -171,7 +193,37 @@ export function assembleScene(file: GanttlyFile, opts: AssembleOptions): Scene {
     hasActiveBaseline,
     selectedTaskId: file.viewState.selectedTaskId,
     selectedTaskIds: opts.selectedTaskIds ?? new Set<string>(),
+    depChain,
   };
+}
+
+/**
+ * Ancestor summaries of every chain member (chain spec §3.5): those summary
+ * bars stay at full opacity under the spotlight dimming so the chain's WBS
+ * context remains readable. Walks each member's parentId chain; the `out.has`
+ * check terminates malformed parent cycles.
+ */
+function collectAncestorSummaries(
+  tasks: ReadonlyArray<Task>,
+  closure: {
+    originId: string;
+    upstream: ReadonlyMap<string, number>;
+    downstream: ReadonlyMap<string, number>;
+  },
+): Set<string> {
+  const parentOf = new Map(tasks.map((t) => [t.id, t.parentId]));
+  const out = new Set<string>();
+  const mark = (id: string) => {
+    let parent = parentOf.get(id) ?? null;
+    while (parent && !out.has(parent)) {
+      out.add(parent);
+      parent = parentOf.get(parent) ?? null;
+    }
+  };
+  mark(closure.originId);
+  for (const id of closure.upstream.keys()) mark(id);
+  for (const id of closure.downstream.keys()) mark(id);
+  return out;
 }
 
 function toTaskRow(
@@ -262,6 +314,7 @@ function computeArrows(
   visible: ReturnType<typeof flattenVisible>,
   criticalIds: ReadonlySet<string>,
   conflictIds: ReadonlySet<string>,
+  depChain: Scene['depChain'],
 ): ArrowSpec[] {
   const originDate = originDateFor(file, opts);
   const zoom = file.viewState.zoom;
@@ -354,10 +407,38 @@ function computeArrows(
         isCritical: criticalIds.has(successor.id) && criticalIds.has(predecessor.id),
         // G4: flag arrows INTO a successor whose constraint conflicts with deps.
         isConflict: conflictIds.has(successor.id),
+        chainRole: arrowChainRole(depChain, predecessor.id, successor.id),
       });
     }
   }
   return out;
+}
+
+/**
+ * Induced-subgraph membership test (chain spec §5): an edge pred→succ lies on
+ * the downstream chain iff its tail is reachable-from-origin (or IS the
+ * origin) and its head is a transitive successor; mirrored for upstream. Any
+ * such edge necessarily lies on an origin-passing path. Downstream wins the
+ * (pathological) both-roles case in cyclic legacy data — the future direction
+ * is the one the user is usually tracing.
+ */
+function arrowChainRole(
+  depChain: Scene['depChain'],
+  predecessorId: string,
+  successorId: string,
+): 'upstream' | 'downstream' | undefined {
+  if (!depChain) return undefined;
+  const { originId, upstream, downstream } = depChain;
+  if (
+    (predecessorId === originId || downstream.has(predecessorId)) &&
+    downstream.has(successorId)
+  ) {
+    return 'downstream';
+  }
+  if ((successorId === originId || upstream.has(successorId)) && upstream.has(predecessorId)) {
+    return 'upstream';
+  }
+  return undefined;
 }
 
 function portOffset(index: number, count: number): number {

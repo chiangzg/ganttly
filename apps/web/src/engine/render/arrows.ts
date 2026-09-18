@@ -1,13 +1,26 @@
 /**
- * Dependency arrow renderer (PRD §5.2, M2.17).
+ * Dependency arrow renderer (PRD §5.2, M2.17; chain visuals: dependency-chain
+ * spec §3).
  *
- * Each arrow is drawn as a rounded orthogonal path with an arrowhead. Arrow color
- * reflects critical-path status when `showCriticalPath` is on.
+ * Each arrow is drawn as a rounded orthogonal path with an arrowhead. Arrow
+ * color reflects critical-path status when `showCriticalPath` is on, and the
+ * dependency-chain highlight when one is active (chain spec §5.2 priority:
+ * conflict orange > chain color > critical red > muted grey; conflicts are
+ * never dimmed by the spotlight — errors must stay visible).
+ *
+ * Chain styling:
+ * - upstream (前置·过去): emerald solid line over a soft wide underglow —
+ *   settled, no motion (chain spec §3.1).
+ * - downstream (后续·未来): cyan line + bright marching dashes + a glow pulse
+ *   traveling tail→head, staggered by BFS depth so the chain lights up
+ *   level-by-level away from the origin (chain spec §3.2). Without an
+ *   animation clock (prefers-reduced-motion / static render) the dashes stay
+ *   fixed — still distinct from upstream.
  *
  * ArrowSpec carries pre-computed endpoint positions; the renderer routes around
  * the visible task rows so lines do not cut through bars or milestones.
  */
-import type { Scene, ThemeColors } from './types';
+import type { RenderAnimation, Scene, ThemeColors } from './types';
 import {
   COLUMN_WIDTH,
   HEADER_HEIGHT,
@@ -21,16 +34,35 @@ import { MILESTONE_RADIUS } from './geometry';
 const ARROW_HEAD_SIZE = 6;
 const ROUTE_GAP = 8;
 const CHANNEL_GAP = 6;
+/** Conflict orange (G4) — the only hard-coded edge color; never dimmed. */
+const CONFLICT_COLOR = '#f97316';
+const CHAIN_LINE_WIDTH = 2;
+const UPSTREAM_GLOW_WIDTH = 5;
+/** Marching dash overlay on downstream chain edges (chain spec §3.2). */
+const FLOW_DASH: readonly [number, number] = [1.5, 9];
+/** One glow pulse takes this long to travel one edge. */
+const PULSE_CYCLE_MS = 1600;
+/** Each BFS depth level starts its pulses this much later (层层传递). */
+const PULSE_STAGGER_MS = 220;
 type Side = 'left' | 'right';
 export interface ArrowRoutePoint {
   x: number;
   y: number;
 }
 
+interface ArrowStyle {
+  color: string;
+  width: number;
+  /** Spotlight alpha for non-chain edges; conflict/chain edges stay at 1. */
+  alpha: number;
+  role?: 'upstream' | 'downstream';
+}
+
 export function renderArrows(
   ctx: CanvasRenderingContext2D,
   scene: Scene,
   theme: ThemeColors,
+  animation?: RenderAnimation,
 ): void {
   // Clip arrows to the content area below the header so routes
   // and arrowheads never overlap the month/day header row.
@@ -40,30 +72,147 @@ export function renderArrows(
   ctx.clip();
 
   for (const arrow of scene.arrows) {
-    const isCritical = scene.showCriticalPath && arrow.isCritical;
-    // G4: conflict arrows are orange, taking priority over critical-path red.
-    const isConflict = arrow.isConflict;
-    const color = isConflict ? '#f97316' : isCritical ? theme.critical : theme.fgMuted;
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = isConflict || isCritical ? 2 : 1;
-    drawArrowPath(ctx, arrow, scene);
+    const style = resolveArrowStyle(arrow, scene, theme);
+    const points = computeArrowRoute(arrow, scene);
+    ctx.strokeStyle = style.color;
+    ctx.fillStyle = style.color;
+    ctx.lineWidth = style.width;
+    ctx.globalAlpha = style.alpha;
+
+    if (style.role === 'upstream') {
+      // Settled underglow first (wide, faint), then the crisp solid line.
+      ctx.save();
+      ctx.globalAlpha = style.alpha * 0.18;
+      ctx.lineWidth = UPSTREAM_GLOW_WIDTH;
+      traceArrowPath(ctx, points);
+      ctx.stroke();
+      ctx.restore();
+      ctx.lineWidth = style.width;
+      traceArrowPath(ctx, points);
+      ctx.stroke();
+      drawArrowhead(ctx, arrow, points, ARROW_HEAD_SIZE + 1);
+    } else if (style.role === 'downstream') {
+      traceArrowPath(ctx, points);
+      ctx.stroke();
+      drawArrowhead(ctx, arrow, points, ARROW_HEAD_SIZE + 1);
+      drawFlowOverlay(ctx, points, animation);
+      if (animation && scene.depChain) {
+        const depth = scene.depChain.downstream.get(arrow.toId) ?? 1;
+        drawTravelPulse(ctx, points, depth, animation.now, style.color);
+      }
+    } else {
+      traceArrowPath(ctx, points);
+      ctx.stroke();
+      drawArrowhead(ctx, arrow, points, ARROW_HEAD_SIZE);
+    }
+    ctx.globalAlpha = 1;
   }
 
   ctx.restore();
 }
 
-function drawArrowPath(
-  ctx: CanvasRenderingContext2D,
+/** Edge style resolution — the single precedence table (chain spec §5.2). */
+function resolveArrowStyle(
   arrow: Scene['arrows'][number],
   scene: Scene,
-): void {
-  const toSide = sideFor(arrow.type, 'to');
-  const points = computeArrowRoute(arrow, scene);
-  const finalDir =
-    Math.sign(points[points.length - 1]!.x - points[points.length - 2]!.x) ||
-    (toSide === 'right' ? -1 : 1);
+  theme: ThemeColors,
+): ArrowStyle {
+  // G4: conflict arrows are orange, taking priority over everything else and
+  // never dimmed by the spotlight.
+  if (arrow.isConflict) return { color: CONFLICT_COLOR, width: 2, alpha: 1 };
+  if (arrow.chainRole === 'downstream') {
+    return { color: theme.depDownstream, width: CHAIN_LINE_WIDTH, alpha: 1, role: 'downstream' };
+  }
+  if (arrow.chainRole === 'upstream') {
+    return { color: theme.depUpstream, width: CHAIN_LINE_WIDTH, alpha: 1, role: 'upstream' };
+  }
+  const isCritical = scene.showCriticalPath && arrow.isCritical;
+  if (isCritical) {
+    // Non-chain critical edges stay red but recede under the spotlight.
+    return { color: theme.critical, width: 2, alpha: scene.depChain ? 0.35 : 1 };
+  }
+  return { color: theme.fgMuted, width: 1, alpha: scene.depChain ? 0.15 : 1 };
+}
 
+/**
+ * Bright dashes marching tail→head along a downstream edge. With an animation
+ * clock they flow; without one (prefers-reduced-motion, static renders) they
+ * freeze — the downstream direction stays visually distinct from upstream.
+ */
+function drawFlowOverlay(
+  ctx: CanvasRenderingContext2D,
+  points: ArrowRoutePoint[],
+  animation?: RenderAnimation,
+): void {
+  ctx.save();
+  ctx.lineCap = 'round';
+  if (animation) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash(FLOW_DASH);
+    const period = FLOW_DASH[0] + FLOW_DASH[1];
+    ctx.lineDashOffset = -((animation.now / 45) % period);
+  } else {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([3, 5]);
+  }
+  traceArrowPath(ctx, points);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * A white glow dot traveling the edge tail→head once per cycle, delayed by the
+ * successor's BFS depth so pulses ripple outward level-by-level (chain spec
+ * §3.2). Sin envelope fades the dot in/out at the endpoints.
+ */
+function drawTravelPulse(
+  ctx: CanvasRenderingContext2D,
+  points: ArrowRoutePoint[],
+  depth: number,
+  now: number,
+  color: string,
+): void {
+  const cycle = PULSE_CYCLE_MS;
+  const raw = now - depth * PULSE_STAGGER_MS;
+  const t = (((raw % cycle) + cycle) % cycle) / cycle;
+  const alpha = Math.sin(Math.PI * t);
+  if (alpha <= 0.02) return;
+  const pos = pointAtLength(points, t);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Linear position at fraction `t` (0..1) of the polyline's total length. */
+function pointAtLength(points: ArrowRoutePoint[], t: number): ArrowRoutePoint {
+  const cumulative: number[] = [0];
+  for (let i = 1; i < points.length; i++) {
+    cumulative.push(cumulative[i - 1]! + distance(points[i - 1]!, points[i]!));
+  }
+  const target = t * cumulative[cumulative.length - 1]!;
+  for (let i = 1; i < points.length; i++) {
+    if (cumulative[i]! >= target) {
+      const segment = cumulative[i]! - cumulative[i - 1]!;
+      const local = segment > 0 ? (target - cumulative[i - 1]!) / segment : 0;
+      return {
+        x: points[i - 1]!.x + (points[i]!.x - points[i - 1]!.x) * local,
+        y: points[i - 1]!.y + (points[i]!.y - points[i - 1]!.y) * local,
+      };
+    }
+  }
+  return points[points.length - 1]!;
+}
+
+/** Build the rounded orthogonal path (moveTo + lineTo/quadraticCurveTo). */
+function traceArrowPath(ctx: CanvasRenderingContext2D, points: ArrowRoutePoint[]): void {
   ctx.beginPath();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -86,16 +235,26 @@ function drawArrowPath(
     ctx.lineTo(inPoint.x, inPoint.y);
     ctx.quadraticCurveTo(point.x, point.y, outPoint.x, outPoint.y);
   }
-  ctx.stroke();
+}
 
+function drawArrowhead(
+  ctx: CanvasRenderingContext2D,
+  arrow: Scene['arrows'][number],
+  points: ArrowRoutePoint[],
+  size: number,
+): void {
+  const toSide = sideFor(arrow.type, 'to');
   // Arrowhead follows the final horizontal segment, so it never points into a
   // bar or a milestone when the route approaches from the opposite side.
+  const finalDir =
+    Math.sign(points[points.length - 1]!.x - points[points.length - 2]!.x) ||
+    (toSide === 'right' ? -1 : 1);
   const toX = arrow.toX;
   const toY = arrow.toY;
   ctx.beginPath();
   ctx.moveTo(toX, toY);
-  ctx.lineTo(toX - finalDir * ARROW_HEAD_SIZE, toY - ARROW_HEAD_SIZE / 2);
-  ctx.lineTo(toX - finalDir * ARROW_HEAD_SIZE, toY + ARROW_HEAD_SIZE / 2);
+  ctx.lineTo(toX - finalDir * size, toY - size / 2);
+  ctx.lineTo(toX - finalDir * size, toY + size / 2);
   ctx.closePath();
   ctx.fill();
 }

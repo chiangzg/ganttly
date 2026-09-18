@@ -30,6 +30,10 @@ export interface ThemeColors {
   critical: string;
   /** Neutral reference color for baseline bars (baseline-comparison spec §5.11). */
   baseline: string;
+  /** Dependency-chain upstream (predecessor / past) highlight (chain spec §3.1). */
+  depUpstream: string;
+  /** Dependency-chain downstream (successor / future) highlight (chain spec §3.2). */
+  depDownstream: string;
   todayLine: string;
 }
 
@@ -108,6 +112,13 @@ export interface ArrowSpec {
   isCritical?: boolean;
   /** True when the successor's constraint conflicts with this dependency (G4). */
   isConflict?: boolean;
+  /**
+   * Dependency-chain membership (chain spec §5): 'upstream' when this edge lies
+   * on a path FROM a transitive predecessor of the origin TO the origin;
+   * 'downstream' when it lies on a path from the origin to a transitive
+   * successor. Undefined when no chain is active (single selection absent).
+   */
+  chainRole?: 'upstream' | 'downstream';
 }
 
 /** A single load bar for one resource on one date (P1 feature one). */
@@ -267,6 +278,26 @@ export interface Scene {
    * primary selection stays distinguishable within a multi-selection.
    */
   selectedTaskIds: ReadonlySet<string>;
+  /**
+   * Dependency-chain highlight data (chain spec §4/§5). Present only when
+   * exactly one task is selected. `upstream`/`downstream` map each transitive
+   * predecessor/successor of the origin to its BFS depth (drives the pulse
+   * stagger); the origin itself is in neither map. `relatedSummaryIds` holds
+   * the ancestor summaries of chain members — they stay at full opacity while
+   * unrelated rows are dimmed by the spotlight (chain spec §3.5).
+   */
+  depChain?: {
+    originId: string;
+    upstream: ReadonlyMap<string, number>;
+    downstream: ReadonlyMap<string, number>;
+    relatedSummaryIds: ReadonlySet<string>;
+  };
+}
+
+/** Animation clock threaded through renderScene by the host's rAF loop. */
+export interface RenderAnimation {
+  /** performance.now()-style timestamp in ms. */
+  now: number;
 }
 
 /** The full render options. */

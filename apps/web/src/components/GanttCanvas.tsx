@@ -57,6 +57,7 @@ import { isEditableTarget } from '@/lib/shortcutTarget';
 import { useHolidayHover } from '@/components/useHolidayHover';
 import { useBaselineHover } from '@/components/useBaselineHover';
 import { useTaskHover } from '@/components/useTaskHover';
+import { DependencyChainLegend } from '@/components/DependencyChainLegend';
 import { useTranslation } from 'react-i18next';
 import { DeleteTaskConfirm } from '@/components/DeleteTaskConfirm';
 import type { DependencyType, Task, Baseline } from '@ganttly/schema';
@@ -99,6 +100,30 @@ export function GanttCanvas() {
 
   // Keep a fresh scene ref so pointer handlers can read it without re-binding.
   const sceneRef = useRef<Scene | null>(null);
+
+  // Dependency-chain highlight (chain spec §5.3): legend data + whether the
+  // downstream pulse animation is running. Derived from the assembled scene so
+  // the DOM stays in lockstep with the canvas.
+  const [depLegend, setDepLegend] = useState<{
+    upstreamCount: number;
+    downstreamCount: number;
+  } | null>(null);
+  const [pulseActive, setPulseActive] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+  const renderMetaRef = useRef({ dpr: 1, cssWidth: 0, cssHeight: 0 });
+
+  // Track the reduced-motion preference so the pulse loop (and its
+  // data-dep-pulse marker) react to live OS toggles, not just page load.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // Max valid scrollTop (contentHeight - viewportHeight), refreshed each
   // render. Clamps wheel/drag pan so the canvas never scrolls past the last
@@ -284,7 +309,55 @@ export function GanttCanvas() {
     );
     const theme = resolveThemeColors();
     renderScene({ ctx, scene, theme, dpr, cssWidth: size.width, cssHeight: size.height });
+    renderMetaRef.current = { dpr, cssWidth: size.width, cssHeight: size.height };
+
+    // Chain legend + pulse gate (chain spec §5.3). Functional updates keep the
+    // object identity stable across scroll-driven re-assemblies so unrelated
+    // renders are not queued every scroll tick.
+    const chain = scene.depChain;
+    const legend =
+      chain && (chain.upstream.size > 0 || chain.downstream.size > 0)
+        ? { upstreamCount: chain.upstream.size, downstreamCount: chain.downstream.size }
+        : null;
+    setDepLegend((prev) =>
+      prev?.upstreamCount === legend?.upstreamCount &&
+      prev?.downstreamCount === legend?.downstreamCount
+        ? prev
+        : legend,
+    );
+    const needsPulse = !!chain && chain.downstream.size > 0;
+    setPulseActive((prev) => (prev === needsPulse ? prev : needsPulse));
   }, [file, size, activeBaseline, searchQuery, taskFilter, selectedTaskIds]);
+
+  // Dependency-chain pulse loop (chain spec §5.3): re-render the cached
+  // immutable scene with an animation clock while a downstream chain is
+  // active. Skipped entirely under prefers-reduced-motion — the renderer then
+  // degrades to fixed dashes and a static origin halo.
+  useEffect(() => {
+    if (!pulseActive || reducedMotion) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    let raf = 0;
+    const frame = () => {
+      const scene = sceneRef.current;
+      const meta = renderMetaRef.current;
+      if (scene && meta.cssWidth > 0) {
+        renderScene({
+          ctx,
+          scene,
+          theme: resolveThemeColors(),
+          dpr: meta.dpr,
+          cssWidth: meta.cssWidth,
+          cssHeight: meta.cssHeight,
+          animation: { now: performance.now() },
+        });
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [pulseActive, reducedMotion]);
 
   // ----- Pointer interaction -----
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -580,6 +653,7 @@ export function GanttCanvas() {
         ref={canvasRef}
         tabIndex={0}
         aria-label={t('canvas.ariaLabel')}
+        data-dep-pulse={pulseActive && !reducedMotion ? 'on' : 'off'}
         className={cn(
           'absolute inset-0 outline-none',
           dragRef.current.kind === 'pan' && dragRef.current.engaged
@@ -599,6 +673,7 @@ export function GanttCanvas() {
           clearTaskHover();
         }}
       />
+      <DependencyChainLegend info={depLegend} />
       {holidayTooltip}
       {baselineTooltip}
       {taskTooltip}

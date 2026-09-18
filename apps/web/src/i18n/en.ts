@@ -194,6 +194,9 @@ export const en = {
     constraintMustStartOn: 'Must start on {{date}}',
     constraintMustFinishOn: 'Must finish on {{date}}',
     constraintFinishNoLaterThan: 'Finish no later than {{date}}',
+    depChainUpstream: 'Predecessors · settled path',
+    depChainDownstream: 'Successors · propagating',
+    depChainCounts: '{{upstream}} predecessors · {{downstream}} successors',
   },
   resource: {
     columnName: 'Resource',

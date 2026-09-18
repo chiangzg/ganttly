@@ -1,18 +1,24 @@
 /**
- * Task bar renderer (PRD §5.2, M1.12/M1.13).
+ * Task bar renderer (PRD §5.2, M1.12/M1.13; chain visuals: dependency-chain
+ * spec §3).
  *
  * Draws:
  * - Regular task bars with progress fill (rounded rect)
  * - Milestone diamonds (rotated square)
  * - Critical-path coloring override
  * - Selection focus ring
+ * - Dependency-chain accents + spotlight dimming (chain spec §3.4/§3.5):
+ *   chain rows get a direction-colored 2px outline (upstream emerald /
+ *   downstream cyan), the origin keeps its primary selection ring plus a
+ *   breathing halo, and unrelated rows (except ancestor summaries of chain
+ *   members) render at reduced opacity so the chain pops.
  *
  * Bars are positioned by their start/end date using the layout primitives.
  * The renderer is given a pre-sliced set of rows; each row carries its GLOBAL
  * `yIndex`, and its viewport pixel Y = HEADER_HEIGHT + yIndex*ROW_HEIGHT - scrollTop
  * (mirrors resourceLoad.ts so bars track the left TaskTable during scroll).
  */
-import type { Scene, ThemeColors, TaskRow } from './types';
+import type { RenderAnimation, Scene, ThemeColors, TaskRow } from './types';
 import {
   COLUMN_WIDTH,
   HEADER_HEIGHT,
@@ -24,8 +30,17 @@ import {
 import { BAR_INSET_Y, MILESTONE_HALF } from './geometry';
 
 const BAR_RADIUS = 4;
+/** Spotlight opacity for rows outside the active dependency chain (§3.5). */
+const SPOTLIGHT_ROW_ALPHA = 0.45;
+/** Breathing period of the origin halo (§3.4). */
+const ORIGIN_HALO_CYCLE_MS = 1600;
 
-export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: ThemeColors): void {
+export function renderBars(
+  ctx: CanvasRenderingContext2D,
+  scene: Scene,
+  theme: ThemeColors,
+  animation?: RenderAnimation,
+): void {
   const {
     zoom,
     originDate,
@@ -35,6 +50,7 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
     selectedTaskIds,
     showCriticalPath,
     hasActiveBaseline,
+    depChain,
   } = scene;
 
   rows.forEach((row) => {
@@ -52,6 +68,11 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
     // clipped there). Rows straddling the header still draw (their lower part
     // shows below the header band).
     if (y + ROW_HEIGHT < HEADER_HEIGHT || y > scene.viewportHeight) return;
+    const role = chainRoleOf(depChain, row.id);
+    // Spotlight (§3.5): with an active chain, rows that are neither chain
+    // members nor ancestor summaries of one render dimmed. Propagated as
+    // `baseAlpha` because several row-draw steps set/reset globalAlpha.
+    const inSpotlight = !!depChain && role === null && !depChain.relatedSummaryIds.has(row.id);
     drawRow(ctx, row, y, {
       zoom,
       originDate,
@@ -62,8 +83,22 @@ export function renderBars(ctx: CanvasRenderingContext2D, scene: Scene, theme: T
       showCriticalPath,
       hasActiveBaseline,
       viewportWidth: scene.viewportWidth,
+      depChainRole: role,
+      animation,
+      baseAlpha: inSpotlight ? SPOTLIGHT_ROW_ALPHA : 1,
     });
   });
+}
+
+/** A row's membership in the active dependency chain (§3). */
+type DepChainRole = 'origin' | 'upstream' | 'downstream';
+
+function chainRoleOf(chain: Scene['depChain'], taskId: string): DepChainRole | null {
+  if (!chain) return null;
+  if (taskId === chain.originId) return 'origin';
+  if (chain.upstream.has(taskId)) return 'upstream';
+  if (chain.downstream.has(taskId)) return 'downstream';
+  return null;
 }
 
 interface DrawCtx {
@@ -79,6 +114,12 @@ interface DrawCtx {
   /** When true, rows draw a baseline reference track below the live bar. */
   hasActiveBaseline: boolean;
   viewportWidth: number;
+  /** Chain membership of this row; null when no chain is active. */
+  depChainRole: DepChainRole | null;
+  /** Animation clock — present only inside the host's rAF loop (§5.3). */
+  animation?: RenderAnimation;
+  /** Row-level alpha base (spotlight). All globalAlpha writes multiply it. */
+  baseAlpha: number;
 }
 
 function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env: DrawCtx): void {
@@ -123,7 +164,12 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
     const half = compare ? 8 : MILESTONE_HALF;
     drawMilestone(ctx, cx, cy, barColor, env.theme, half);
     if (row.id === env.selectedTaskId) {
-      drawSelectionRing(ctx, cx, cy, half + 4, env.theme);
+      drawDiamondRing(ctx, cx, cy, half + 4, env.theme.primary);
+    }
+    if (env.depChainRole === 'origin') {
+      drawOriginHaloDiamond(ctx, cx, cy, half + 7, env);
+    } else if (env.depChainRole) {
+      drawDiamondRing(ctx, cx, cy, half + 4, chainAccentColor(env));
     }
     // Label starts at the diamond's right edge instead of `xStart + width`,
     // since width is one-day-wide and would push the label too far right.
@@ -141,9 +187,9 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
 
   drawRoundedRect(ctx, xStart, barY, width, barH, BAR_RADIUS);
   ctx.fillStyle = barColor;
-  ctx.globalAlpha = 0.35;
+  ctx.globalAlpha = env.baseAlpha * 0.35;
   ctx.fill();
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = env.baseAlpha;
 
   // Progress fill
   if (row.progress > 0) {
@@ -158,11 +204,21 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
   // Bar outline (always visible, sharper when selected). §4.6: every task in
   // the multi-select set gets a 2px primary outline; the anchor additionally
   // gets the selection ring further below. Non-selected bars use a 1px darken.
+  // Chain members (§3.4) get their direction color instead of the darken —
+  // the origin is always the selected one and keeps the primary outline.
   const isSelected = env.selectedTaskIds.has(row.id);
+  const chainAccent =
+    env.depChainRole && env.depChainRole !== 'origin' ? chainAccentColor(env) : null;
   drawRoundedRect(ctx, xStart, barY, width, barH, BAR_RADIUS);
-  ctx.strokeStyle = isSelected ? env.theme.primary : darken(barColor);
-  ctx.lineWidth = isSelected ? 2 : 1;
+  ctx.strokeStyle = isSelected ? env.theme.primary : (chainAccent ?? darken(barColor));
+  ctx.lineWidth = isSelected || chainAccent ? 2 : 1;
   ctx.stroke();
+
+  // Origin breathing halo (§3.4) — the ripple's source, in the selection
+  // color so it reads as "focus", not as another chain direction.
+  if (env.depChainRole === 'origin') {
+    drawOriginHalo(ctx, xStart, barY, width, barH, env);
+  }
 
   // Constraint marker (G5): a small icon at the constrained edge.
   // Start-type constraints (SNET/MSO) → left edge; end-type (MFO/FNLT) → right.
@@ -194,10 +250,10 @@ function drawBaselineTrack(
   const trackY = yTop + 24; // spec §5.9
   const trackH = 4;
   drawRoundedRect(ctx, xStart, trackY, width, trackH, 2);
-  ctx.globalAlpha = 0.55;
+  ctx.globalAlpha = env.baseAlpha * 0.55;
   ctx.fillStyle = env.theme.baseline;
   ctx.fill();
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = env.baseAlpha;
   ctx.strokeStyle = env.theme.baseline;
   ctx.lineWidth = 1;
   ctx.stroke();
@@ -395,11 +451,11 @@ function drawBaselineSummaryTrack(
   const width = Math.max(dateRangeWidth(startISO, endISO, env.zoom), COLUMN_WIDTH[env.zoom] / 2);
   const trackY = yTop + ROW_HEIGHT - 8;
   const trackH = 3;
-  ctx.globalAlpha = 0.55;
+  ctx.globalAlpha = env.baseAlpha * 0.55;
   drawRoundedRect(ctx, xStart, trackY, width, trackH, 1);
   ctx.fillStyle = env.theme.baseline;
   ctx.fill();
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = env.baseAlpha;
   // Small end caps.
   ctx.fillStyle = env.theme.baseline;
   ctx.fillRect(xStart - 1, trackY - 1, 1.5, trackH + 2);
@@ -470,20 +526,75 @@ function drawMilestone(
   ctx.restore();
 }
 
-function drawSelectionRing(
+/** Diamond-shaped ring (rotated square) in the given color (§3.4). */
+function drawDiamondRing(
   ctx: CanvasRenderingContext2D,
   cx: number,
   cy: number,
   radius: number,
-  theme: ThemeColors,
+  color: string,
 ): void {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(Math.PI / 4);
-  ctx.strokeStyle = theme.primary;
+  ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.strokeRect(-radius, -radius, radius * 2, radius * 2);
   ctx.restore();
+}
+
+/** Direction color for a chain-member row (§3.4). Call only for members. */
+function chainAccentColor(env: DrawCtx): string {
+  return env.depChainRole === 'upstream' ? env.theme.depUpstream : env.theme.depDownstream;
+}
+
+/**
+ * Origin breathing halo for a task bar (§3.4): a soft primary ring outside the
+ * bar whose alpha swells 0.22↔0.5 over ~1.6s — the ripple's source. Static at
+ * mid-alpha when no animation clock is available (reduced motion).
+ */
+function drawOriginHalo(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  env: DrawCtx,
+): void {
+  const breathe = breatheAt(env);
+  ctx.save();
+  ctx.strokeStyle = env.theme.primary;
+  ctx.globalAlpha = env.baseAlpha * (0.25 + 0.3 * breathe);
+  ctx.lineWidth = 2;
+  drawRoundedRect(ctx, x - 3, y - 3, w + 6, h + 6, BAR_RADIUS + 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Origin halo variant for milestones — a larger, softer diamond ring. */
+function drawOriginHaloDiamond(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  env: DrawCtx,
+): void {
+  const breathe = breatheAt(env);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.PI / 4);
+  ctx.strokeStyle = env.theme.primary;
+  ctx.globalAlpha = env.baseAlpha * (0.25 + 0.3 * breathe);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-radius, -radius, radius * 2, radius * 2);
+  ctx.restore();
+}
+
+/** 0..1 breathing phase; static 0.5 without an animation clock. */
+function breatheAt(env: DrawCtx): number {
+  if (!env.animation) return 0.5;
+  const t = (env.animation.now % ORIGIN_HALO_CYCLE_MS) / ORIGIN_HALO_CYCLE_MS;
+  return (Math.sin(t * Math.PI * 2) + 1) / 2;
 }
 
 function drawRoundedRect(
