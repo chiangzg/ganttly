@@ -167,12 +167,12 @@ describe('signedWorkingDayDelta', () => {
     expect(signedWorkingDayDelta('2026-02-03', '2026-02-02', cal)).toBe(-1);
   });
 
-  // National Day: holiday block 2026-10-01..2026-10-08 (all non-working),
-  // with 调休补班 at 09-19 and 10-10 (both OUTSIDE the block). So the last
-  // working day before is 2026-09-30 (Wed) and the first after is 2026-10-09
-  // (Fri), with no working days in between — exactly the spec's "+1" case.
+  // National Day: holiday block 2026-10-01..2026-10-07 (all non-working),
+  // with 调休补班 at 09-20 and 10-10 (both OUTSIDE the block). So the last
+  // working day before is 2026-09-30 (Wed) and the first after is 2026-10-08
+  // (Thu), with no working days in between — exactly the spec's "+1" case.
   it('crosses the National Day holiday block = +1', () => {
-    expect(signedWorkingDayDelta('2026-09-30', '2026-10-09', cal)).toBe(1);
+    expect(signedWorkingDayDelta('2026-09-30', '2026-10-08', cal)).toBe(1);
   });
 
   // Spring Festival: holiday block 2026-02-15..2026-02-22 (all non-working),

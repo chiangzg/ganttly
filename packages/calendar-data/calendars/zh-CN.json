@@ -49,8 +49,7 @@
     { "date": "2026-10-05", "name": "国庆节", "type": "holiday" },
     { "date": "2026-10-06", "name": "国庆节", "type": "holiday" },
     { "date": "2026-10-07", "name": "国庆节", "type": "holiday" },
-    { "date": "2026-10-08", "name": "国庆节", "type": "holiday" },
-    { "date": "2026-09-19", "name": "国庆节调休上班", "type": "working" },
+    { "date": "2026-09-20", "name": "国庆节调休上班", "type": "working" },
     { "date": "2026-10-10", "name": "国庆节调休上班", "type": "working" }
   ]
 }
