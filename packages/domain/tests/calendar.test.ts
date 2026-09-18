@@ -85,15 +85,17 @@ describe('isWorkingDay with zh-CN 2026', () => {
     expect(isWorkingDay('2026-02-28', cal)).toBe(true);
   });
 
-  it('honors National Day 2026 (Oct 1-8)', () => {
-    for (let d = 1; d <= 8; d++) {
+  it('honors National Day 2026 (Oct 1-7)', () => {
+    for (let d = 1; d <= 7; d++) {
       const iso = `2026-10-${String(d).padStart(2, '0')}`;
       expect(isWorkingDay(iso, cal), `${iso}`).toBe(false);
     }
+    // Official notice: 7 days only — Oct 8 (Thu) is a regular working day.
+    expect(isWorkingDay('2026-10-08', cal)).toBe(true);
   });
 
-  it('treats National Day make-up days (Sep 19, Oct 10) as working', () => {
-    expect(isWorkingDay('2026-09-19', cal)).toBe(true); // Saturday make-up
+  it('treats National Day make-up days (Sep 20, Oct 10) as working', () => {
+    expect(isWorkingDay('2026-09-20', cal)).toBe(true); // Sunday make-up
     expect(isWorkingDay('2026-10-10', cal)).toBe(true); // Saturday make-up
   });
 

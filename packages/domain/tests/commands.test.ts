@@ -525,8 +525,8 @@ describe('resolveProjectCalendar', () => {
   it('falls back to the bundled regional dataset when file holidays are empty', () => {
     const file = makeFile([]); // createEmptyFile ships zh-CN with holidays: []
     const cal = resolveProjectCalendar(file);
-    // zh-CN 2026: 09-25 is Mid-Autumn holiday (bundled), 09-19 is a make-up working Saturday.
+    // zh-CN 2026: 09-25 is Mid-Autumn holiday (bundled), 09-20 is a make-up working Sunday.
     expect(isWorkingDay('2026-09-25', cal)).toBe(false);
-    expect(isWorkingDay('2026-09-19', cal)).toBe(true);
+    expect(isWorkingDay('2026-09-20', cal)).toBe(true);
   });
 });
