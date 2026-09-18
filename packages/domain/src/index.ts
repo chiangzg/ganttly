@@ -13,6 +13,7 @@
 export * from './calendar';
 export * from './schedule';
 export * from './cpm';
+export * from './dependencyGraph';
 export * from './summary';
 export * from './cost';
 export * from './resourceLoad';

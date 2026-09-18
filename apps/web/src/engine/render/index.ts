@@ -7,7 +7,7 @@
  * The function is responsible for HiDPI scaling — the host passes a CSS-sized
  * canvas; we set the transform so drawing operations use CSS pixels.
  */
-import type { Scene, ThemeColors } from './types';
+import type { RenderAnimation, Scene, ThemeColors } from './types';
 import { renderGrid } from './grid';
 import { renderBars } from './bars';
 import { renderArrows } from './arrows';
@@ -22,10 +22,16 @@ export interface RenderInput {
   /** CSS-pixel canvas width/height (must match the canvas's CSS size). */
   cssWidth: number;
   cssHeight: number;
+  /**
+   * Animation clock (chain spec §5.3). Present only inside the host's rAF loop
+   * while a downstream dependency chain is animating; absent for static
+   * renders (and under prefers-reduced-motion).
+   */
+  animation?: RenderAnimation;
 }
 
 export function renderScene(input: RenderInput): void {
-  const { ctx, scene, theme, dpr, cssWidth, cssHeight } = input;
+  const { ctx, scene, theme, dpr, cssWidth, cssHeight, animation } = input;
 
   // Reset transform and apply DPR scaling so we can draw in CSS pixels.
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -34,8 +40,8 @@ export function renderScene(input: RenderInput): void {
 
   renderGrid(ctx, scene, theme);
   renderTodayLine(ctx, scene, theme);
-  renderBars(ctx, scene, theme);
-  renderArrows(ctx, scene, theme);
+  renderBars(ctx, scene, theme, animation);
+  renderArrows(ctx, scene, theme, animation);
 }
 
 export * from './types';

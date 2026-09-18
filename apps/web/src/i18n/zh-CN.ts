@@ -189,6 +189,9 @@ export const zhCN = {
     constraintMustStartOn: '必须于 {{date}} 开始',
     constraintMustFinishOn: '必须于 {{date}} 完成',
     constraintFinishNoLaterThan: '不得晚于 {{date}} 完成',
+    depChainUpstream: '前置链路 · 已完成路径',
+    depChainDownstream: '后续链路 · 向下传递',
+    depChainCounts: '{{upstream}} 个前置 · {{downstream}} 个后续',
   },
   resource: {
     columnName: '资源名称',

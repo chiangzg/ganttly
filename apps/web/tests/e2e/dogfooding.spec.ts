@@ -68,8 +68,10 @@ test('ganttly can open and edit its own roadmap.json', async ({ page }) => {
   // lives in the draft until explicit Save. Blur no longer commits.
   await page.locator('aside').getByRole('button', { name: '保存' }).click();
 
-  // Verify the rename landed in the table.
-  await expect(page.getByText(/已完成/)).toBeVisible();
+  // Verify the rename landed in the table. Match the full new name — a bare
+  // /已完成/ regex also hits the dependency-chain legend ("…已完成路径")
+  // that appears whenever a task with dependencies is selected.
+  await expect(page.getByText('M1 — 数据 + 引擎核心(已完成)')).toBeVisible();
 });
 
 /**

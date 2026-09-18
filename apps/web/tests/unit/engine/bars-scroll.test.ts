@@ -28,6 +28,8 @@ const THEME: ThemeColors = {
   taskProgress: '#1d4ed8',
   critical: '#dc2626',
   baseline: '#64748b',
+  depUpstream: '#10b981',
+  depDownstream: '#06b6d4',
   todayLine: '#ef4444',
 };
 

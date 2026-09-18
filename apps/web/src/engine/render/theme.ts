@@ -22,6 +22,8 @@ const COLOR_VARS: Array<{ key: keyof ThemeColors; varName: string }> = [
   { key: 'taskProgress', varName: '--color-task-progress' },
   { key: 'critical', varName: '--color-critical' },
   { key: 'baseline', varName: '--color-baseline' },
+  { key: 'depUpstream', varName: '--color-dep-upstream' },
+  { key: 'depDownstream', varName: '--color-dep-downstream' },
 ];
 
 export function resolveThemeColors(doc: Document = document): ThemeColors {
@@ -43,6 +45,8 @@ export function resolveThemeColors(doc: Document = document): ThemeColors {
     taskProgress: 'rgb(37, 99, 235)',
     critical: 'rgb(220, 38, 38)',
     baseline: 'rgb(100, 116, 139)',
+    depUpstream: 'rgb(16, 185, 129)',
+    depDownstream: 'rgb(6, 182, 212)',
     todayLine: 'rgb(220, 38, 38)',
   };
 
