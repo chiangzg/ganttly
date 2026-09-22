@@ -10,7 +10,7 @@
  * to them. A page refresh re-checks only the instances the user actually opens.
  *
  * **Login flow:** {@link login} stashes the current path in `sessionStorage`
- * and redirects to the server's GitHub OAuth entrypoint. The server redirects
+ * and redirects to the server's OIDC entrypoint. The server redirects
  * back to the web app root after success/failure; a post-login hook reads the
  * stashed path and navigates the user back to where they were.
  */
@@ -51,7 +51,7 @@ interface AuthState {
   /** Return and clear {@link lastLoginError} (consume-on-read). */
   consumeLoginError(): string | null;
   /**
-   * Start the GitHub OAuth web flow. Resolves `false` when the instance is
+   * Start the OIDC login web flow. Resolves `false` when the instance is
    * unreachable (server down, CORS/network failure) so callers can surface a
    * friendly error instead of dumping the user onto a raw proxy 500 page.
    */
@@ -146,7 +146,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // sessionStorage unavailable — proceed without return-to.
     }
     if (typeof window !== 'undefined') {
-      window.location.href = `${baseUrl}/api/v1/auth/github`;
+      window.location.href = `${baseUrl}/api/v1/auth/oidc`;
     }
     return true;
   },
@@ -222,12 +222,10 @@ export function peekLoginError(): string | null {
 /** Map a server `login_error` code to a user-facing message. */
 export function loginErrorMessage(code: string | null): string | null {
   switch (code) {
-    case 'not_allowed':
-      return '该实例仅允许白名单内的用户登录。如需使用，请联系实例管理员，或参考 self-hosting 文档自行部署。';
-    case 'dev_mode_no_github':
+    case 'dev_mode_no_oidc':
       return '该实例运行在开发模式，请使用开发登录。';
-    case 'github_login_failed':
-      return 'GitHub 登录失败，请重试。';
+    case 'oidc_login_failed':
+      return 'SSO 登录失败，请重试。';
     case null:
       return null;
     default:

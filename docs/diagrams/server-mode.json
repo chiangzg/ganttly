@@ -31,7 +31,7 @@
     {
       "id": "github-oauth",
       "type": "external",
-      "label": "GitHub OAuth",
+      "label": "OIDC (IdP)",
       "sublabel": "授权码换发后 token 即弃",
       "pos": [124, 74],
       "size": [172, 62]

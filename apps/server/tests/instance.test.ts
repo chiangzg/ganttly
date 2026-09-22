@@ -24,7 +24,7 @@ describe('buildDiscovery', () => {
     expect(d.features.mcp).toBe(true);
     expect(d.features.sse).toBe(true);
     expect(d.features.projectImport).toBe(true);
-    expect(d.auth.providers).toEqual(['github']);
+    expect(d.auth.providers).toEqual(['oidc']);
   });
 
   it('advertises devLogin only for AUTH_MODE=dev', () => {
@@ -32,9 +32,10 @@ describe('buildDiscovery', () => {
     expect(
       buildDiscovery(
         buildTestConfig({
-          AUTH_MODE: 'github',
-          GITHUB_OAUTH_CLIENT_ID: 'client-id',
-          GITHUB_OAUTH_CLIENT_SECRET: 'client-secret',
+          AUTH_MODE: 'oidc',
+          OIDC_ISSUER_URL: 'https://auth.example.com/application/o/ganttly/',
+          OIDC_CLIENT_ID: 'client-id',
+          OIDC_CLIENT_SECRET: 'client-secret',
           SESSION_SECRET: 'x'.repeat(32),
           TOKEN_PEPPER: 'x'.repeat(32),
         }),

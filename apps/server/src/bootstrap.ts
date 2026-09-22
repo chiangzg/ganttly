@@ -13,7 +13,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AppConfig } from './config';
-import type { GitHubOAuthDeps } from './auth/github';
+import type { OidcOAuthDeps } from './auth/oidc';
 import { HttpError } from './modules/errors';
 import { createWorkspaceEventBus } from './modules/events/bus';
 import { createOutboxPublisher, type OutboxPublisher } from './modules/events/publisher';
@@ -69,11 +69,11 @@ export interface BuildServerOptions {
    */
   registerDatabase?: boolean;
   /**
-   * Override the GitHub OAuth network layer (tests inject fakes so the callback
-   * can be exercised without hitting GitHub). Defaults to the global-`fetch`
-   * implementation configured from `GITHUB_OAUTH_CLIENT_*`.
+   * Override the OIDC network layer (tests inject fakes so the callback can be
+   * exercised without hitting a real issuer). Defaults to the global-`fetch`
+   * implementation configured from `OIDC_*`.
    */
-  githubDeps?: GitHubOAuthDeps;
+  oidcDeps?: OidcOAuthDeps;
 }
 
 export async function buildServer(
@@ -188,7 +188,7 @@ export async function buildServer(
   await app.register(authRoutes, {
     prefix: API_PREFIX,
     config,
-    githubDeps: options.githubDeps,
+    oidcDeps: options.oidcDeps,
   });
   await app.register(identityRoutes, { prefix: API_PREFIX });
   await app.register(projectsRoutes, { prefix: API_PREFIX, config });

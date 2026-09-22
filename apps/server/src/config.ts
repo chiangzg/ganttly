@@ -8,7 +8,7 @@
  * Fail-fast rules:
  * - `DATABASE_URL`, base URLs and instance identity are required everywhere.
  * - `AUTH_MODE=dev` is rejected when `NODE_ENV=production` (spec §8.2).
- * - In production, the GitHub OAuth secrets, `SESSION_SECRET` and
+ * - In production, the OIDC client credentials, `SESSION_SECRET` and
  *   `TOKEN_PEPPER` are required; dev mode derives non-secret placeholders so a
  *   local server boots with zero extra setup.
  */
@@ -17,7 +17,7 @@ import { DEFAULT_LIMITS } from '@ganttly/api-contract';
 
 const LogLevel = z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']);
 const NodeEnv = z.enum(['development', 'production', 'test']);
-const AuthMode = z.enum(['dev', 'github']);
+const AuthMode = z.enum(['dev', 'oidc']);
 
 const rawConfigSchema = z.object({
   NODE_ENV: NodeEnv.default('development'),
@@ -31,18 +31,20 @@ const rawConfigSchema = z.object({
   GANTTLY_INSTANCE_ID: z.string().min(1),
   GANTTLY_INSTANCE_NAME: z.string().min(1),
 
-  AUTH_MODE: AuthMode.default('github'),
-  GITHUB_OAUTH_CLIENT_ID: z.string().optional(),
-  GITHUB_OAUTH_CLIENT_SECRET: z.string().optional(),
+  AUTH_MODE: AuthMode.default('oidc'),
+  /**
+   * OIDC issuer base URL (e.g. `https://auth.example.com/application/o/ganttly/`).
+   * Endpoints are resolved from its discovery document; trailing slashes are
+   * normalized away. Required when `AUTH_MODE=oidc` or in production.
+   */
+  OIDC_ISSUER_URL: z.string().url().optional(),
+  OIDC_CLIENT_ID: z.string().optional(),
+  OIDC_CLIENT_SECRET: z.string().optional(),
+  /** Space-separated scopes; the default covers identity only. */
+  OIDC_SCOPES: z.string().default('openid profile email'),
   SESSION_SECRET: z.string().optional(),
   TOKEN_PEPPER: z.string().optional(),
   ALLOWED_WEB_ORIGINS: z.string().default(''),
-  /**
-   * Comma-separated GitHub numeric user ids allowed to sign in via OAuth.
-   * Empty/unset = open login (any GitHub account). Entries must be numeric —
-   * the default matcher is the stable `id`, not the mutable `login`.
-   */
-  ALLOWED_GITHUB_USER_IDS: z.string().default(''),
 
   MAX_PROJECT_BYTES: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectBytes),
   MAX_PROJECT_TASKS: z.coerce.number().int().positive().default(DEFAULT_LIMITS.maxProjectTasks),
@@ -105,17 +107,15 @@ export interface AppConfig {
   instanceName: string;
 
   authMode: AuthMode;
-  githubOAuthClientId?: string;
-  githubOAuthClientSecret?: string;
+  oidcIssuerUrl?: string;
+  oidcClientId?: string;
+  oidcClientSecret?: string;
+  /** Space-separated scopes forwarded to the issuer (identity only by default). */
+  oidcScopes: string;
   sessionSecret: string;
   tokenPepper: string;
   /** Parsed, de-duplicated CORS origin list (empty = no origins allowed). */
   allowedWebOrigins: string[];
-  /**
-   * GitHub numeric ids allowed to log in (`ALLOWED_GITHUB_USER_IDS`);
-   * `null` = no restriction (open login).
-   */
-  allowedGitHubUserIds: ReadonlySet<string> | null;
   /** Hostnames accepted by the /mcp endpoint (DNS-rebinding defence). */
   allowedMcpHosts: ReadonlySet<string>;
 
@@ -155,8 +155,9 @@ export class ConfigError extends Error {
 }
 
 const PROD_SECRET_KEYS = [
-  'GITHUB_OAUTH_CLIENT_ID',
-  'GITHUB_OAUTH_CLIENT_SECRET',
+  'OIDC_ISSUER_URL',
+  'OIDC_CLIENT_ID',
+  'OIDC_CLIENT_SECRET',
   'SESSION_SECRET',
   'TOKEN_PEPPER',
 ] as const;
@@ -172,6 +173,18 @@ export const DEV_TOKEN_PEPPER = 'dev-token-pepper-not-for-production-use';
  * @param env environment source; defaults to `process.env`.
  */
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
+  // GitHub OAuth login was removed in favour of OIDC. Check before the schema
+  // so legacy deployments get a migration hint instead of a zod enum error.
+  if (env.AUTH_MODE === 'github') {
+    throw new ConfigError(
+      'AUTH_MODE=github is no longer supported (GitHub OAuth login was removed).',
+      [
+        'Set AUTH_MODE=oidc and configure OIDC_ISSUER_URL, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET',
+        '(see docs/self-hosting.md for the authentik setup guide).',
+      ],
+    );
+  }
+
   const parsed = rawConfigSchema.safeParse(env);
   if (!parsed.success) {
     const details = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
@@ -183,12 +196,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   // §8.2: production must never run dev auth.
   if (isProduction && r.AUTH_MODE === 'dev') {
     throw new ConfigError('AUTH_MODE=dev is not permitted in production (NODE_ENV=production).', [
-      'Set AUTH_MODE=github and configure the GitHub OAuth + session/pepper secrets.',
+      'Set AUTH_MODE=oidc and configure the OIDC issuer/client credentials + session/pepper secrets.',
     ]);
   }
 
-  // github auth (or production) requires the real secrets.
-  const needSecrets = r.AUTH_MODE === 'github' || isProduction;
+  // oidc auth (or production) requires the real secrets.
+  const needSecrets = r.AUTH_MODE === 'oidc' || isProduction;
   if (needSecrets) {
     const missing = PROD_SECRET_KEYS.filter((k) => !env[k] || env[k]!.trim() === '');
     if (missing.length > 0) {
@@ -210,21 +223,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const allowedWebOrigins = r.ALLOWED_WEB_ORIGINS.split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-
-  // Login allowlist: comma-separated numeric GitHub user ids. Empty = open
-  // login (null). Entries are validated here so a typo'd config fails at
-  // boot instead of silently locking everyone out (or letting someone in).
-  let allowedGitHubUserIds: ReadonlySet<string> | null = null;
-  {
-    const entries = r.ALLOWED_GITHUB_USER_IDS.split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    const invalid = entries.filter((s) => !/^\d+$/.test(s));
-    if (invalid.length > 0) {
-      throw new ConfigError('Invalid ALLOWED_GITHUB_USER_IDS entries.', invalid);
-    }
-    if (entries.length > 0) allowedGitHubUserIds = new Set(entries);
-  }
 
   // Session cookie Secure flag: explicit override wins, otherwise automatic
   // (Secure only in production). Parsed manually — `z.coerce.boolean()` would
@@ -250,12 +248,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     instanceId: r.GANTTLY_INSTANCE_ID,
     instanceName: r.GANTTLY_INSTANCE_NAME,
     authMode: r.AUTH_MODE,
-    githubOAuthClientId: r.GITHUB_OAUTH_CLIENT_ID,
-    githubOAuthClientSecret: r.GITHUB_OAUTH_CLIENT_SECRET,
+    oidcIssuerUrl: r.OIDC_ISSUER_URL ? r.OIDC_ISSUER_URL.trim() : undefined,
+    oidcClientId: r.OIDC_CLIENT_ID?.trim() || undefined,
+    oidcClientSecret: r.OIDC_CLIENT_SECRET?.trim() || undefined,
+    oidcScopes:
+      r.OIDC_SCOPES.split(/\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .join(' ') || 'openid profile email',
     sessionSecret,
     tokenPepper,
     allowedWebOrigins,
-    allowedGitHubUserIds,
     allowedMcpHosts,
     maxProjectBytes: r.MAX_PROJECT_BYTES,
     maxProjectTasks: r.MAX_PROJECT_TASKS,

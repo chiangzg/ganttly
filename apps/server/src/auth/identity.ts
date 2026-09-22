@@ -2,7 +2,7 @@
  * Identity provisioning (spec §8.2 step 4).
  *
  * Upserts a user by `(provider, subject)` and guarantees they own a `personal`
- * workspace — the one operation shared by the GitHub login callback and the
+ * workspace — the one operation shared by the OIDC login callback and the
  * dev-session bootstrap. The whole thing runs in one transaction so a partial
  * login (user row without a workspace) can never be observed.
  */
@@ -29,7 +29,7 @@ export async function provisionUser(db: Db, input: ProvisionInput): Promise<Prov
   const now = new Date();
   return db.transaction(async (tx) => {
     // Upsert by (provider, subject). `ON CONFLICT DO UPDATE` refreshes identity
-    // fields so a renamed GitHub account stays in sync on each login.
+    // fields so a renamed upstream account stays in sync on each login.
     const upserted = await tx
       .insert(users)
       .values({

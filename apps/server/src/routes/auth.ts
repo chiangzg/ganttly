@@ -1,25 +1,27 @@
 /**
- * Auth routes (spec §8.2) — GitHub OAuth web flow + dev bootstrap.
+ * Auth routes (spec §8.2) — OIDC authorization-code web flow + dev bootstrap.
  *
  * Mounted under `/api/v1` by the bootstrap API plugin:
- *   GET  /auth/github             — start: redirect to GitHub authorize URL
- *   GET  /auth/github/callback     — exchange code, provision identity, set session
- *   POST /auth/logout              — clear the session cookie
- *   POST /auth/dev-session         — dev-only: provision fixed test user (AUTH_MODE=dev)
+ *   GET  /auth/oidc              — start: redirect to the issuer's authorize URL
+ *   GET  /auth/oidc/callback     — exchange code, provision identity, set session
+ *   POST /auth/logout            — clear the session cookie
+ *   POST /auth/dev-session       — dev-only: provision fixed test user (AUTH_MODE=dev)
  *
- * The network calls to GitHub are isolated behind {@link GitHubOAuthDeps}
- * (default uses global `fetch`); tests inject fakes to drive the callback
- * without hitting GitHub.
+ * The issuer is configured via env (any standards-compliant OIDC IdP, e.g.
+ * authentik); who may sign in is governed at the IdP by the application's
+ * access policies — the server keeps no login allowlist. The network calls
+ * are isolated behind {@link OidcOAuthDeps} (default uses global `fetch`);
+ * tests inject fakes to drive the callback without hitting a real issuer.
  */
 import { ApiErrorCode, buildApiError } from '@ganttly/api-contract';
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config';
 import {
-  GITHUB_PROVIDER,
   buildAuthorizeUrl,
-  createDefaultGitHubDeps,
-  type GitHubOAuthDeps,
-} from '../auth/github';
+  createDefaultOidcDeps,
+  oidcProviderId,
+  type OidcOAuthDeps,
+} from '../auth/oidc';
 import { clearStateCookie, newState, setStateCookie, verifyStateCookie } from '../auth/oauth-state';
 import {
   DEV_DISPLAY_NAME,
@@ -32,10 +34,10 @@ import {
 export interface AuthRoutesOptions {
   config: AppConfig;
   /** Injectable for tests; defaults to the global-`fetch` implementation. */
-  githubDeps?: GitHubOAuthDeps;
+  oidcDeps?: OidcOAuthDeps;
 }
 
-const CALLBACK_PATH = '/api/v1/auth/github/callback';
+const CALLBACK_PATH = '/api/v1/auth/oidc/callback';
 
 function callbackUrl(config: AppConfig): string {
   return `${config.publicBaseUrl.replace(/\/+$/, '')}${CALLBACK_PATH}`;
@@ -50,42 +52,54 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (
   options,
 ) => {
   const { config } = options;
-  const githubDeps =
-    options.githubDeps ??
-    (config.githubOAuthClientId && config.githubOAuthClientSecret
-      ? createDefaultGitHubDeps(config.githubOAuthClientId, config.githubOAuthClientSecret)
+  const oidcDeps =
+    options.oidcDeps ??
+    (config.oidcIssuerUrl && config.oidcClientId && config.oidcClientSecret
+      ? createDefaultOidcDeps(config.oidcIssuerUrl, config.oidcClientId, config.oidcClientSecret)
       : undefined);
 
-  // --- GET /auth/github: start the OAuth web flow --------------------------
-  app.get('/auth/github', async (request: FastifyRequest, reply: FastifyReply) => {
+  // --- GET /auth/oidc: start the OIDC authorization-code flow ---------------
+  app.get('/auth/oidc', async (request: FastifyRequest, reply: FastifyReply) => {
     if (config.authMode === 'dev') {
-      // Dev mode has no GitHub credentials; clients use POST /auth/dev-session.
-      return reply.redirect(loginErrorUrl(config.webAppUrl, 'dev_mode_no_github'));
+      // Dev mode has no OIDC credentials; clients use POST /auth/dev-session.
+      return reply.redirect(loginErrorUrl(config.webAppUrl, 'dev_mode_no_oidc'));
     }
-    if (!githubDeps || !config.githubOAuthClientId) {
+    if (!oidcDeps || !config.oidcIssuerUrl || !config.oidcClientId) {
       return reply
         .code(503)
         .send(
           buildApiError(
             ApiErrorCode.UNSUPPORTED_CLIENT,
-            'GitHub OAuth is not configured on this instance',
+            'OIDC login is not configured on this instance',
             request.id,
           ),
         );
+    }
+    let authorizationEndpoint: string;
+    try {
+      const endpoints = await oidcDeps.discoverEndpoints();
+      authorizationEndpoint = endpoints.authorizationEndpoint;
+    } catch (err) {
+      // The browser was already navigated here — bounce back with a reason
+      // instead of stranding it on a JSON error page.
+      request.log.warn({ err }, 'oidc discovery failed at login start');
+      return reply.redirect(loginErrorUrl(config.webAppUrl, 'oidc_login_failed'));
     }
     const state = newState();
     setStateCookie(reply, state, { secure: config.isProduction });
     return reply.redirect(
       buildAuthorizeUrl({
-        clientId: config.githubOAuthClientId,
+        authorizationEndpoint,
+        clientId: config.oidcClientId,
         redirectUri: callbackUrl(config),
         state,
+        scopes: config.oidcScopes.split(' '),
       }),
     );
   });
 
-  // --- GET /auth/github/callback: exchange, provision, set session ---------
-  app.get('/auth/github/callback', async (request: FastifyRequest, reply: FastifyReply) => {
+  // --- GET /auth/oidc/callback: exchange, provision, set session ------------
+  app.get('/auth/oidc/callback', async (request: FastifyRequest, reply: FastifyReply) => {
     const query = (request.query ?? {}) as { code?: string; state?: string; error?: string };
     try {
       if (!app.hasDecorator('db')) {
@@ -94,49 +108,40 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (
       if (query.error || !query.code || !query.state) {
         throw new Error(`missing_parameters:${query.error ?? 'none'}`);
       }
-      if (!githubDeps) {
-        throw new Error('github_not_configured');
+      if (!oidcDeps || !config.oidcIssuerUrl) {
+        throw new Error('oidc_not_configured');
       }
       if (!verifyStateCookie(request, query.state)) {
         throw new Error('state_mismatch');
       }
-      const accessToken = await githubDeps.exchangeCode(query.code, callbackUrl(config));
-      const ghUser = await githubDeps.fetchUser(accessToken);
-      // Login allowlist (spec §8.2): when configured, only the listed GitHub
-      // ids may sign in. Checked before provisioning so a denied user leaves
-      // no users row, workspace, or session behind.
-      if (config.allowedGitHubUserIds && !config.allowedGitHubUserIds.has(String(ghUser.id))) {
-        request.log.warn(
-          { githubLogin: ghUser.login, githubId: String(ghUser.id) },
-          'github login denied: not in ALLOWED_GITHUB_USER_IDS',
-        );
-        return reply.redirect(loginErrorUrl(config.webAppUrl, 'not_allowed'));
-      }
+      const accessToken = await oidcDeps.exchangeCode(query.code, callbackUrl(config));
+      const user = await oidcDeps.fetchUser(accessToken);
+      const provider = oidcProviderId(config.oidcIssuerUrl);
       const result = await provisionUser(app.db, {
-        provider: GITHUB_PROVIDER,
-        subject: String(ghUser.id),
-        email: ghUser.email,
-        displayName: ghUser.name ?? ghUser.login,
+        provider,
+        subject: user.sub,
+        email: user.email,
+        displayName: user.name ?? user.preferred_username ?? user.sub,
       });
       request.session.set('userId', result.userId);
-      request.session.set('provider', GITHUB_PROVIDER);
+      request.session.set('provider', provider);
       request.session.set('loginAt', new Date().toISOString());
       return reply.redirect(config.webAppUrl);
     } catch (err) {
-      request.log.warn({ err }, 'github login callback failed');
-      return reply.redirect(loginErrorUrl(config.webAppUrl, 'github_login_failed'));
+      request.log.warn({ err }, 'oidc login callback failed');
+      return reply.redirect(loginErrorUrl(config.webAppUrl, 'oidc_login_failed'));
     } finally {
       clearStateCookie(reply);
     }
   });
 
-  // --- POST /auth/logout: invalidate the session ---------------------------
+  // --- POST /auth/logout: invalidate the session cookie ---------------------
   app.post('/auth/logout', async (request: FastifyRequest, reply: FastifyReply) => {
     request.session.delete();
     return reply.code(204).send();
   });
 
-  // --- POST /auth/dev-session: dev-only fixed test user (spec §8.2) --------
+  // --- POST /auth/dev-session: dev-only fixed test user (spec §8.2) ---------
   app.post('/auth/dev-session', async (request: FastifyRequest, reply: FastifyReply) => {
     if (config.authMode !== 'dev') {
       // Hidden in non-dev builds; a 404 avoids leaking the route's existence.

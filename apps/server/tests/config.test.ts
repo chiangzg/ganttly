@@ -70,18 +70,21 @@ describe('loadConfig — happy path', () => {
     expect(cfg.allowedWebOrigins).toEqual(['http://a.com', 'http://b.com']);
   });
 
-  it('accepts a fully-configured production (github) environment', () => {
+  it('accepts a fully-configured production (oidc) environment', () => {
     const cfg = loadConfig({
       ...validDevEnv(),
       NODE_ENV: 'production',
-      AUTH_MODE: 'github',
-      GITHUB_OAUTH_CLIENT_ID: 'id',
-      GITHUB_OAUTH_CLIENT_SECRET: 'secret',
+      AUTH_MODE: 'oidc',
+      OIDC_ISSUER_URL: 'https://auth.example.com/application/o/ganttly/',
+      OIDC_CLIENT_ID: 'id',
+      OIDC_CLIENT_SECRET: 'secret',
       SESSION_SECRET: 'a'.repeat(48),
       TOKEN_PEPPER: 'b'.repeat(48),
     });
     expect(cfg.isProduction).toBe(true);
-    expect(cfg.githubOAuthClientId).toBe('id');
+    expect(cfg.oidcIssuerUrl).toBe('https://auth.example.com/application/o/ganttly/');
+    expect(cfg.oidcClientId).toBe('id');
+    expect(cfg.oidcScopes).toBe('openid profile email');
     expect(cfg.sessionSecret).toBe('a'.repeat(48));
   });
 });
@@ -122,7 +125,7 @@ describe('loadConfig — fail-fast', () => {
     const env = {
       ...validDevEnv(),
       NODE_ENV: 'production',
-      AUTH_MODE: 'github',
+      AUTH_MODE: 'oidc',
       // no secrets provided.
     };
     let err: ConfigError | null = null;
@@ -134,8 +137,9 @@ describe('loadConfig — fail-fast', () => {
     expect(err).not.toBeNull();
     expect(err!.message).toMatch(/Missing required production configuration/);
     for (const key of [
-      'GITHUB_OAUTH_CLIENT_ID',
-      'GITHUB_OAUTH_CLIENT_SECRET',
+      'OIDC_ISSUER_URL',
+      'OIDC_CLIENT_ID',
+      'OIDC_CLIENT_SECRET',
       'SESSION_SECRET',
       'TOKEN_PEPPER',
     ]) {
@@ -143,37 +147,34 @@ describe('loadConfig — fail-fast', () => {
     }
   });
 
-  it('requires secrets when AUTH_MODE=github even in development', () => {
-    expect(() => loadConfig({ ...validDevEnv(), AUTH_MODE: 'github' })).toThrow(ConfigError);
-  });
-});
-
-describe('loadConfig — GitHub login allowlist', () => {
-  it('defaults to open login (null) when unset', () => {
-    expect(loadConfig(validDevEnv()).allowedGitHubUserIds).toBeNull();
+  it('requires secrets when AUTH_MODE=oidc even in development', () => {
+    expect(() => loadConfig({ ...validDevEnv(), AUTH_MODE: 'oidc' })).toThrow(ConfigError);
   });
 
-  it('parses a comma-separated numeric id list, trimming blanks and de-duplicating', () => {
-    const cfg = loadConfig({ ...validDevEnv(), ALLOWED_GITHUB_USER_IDS: ' 123 , ,456,123 ' });
-    expect(cfg.allowedGitHubUserIds).toEqual(new Set(['123', '456']));
-  });
-
-  it('treats a whitespace-only value as open login', () => {
-    expect(
-      loadConfig({ ...validDevEnv(), ALLOWED_GITHUB_USER_IDS: '  ' }).allowedGitHubUserIds,
-    ).toBeNull();
-  });
-
-  it('rejects non-numeric entries at boot', () => {
+  it('rejects AUTH_MODE=github with a migration hint (GitHub OAuth was removed)', () => {
     let err: ConfigError | null = null;
     try {
-      loadConfig({ ...validDevEnv(), ALLOWED_GITHUB_USER_IDS: 'octocat,123' });
+      loadConfig({ ...validDevEnv(), AUTH_MODE: 'github' });
     } catch (e) {
       err = e as ConfigError;
     }
     expect(err).not.toBeNull();
-    expect(err!.message).toMatch(/ALLOWED_GITHUB_USER_IDS/);
-    expect(err!.details).toContain('octocat');
+    expect(err!.message).toMatch(/AUTH_MODE=github is no longer supported/);
+    expect(err!.details.join('\n')).toMatch(/OIDC_ISSUER_URL/);
+  });
+
+  it('rejects a non-URL OIDC_ISSUER_URL', () => {
+    expect(() =>
+      loadConfig({
+        ...validDevEnv(),
+        AUTH_MODE: 'oidc',
+        OIDC_ISSUER_URL: 'not-a-url',
+        OIDC_CLIENT_ID: 'id',
+        OIDC_CLIENT_SECRET: 'secret',
+        SESSION_SECRET: 'a'.repeat(48),
+        TOKEN_PEPPER: 'b'.repeat(48),
+      }),
+    ).toThrow(ConfigError);
   });
 });
 
@@ -193,9 +194,10 @@ describe('loadConfig — self-hosted deployment knobs', () => {
     const prod = loadConfig({
       ...validDevEnv(),
       NODE_ENV: 'production',
-      AUTH_MODE: 'github',
-      GITHUB_OAUTH_CLIENT_ID: 'id',
-      GITHUB_OAUTH_CLIENT_SECRET: 'secret',
+      AUTH_MODE: 'oidc',
+      OIDC_ISSUER_URL: 'https://auth.example.com/application/o/ganttly/',
+      OIDC_CLIENT_ID: 'id',
+      OIDC_CLIENT_SECRET: 'secret',
       SESSION_SECRET: 'x'.repeat(32),
       TOKEN_PEPPER: 'p'.repeat(32),
     });
@@ -207,9 +209,10 @@ describe('loadConfig — self-hosted deployment knobs', () => {
     const cfg = loadConfig({
       ...validDevEnv(),
       NODE_ENV: 'production',
-      AUTH_MODE: 'github',
-      GITHUB_OAUTH_CLIENT_ID: 'id',
-      GITHUB_OAUTH_CLIENT_SECRET: 'secret',
+      AUTH_MODE: 'oidc',
+      OIDC_ISSUER_URL: 'https://auth.example.com/application/o/ganttly/',
+      OIDC_CLIENT_ID: 'id',
+      OIDC_CLIENT_SECRET: 'secret',
       SESSION_SECRET: 'x'.repeat(32),
       TOKEN_PEPPER: 'p'.repeat(32),
       SESSION_COOKIE_SECURE: 'false',

@@ -184,8 +184,8 @@ describe('useAuthStore', () => {
 
     it('peekLoginError reads and cleans the query param', () => {
       const original = window.location.href;
-      window.history.replaceState(null, '', '/?login_error=github_login_failed');
-      expect(peekLoginError()).toBe('github_login_failed');
+      window.history.replaceState(null, '', '/?login_error=oidc_login_failed');
+      expect(peekLoginError()).toBe('oidc_login_failed');
       expect(window.location.search).toBe('');
       window.history.replaceState(null, '', original);
     });
@@ -203,9 +203,9 @@ describe('useAuthStore', () => {
     afterEach(() => window.history.replaceState(null, '', originalHref));
 
     it('captureLoginError stashes the code and cleans the URL', () => {
-      window.history.replaceState(null, '', '/?login_error=not_allowed');
+      window.history.replaceState(null, '', '/?login_error=oidc_login_failed');
       useAuthStore.getState().captureLoginError();
-      expect(useAuthStore.getState().lastLoginError).toBe('not_allowed');
+      expect(useAuthStore.getState().lastLoginError).toBe('oidc_login_failed');
       expect(window.location.search).toBe('');
     });
 
@@ -216,16 +216,15 @@ describe('useAuthStore', () => {
     });
 
     it('consumeLoginError returns and clears (consume-on-read)', () => {
-      useAuthStore.setState({ lastLoginError: 'github_login_failed' });
-      expect(useAuthStore.getState().consumeLoginError()).toBe('github_login_failed');
+      useAuthStore.setState({ lastLoginError: 'oidc_login_failed' });
+      expect(useAuthStore.getState().consumeLoginError()).toBe('oidc_login_failed');
       expect(useAuthStore.getState().lastLoginError).toBeNull();
       expect(useAuthStore.getState().consumeLoginError()).toBeNull();
     });
 
     it('loginErrorMessage maps known codes and falls back for unknown ones', () => {
-      expect(loginErrorMessage('not_allowed')).toMatch(/白名单/);
-      expect(loginErrorMessage('dev_mode_no_github')).toMatch(/开发模式/);
-      expect(loginErrorMessage('github_login_failed')).toMatch(/重试/);
+      expect(loginErrorMessage('dev_mode_no_oidc')).toMatch(/开发模式/);
+      expect(loginErrorMessage('oidc_login_failed')).toMatch(/重试/);
       expect(loginErrorMessage('mystery')).toMatch(/mystery/);
       expect(loginErrorMessage(null)).toBeNull();
     });

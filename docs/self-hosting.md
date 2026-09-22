@@ -9,20 +9,27 @@
 ## 前置条件
 
 - Docker 与 Docker Compose（v2）
-- 一台 GitHub 账号可访问的机器（用于创建 OAuth App）
+- 一个 OIDC 身份提供方（IdP）——如自建的 [authentik](https://goauthentik.io)、Keycloak，或任何标准 OIDC 服务
 - （推荐）一个域名 + TLS 反向代理；纯 HTTP 仅建议用于可信内网
 
-## 1. 创建 GitHub OAuth App
+## 1. 在 IdP 创建 OIDC 应用（以 authentik 为例）
 
-ganttly 不自建用户名/密码库，登录完全走 GitHub OAuth（spec §8.2）：
+ganttly 不自建用户名/密码库，登录完全走标准 OIDC 授权码流程（spec §8.2）：
 
-1. 打开 GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**
+1. authentik 管理界面 → **Applications → Providers → Create → OAuth2/OpenID Connect**
 2. 填写：
-   - **Homepage URL**：`https://ganttly.example.com`（你的实例地址）
-   - **Authorization callback URL**：`https://ganttly.example.com/api/v1/auth/github/callback`
-3. 创建后记录 **Client ID**，并 **Generate a new client secret** 记录 **Client Secret**
+   - **Name**：`ganttly`
+   - **Client type**：`Confidential`
+   - **Redirect URIs**（Exact match）：`https://ganttly.example.com/api/v1/auth/oidc/callback`
+   - **Authorization flow**：默认（implicit consent 可选）
+3. 创建后记录 **Client ID** 与 **Client Secret**；Provider 详情页的 **OpenID Configuration Issuer** 就是下文的 `OIDC_ISSUER_URL`（形如 `https://auth.example.com/application/o/ganttly/`，注意结尾斜杠有无均可，服务端会归一化）
+4. **Applications → Create application** 绑定该 Provider——**谁能登录 ganttly 就在这一步控制**：给应用绑定组（Group）或访问策略（Policy），不在组内的用户连授权页都进不去
 
-> 回调 URL 必须与 `PUBLIC_BASE_URL` 完全一致（协议、域名、端口），否则 GitHub 报 `redirect_uri_mismatch`。
+其他 IdP（Keycloak 等）同理：创建 confidential OIDC 客户端、回调地址同上、记录 issuer 与凭据即可。ganttly 请求的 scope 默认为 `openid profile email`（可用 `OIDC_SCOPES` 覆盖），登录时通过发现文档（`{issuer}/.well-known/openid-configuration`）解析端点，用户身份取自 userinfo 的 `sub`/`name`/`preferred_username`/`email`。
+
+> 回调 URL 必须与 `PUBLIC_BASE_URL` 完全一致（协议、域名、端口），否则 IdP 报 `redirect_uri_mismatch`。
+>
+> 历史：v0.13.0 之前 ganttly 使用 GitHub OAuth App 登录，已移除。升级部署见下文「从 GitHub 登录迁移」。
 
 ## 2. 生成密钥
 
@@ -37,7 +44,7 @@ openssl rand -hex 32   # → SESSION_SECRET（再生成一次 → TOKEN_PEPPER�
 git clone https://github.com/your-org/ganttly.git && cd ganttly
 cp .env.example .env
 # 编辑 .env：填入 POSTGRES_PASSWORD、PUBLIC_BASE_URL/WEB_APP_URL、
-# GANTTLY_INSTANCE_ID/NAME、GitHub Client ID/Secret、SESSION_SECRET、TOKEN_PEPPER
+# GANTTLY_INSTANCE_ID/NAME、OIDC_ISSUER_URL/CLIENT_ID/CLIENT_SECRET、SESSION_SECRET、TOKEN_PEPPER
 docker compose up -d
 ```
 
@@ -87,7 +94,7 @@ server {
 ## 5. 首次登录与日常使用
 
 1. 浏览器打开 `https://ganttly.example.com` —— 自建同源部署下，Web 内置的"ganttly Cloud"入口就是本实例（它指向当前页面 origin），无需手动"添加实例"
-2. 点击 **登录**，走 GitHub OAuth 授权，回到 ganttly 后自动创建个人工作区
+2. 点击 **登录**，跳转到你的 IdP 完成 SSO 授权，回到 ganttly 后自动创建个人工作区
 3. 在本地工作区创建项目后，可通过项目卡片菜单 **复制到远端** 上传到自建实例
 4. "添加远端服务"入口用于添加**其他** ganttly 实例（输入其 HTTPS 地址，经 `/.well-known/ganttly-instance` 发现校验）
 
@@ -99,24 +106,26 @@ server {
    - 鉴权：`Authorization: Bearer <PAT 明文>`
 3. 可用工具：`list_workspaces` / `list_projects` / `get_project` / `search_tasks` / `search_resources` / `get_task` / `create_task` / `create_tasks` / `update_task` / `move_task` / `add_dependency` / `remove_dependency`
 
-### 限制可登录用户（白名单）
+### 限制可登录用户（IdP 侧控制）
 
-默认任何 GitHub 账号完成 OAuth 即可在实例上获得个人工作区。若只想允许指定用户登录，在 `.env` 配置 `ALLOWED_GITHUB_USER_IDS`（逗号分隔的 GitHub **数字 ID**，不是用户名——用户名可改，数字 ID 终身不变）：
+ganttly 服务端**不再内置登录白名单**：谁能登录由 IdP 决定。在 authentik 中打开 ganttly 应用 → **Policy / Group Bindings**，绑定允许使用的用户组或策略即可；未绑定的用户在 IdP 侧就会被拒绝，ganttly 数据库不落任何记录。
 
-```bash
-# 查某用户的数字 ID（看返回 JSON 里的 "id" 字段）：
-curl https://api.github.com/users/<github用户名>
+### 从 GitHub 登录迁移（v0.13.0）
 
-# .env
-ALLOWED_GITHUB_USER_IDS=12345678,87654321
-docker compose up -d   # 重启生效
+GitHub OAuth 登录已移除，`AUTH_MODE=github` 会让服务启动失败（fail-fast，错误信息含迁移指引）。升级已有部署：
+
+1. 按 §1 在你的 IdP 创建 OIDC 应用
+2. `.env`：删除 `GITHUB_OAUTH_CLIENT_ID/SECRET`、`ALLOWED_GITHUB_USER_IDS`，改为 `AUTH_MODE=oidc` + `OIDC_ISSUER_URL/CLIENT_ID/CLIENT_SECRET`
+3. `docker compose up -d`
+
+**存量数据**：`users` 表按 `(provider, subject)` 区分身份，GitHub 时期的行（provider=`https://github.com`）升级后无法再登录——同一用户从 IdP 登录会创建**新用户**（provider=issuer URL）。如需把旧账号的项目"过户"给新身份，可在数据库手动改绑（按 email 匹配，需停机操作）：
+
+```sql
+-- 把 GitHub 用户的行改绑到 IdP 身份（sub 从 IdP userinfo 获取）：
+UPDATE users SET provider='<你的issuer去尾斜杠>', subject='<authentik用户UUID>' WHERE email='<同一邮箱>' AND provider='https://github.com';
 ```
 
-- 留空/未配置 = 不限制（开放登录），不影响已有部署的升级
-- 名单外的用户在登录时被拒，Web 端显示"仅允许白名单内的用户登录"，不会在数据库留下任何记录
-- 非数字条目会导致服务启动失败（fail-fast，防止配置笔误把所有人挡在门外）
-
-**注意：白名单只拦截新登录。** 启用前已登录过的用户，其会话 Cookie 最长 7 天自然失效；若他们在开放期内创建过 PAT（MCP 令牌），PAT 不会自动过期——启用后应按 ops-runbook 的「登录白名单启用审计」核对存量用户并吊销陌生账号的 PAT。
+该用户旧的 PAT（MCP 令牌）与工作区归属随行保留；未改绑的 GitHub 孤儿用户不会自动清理，可按需删除（见 ops-runbook）。
 
 ### 跨域 Web 前端连接（添加远端服务）
 
@@ -165,14 +174,14 @@ docker compose exec -T postgres psql -U postgres ganttly < ganttly-2026-08-14.sq
 - `/metrics` 无鉴权：公网部署建议在反代屏蔽该路径，或 `.env` 设 `METRICS_ENABLED=false`
 - `TOKEN_PEPPER` 与 `SESSION_SECRET` 不要复用同一个值；更换 pepper 会使所有 PAT 失效（需重新签发）
 - 数据库仅在 compose 内网可达，未映射宿主机端口
-- 多人使用的公网实例建议配置 `ALLOWED_GITHUB_USER_IDS` 登录白名单（见 §5）
+- 多人使用的公网实例应在 IdP 侧限制谁能访问 ganttly 应用（见 §5「限制可登录用户」）
 
 ## 9. 验收冒烟清单（全新机器）
 
 对应 spec §17 PR7 验收（"可登录、复制项目、MCP 建任务"）：
 
 1. 打开 `https://<host>` 能看到 Web 界面
-2. GitHub 登录成功，进入个人工作区
+2. SSO（OIDC）登录成功，进入个人工作区
 3. 本地项目"复制到远端"成功，远端可打开编辑
 4. 创建 `task:write` PAT
 5. MCP Host 用 PAT 调 `list_projects` 找到项目，`create_tasks` 建任务成功
@@ -181,15 +190,16 @@ docker compose exec -T postgres psql -U postgres ganttly < ganttly-2026-08-14.sq
 
 ## 10. 故障排查
 
-| 症状                              | 排查                                                                                                      |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| 页面 502 / 打不开                 | `docker compose ps` 是否 healthy；`GANTTLY_PORT` 与反代后端端口是否一致                                   |
-| 登录后仍是未登录                  | HTTP 部署忘了 `SESSION_COOKIE_SECURE=false`；或 HTTPS 部署反代未透传（检查 Cookie 是否被剥）              |
-| GitHub 报 `redirect_uri_mismatch` | OAuth App 回调 URL 与 `PUBLIC_BASE_URL` 不一致（协议/域名/端口都要相同）                                  |
-| `/health/ready` 503               | `checks.database` fail → PostgreSQL 问题；`migrations: behind/missing` → 看 `docker compose logs migrate` |
-| MCP 连接 403                      | 反代未透传 `Host` 头（`/mcp` 有 DNS-rebinding 白名单校验）                                                |
-| MCP 工具 401                      | PAT 过期/被撤销/权限不含所需 scope                                                                        |
-| 改了 `.env` 不生效                | `docker compose up -d` 重建容器（env 在容器创建时注入）                                                   |
+| 症状                               | 排查                                                                                                             |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 页面 502 / 打不开                  | `docker compose ps` 是否 healthy；`GANTTLY_PORT` 与反代后端端口是否一致                                          |
+| 登录后仍是未登录                   | HTTP 部署忘了 `SESSION_COOKIE_SECURE=false`；或 HTTPS 部署反代未透传（检查 Cookie 是否被剥）                     |
+| IdP 报 `redirect_uri_mismatch`     | IdP 应用的回调 URL 与 `PUBLIC_BASE_URL` 不一致（协议/域名/端口都要相同）                                         |
+| 登录跳回且提示 `oidc_login_failed` | 服务端日志 `oidc discovery failed` → `OIDC_ISSUER_URL` 不可达/写错；`token endpoint returned` → 凭据或 code 问题 |
+| `/health/ready` 503                | `checks.database` fail → PostgreSQL 问题；`migrations: behind/missing` → 看 `docker compose logs migrate`        |
+| MCP 连接 403                       | 反代未透传 `Host` 头（`/mcp` 有 DNS-rebinding 白名单校验）                                                       |
+| MCP 工具 401                       | PAT 过期/被撤销/权限不含所需 scope                                                                               |
+| 改了 `.env` 不生效                 | `docker compose up -d` 重建容器（env 在容器创建时注入）                                                          |
 
 ---
 

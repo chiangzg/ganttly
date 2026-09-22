@@ -60,14 +60,14 @@ export function PatSettings() {
         <div className="max-w-sm rounded-3xl border border-border bg-bg-elevated p-8 text-center shadow-xl">
           <h2 className="text-lg font-semibold text-fg">连接到 {instance.displayName}</h2>
           <p className="mt-2 text-sm leading-6 text-fg-muted">
-            使用 GitHub 登录后即可管理 MCP 访问令牌。
+            使用 SSO 登录后即可管理 MCP 访问令牌。
           </p>
           <button
             type="button"
             onClick={() => login(instance, '/settings/tokens')}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90"
           >
-            <LogIn size={16} /> 连接 GitHub
+            <LogIn size={16} /> SSO 登录
           </button>
         </div>
       </div>
