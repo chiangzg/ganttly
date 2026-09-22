@@ -17,7 +17,7 @@ function discoveryPayload(
     apiBaseUrl: 'https://gan.internal/api/v1',
     webAppUrl: 'https://gan.internal',
     mcp: { url: 'https://gan.internal/mcp', transport: 'streamable-http', authMethods: ['pat'] },
-    auth: { browserModes: ['session'], providers: ['github'] },
+    auth: { browserModes: ['session'], providers: ['oidc'] },
     events: { transport: 'sse', url: 'https://gan.internal/api/v1/events' },
     apiVersions: ['v1'],
     minClientVersion: '0.1.0',

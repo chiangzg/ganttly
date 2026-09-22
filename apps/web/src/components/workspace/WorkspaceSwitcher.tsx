@@ -57,7 +57,7 @@ export function WorkspaceSwitcher() {
     if (!instance) return;
     if (!authByInstance[instanceId]) {
       // Not logged in — dev instances offer a test session; others go to
-      // the GitHub OAuth flow.
+      // the OIDC (SSO) login flow.
       const discovery = await fetchInstanceDiscovery(instance);
       if (discovery?.auth.devLogin) {
         const profile = await useAuthStore.getState().devLogin(instance);

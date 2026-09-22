@@ -145,37 +145,36 @@ location /api/v1/events {
 
 ---
 
-## 8. 登录白名单启用审计
+## 8. GitHub → OIDC 迁移后的存量账号审计
 
-`ALLOWED_GITHUB_USER_IDS` 只拦截新登录。对启用白名单**之前**已注册的存量用户，应做一次性核对（他们最多靠会话 Cookie 再活跃 7 天，但 PAT 不过期）：
+v0.13.0 起登录只支持 OIDC（`AUTH_MODE=oidc`），GitHub OAuth 已移除：`users` 中 `provider='https://github.com'` 的行无法再登录（会话随 Cookie 最多 7 天失效，但 PAT 不过期）。升级后应做一次性核对（改绑方法见 self-hosting.md「从 GitHub 登录迁移」）：
 
 ```sql
--- 1. 列出全部用户及登录标识（provider='https://github.com' 时 subject 即 GitHub 数字 ID）
+-- 1. 列出全部用户及登录标识（OIDC 用户 provider 为 issuer URL，subject 为 IdP 的 sub）
 SELECT id, provider, subject, email, display_name, created_at
 FROM users ORDER BY created_at;
 
--- 2. 找出白名单外的账号（把 12345678,87654321 换成你的白名单）
+-- 2. 列出无法再登录的 GitHub 存量用户
 SELECT id, subject, email, display_name, created_at
 FROM users
-WHERE provider = 'https://github.com'
-  AND subject NOT IN ('12345678', '87654321');
+WHERE provider = 'https://github.com';
 
--- 3. 吊销上述账号的 PAT（先跑 2 核对结果，再替换 <陌生用户id 列表> 执行）
+-- 3. 吊销这些账号的 PAT（先跑 2 核对结果再执行；已改绑的用户除外）
 UPDATE personal_access_tokens
 SET revoked_at = now()
 WHERE revoked_at IS NULL
   AND user_id IN (
     SELECT id FROM users
     WHERE provider = 'https://github.com'
-      AND subject NOT IN ('12345678', '87654321')
   );
 
--- 4. 确认无未撤销的陌生 PAT（应返回 0 行）
+-- 4. 确认无未撤销的孤儿 PAT（应返回 0 行）
 SELECT pat.id, pat.user_id, u.subject
 FROM personal_access_tokens pat JOIN users u ON u.id = pat.user_id
 WHERE pat.revoked_at IS NULL
-  AND u.provider = 'https://github.com'
-  AND u.subject NOT IN ('12345678', '87654321');
+  AND u.provider = 'https://github.com';
 ```
 
-白名单外的存量用户无需删行：会话 7 天内自然失效、PAT 吊销后即不可用，其个人工作区数据保留与否可自行决定。
+未改绑的 GitHub 用户行无需删除：其个人工作区数据保留与否可自行决定；确认不再需要时可直接删行。
+
+**登录范围控制**现由 IdP 侧的应用访问策略承担（服务端无白名单配置）。

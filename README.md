@@ -41,14 +41,14 @@ pnpm test:e2e      # Playwright + 截图回归 (50+ 用例)
 
 环境要求:Node ≥ 18, pnpm ≥ 9;开发者模式另需 Docker(仅用于 postgres,`pnpm dev:down` 可停库)。
 
-开发者模式(`AUTH_MODE=dev`)下远端功能零配置:在工作区切换器选 **ganttly Cloud → 开发登录** 即可建立测试会话,项目数据真实存于本地 postgres。GitHub OAuth 真实流程的验证见[自建部署](#自建部署)。
+开发者模式(`AUTH_MODE=dev`)下远端功能零配置:在工作区切换器选 **ganttly Cloud → 开发登录** 即可建立测试会话,项目数据真实存于本地 postgres。OIDC 真实登录流程的验证见[自建部署](#自建部署)。
 
 ## 自建部署
 
-一份 Docker 镜像同时提供 Web 界面、REST API、MCP 端点与 SSE 实时通知,配合 GitHub OAuth 即可拥有自己的 ganttly 实例:
+一份 Docker 镜像同时提供 Web 界面、REST API、MCP 端点与 SSE 实时通知,配合任一标准 OIDC 身份提供方(authentik、Keycloak 等)即可拥有自己的 ganttly 实例:
 
 ```bash
-cp .env.example .env   # 填入 GitHub OAuth 与密钥
+cp .env.example .env   # 填入 OIDC (IdP) 配置与密钥
 docker compose up -d
 ```
 

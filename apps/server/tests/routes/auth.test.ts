@@ -1,63 +1,110 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../src/bootstrap';
-import type { GitHubOAuthDeps, GitHubUser } from '../../src/auth/github';
+import type { OidcOAuthDeps, OidcUser } from '../../src/auth/oidc';
 import { buildTestConfig } from '../helpers';
 
-function githubModeConfig() {
-  return buildTestConfig({
-    AUTH_MODE: 'github',
-    GITHUB_OAUTH_CLIENT_ID: 'cid',
-    GITHUB_OAUTH_CLIENT_SECRET: 'secret',
-    SESSION_SECRET: 'a'.repeat(48),
-    TOKEN_PEPPER: 'b'.repeat(48),
-  });
+const OIDC_ENV = {
+  AUTH_MODE: 'oidc',
+  OIDC_ISSUER_URL: 'https://auth.example.com/application/o/ganttly/',
+  OIDC_CLIENT_ID: 'cid',
+  OIDC_CLIENT_SECRET: 'secret',
+  SESSION_SECRET: 'a'.repeat(48),
+  TOKEN_PEPPER: 'b'.repeat(48),
+};
+
+const FAKE_ENDPOINTS = {
+  authorizationEndpoint: 'https://auth.example.com/application/o/authorize/',
+  tokenEndpoint: 'https://auth.example.com/application/o/token/',
+  userinfoEndpoint: 'https://auth.example.com/application/o/userinfo/',
+};
+
+function fakeOidcDeps(): OidcOAuthDeps {
+  return {
+    discoverEndpoints: async () => FAKE_ENDPOINTS,
+    exchangeCode: async () => 'access-token',
+    fetchUser: async (): Promise<OidcUser> => ({
+      sub: 'oidc-sub-1',
+      name: 'Alice',
+      preferred_username: 'alice',
+      email: 'alice@example.com',
+    }),
+  };
+}
+
+function stateCookieLine(setCookie: string | string[] | undefined): string | undefined {
+  const lines = Array.isArray(setCookie) ? setCookie : [setCookie];
+  return lines.find((c) => c?.startsWith('ganttly_oauth_state='));
 }
 
 describe('auth routes (no database)', () => {
   let devApp: FastifyInstance;
-  let githubApp: FastifyInstance;
+  let oidcApp: FastifyInstance;
 
   beforeAll(async () => {
     devApp = await buildServer(buildTestConfig(), { registerDatabase: false });
-    githubApp = await buildServer(githubModeConfig(), { registerDatabase: false });
+    oidcApp = await buildServer(buildTestConfig(OIDC_ENV), {
+      registerDatabase: false,
+      oidcDeps: fakeOidcDeps(),
+    });
   });
 
   afterAll(async () => {
-    await Promise.all([devApp.close(), githubApp.close()]);
+    await Promise.all([devApp.close(), oidcApp.close()]);
   });
 
-  it('GET /api/v1/auth/github in dev mode redirects to web app with an error', async () => {
-    const res = await devApp.inject({ method: 'GET', url: '/api/v1/auth/github' });
+  it('GET /api/v1/auth/oidc in dev mode redirects to web app with an error', async () => {
+    const res = await devApp.inject({ method: 'GET', url: '/api/v1/auth/oidc' });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toContain('login_error=dev_mode_no_github');
+    expect(res.headers.location).toContain('login_error=dev_mode_no_oidc');
   });
 
-  it('GET /api/v1/auth/github in github mode redirects to GitHub and sets the state cookie', async () => {
-    const res = await githubApp.inject({ method: 'GET', url: '/api/v1/auth/github' });
+  it('GET /api/v1/auth/oidc redirects to the issuer and sets the state cookie', async () => {
+    const res = await oidcApp.inject({ method: 'GET', url: '/api/v1/auth/oidc' });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location?.startsWith('https://github.com/login/oauth/authorize?')).toBe(
-      true,
+    expect(res.headers.location?.startsWith(`${FAKE_ENDPOINTS.authorizationEndpoint}?`)).toBe(true);
+    const location = new URL(res.headers.location ?? '');
+    expect(location.searchParams.get('response_type')).toBe('code');
+    expect(location.searchParams.get('client_id')).toBe('cid');
+    expect(location.searchParams.get('scope')).toBe('openid profile email');
+    expect(location.searchParams.get('redirect_uri')).toBe(
+      'http://localhost:3001/api/v1/auth/oidc/callback',
     );
-    const location = res.headers.location ?? '';
-    expect(new URL(location).searchParams.get('client_id')).toBe('cid');
+    expect(location.searchParams.get('state')).toMatch(/^[0-9a-f]{32}$/);
     // State cookie is set, HttpOnly, SameSite=Lax.
-    const cookies = res.headers['set-cookie'] ?? [];
-    const stateCookie = (Array.isArray(cookies) ? cookies : [cookies]).find((c) =>
-      c.startsWith('ganttly_oauth_state='),
-    );
+    const stateCookie = stateCookieLine(res.headers['set-cookie']);
     expect(stateCookie).toBeTruthy();
     expect(stateCookie).toContain('HttpOnly');
     expect(stateCookie).toContain('SameSite=Lax');
   });
 
-  it('GET /api/v1/auth/github/callback without a database redirects to the error url', async () => {
+  it('GET /api/v1/auth/oidc bounces back with login_error when discovery fails', async () => {
+    const failing: OidcOAuthDeps = {
+      ...fakeOidcDeps(),
+      discoverEndpoints: async () => {
+        throw new Error('issuer unreachable');
+      },
+    };
+    const app = await buildServer(buildTestConfig(OIDC_ENV), {
+      registerDatabase: false,
+      oidcDeps: failing,
+    });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/auth/oidc' });
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain('login_error=oidc_login_failed');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /api/v1/auth/oidc/callback without a database redirects to the error url', async () => {
     const res = await devApp.inject({
       method: 'GET',
-      url: '/api/v1/auth/github/callback?code=x&state=y',
+      url: '/api/v1/auth/oidc/callback?code=x&state=y',
     });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toContain('login_error=github_login_failed');
+    expect(res.headers.location).toContain('login_error=oidc_login_failed');
   });
 
   it('POST /api/v1/auth/logout clears the session and returns 204', async () => {
@@ -66,7 +113,7 @@ describe('auth routes (no database)', () => {
   });
 
   it('POST /api/v1/auth/dev-session returns 404 when AUTH_MODE is not dev', async () => {
-    const res = await githubApp.inject({ method: 'POST', url: '/api/v1/auth/dev-session' });
+    const res = await oidcApp.inject({ method: 'POST', url: '/api/v1/auth/dev-session' });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe('NOT_FOUND');
   });
@@ -78,59 +125,25 @@ describe('auth routes (no database)', () => {
   });
 });
 
-describe('auth routes — GitHub login allowlist (callback gate)', () => {
-  const stranger: GitHubUser = {
-    id: 999999,
-    login: 'stranger',
-    name: 'Stranger',
-    email: 'stranger@example.com',
-    avatar_url: null,
-  };
-
-  function fakeDeps(user: GitHubUser): GitHubOAuthDeps {
-    return { exchangeCode: async () => 'tok', fetchUser: async () => user };
-  }
-
-  function allowlistConfig(userIds: string) {
-    return buildTestConfig({
-      AUTH_MODE: 'github',
-      GITHUB_OAUTH_CLIENT_ID: 'cid',
-      GITHUB_OAUTH_CLIENT_SECRET: 'secret',
-      SESSION_SECRET: 'a'.repeat(48),
-      TOKEN_PEPPER: 'b'.repeat(48),
-      ALLOWED_GITHUB_USER_IDS: userIds,
-    });
-  }
-
-  /**
-   * One full OAuth web-flow round trip as the stranger: mint a state cookie
-   * via the authorize entrypoint, then present it at the callback.
-   */
-  async function callbackAs(app: FastifyInstance) {
-    const start = await app.inject({ method: 'GET', url: '/api/v1/auth/github' });
-    expect(start.statusCode).toBe(302);
-    const state = new URL(start.headers.location ?? '').searchParams.get('state') ?? '';
-    const cookies = start.headers['set-cookie'] ?? [];
-    const stateCookie = (Array.isArray(cookies) ? cookies : [cookies])
-      .find((c) => c.startsWith('ganttly_oauth_state='))
-      ?.split(';')[0];
-    return app.inject({
-      method: 'GET',
-      url: `/api/v1/auth/github/callback?code=abc&state=${encodeURIComponent(state)}`,
-      headers: stateCookie ? { cookie: stateCookie } : {},
-    });
-  }
-
-  it('denies a user outside the allowlist: redirect not_allowed, no session', async () => {
-    // The db pool is registered (lazy — the denial path never queries) so the
-    // callback reaches the allowlist gate instead of failing on
+describe('auth routes — OIDC callback (state gate)', () => {
+  it('rejects a mismatched state: redirect to login_error, no session cookie', async () => {
+    // The db pool is registered (lazy — this path never queries) so the
+    // callback reaches the state check instead of failing on
     // database_unavailable. Provisioning-level assertions live in the
     // integration suite.
-    const app = await buildServer(allowlistConfig('1001'), { githubDeps: fakeDeps(stranger) });
+    const app = await buildServer(buildTestConfig(OIDC_ENV), { oidcDeps: fakeOidcDeps() });
     try {
-      const res = await callbackAs(app);
+      const start = await app.inject({ method: 'GET', url: '/api/v1/auth/oidc' });
+      expect(start.statusCode).toBe(302);
+      const state = new URL(start.headers.location ?? '').searchParams.get('state') ?? '';
+      const res = await app.inject({
+        method: 'GET',
+        // A state that never matches the cookie minted above.
+        url: `/api/v1/auth/oidc/callback?code=abc&state=${encodeURIComponent(`ff${state.slice(2)}`)}`,
+        headers: { cookie: stateCookieLine(start.headers['set-cookie'])?.split(';')[0] ?? '' },
+      });
       expect(res.statusCode).toBe(302);
-      expect(res.headers.location).toContain('login_error=not_allowed');
+      expect(res.headers.location).toContain('login_error=oidc_login_failed');
       const set = res.headers['set-cookie'] ?? [];
       expect((Array.isArray(set) ? set : [set]).some((c) => c.startsWith('ganttly_session='))).toBe(
         false,

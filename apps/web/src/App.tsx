@@ -103,16 +103,16 @@ function LegacyProjectRedirect() {
 }
 
 /**
- * Handles the redirect back from GitHub OAuth. The server sends the user to
- * the web root after setting the session cookie; this component verifies the
- * login succeeded, loads the remote workspaces, and navigates to the first
- * one's project center.
+ * Handles the redirect back from the OIDC login flow. The server sends the
+ * user to the web root after setting the session cookie; this component
+ * verifies the login succeeded, loads the remote workspaces, and navigates to
+ * the first one's project center.
  */
 function PostLoginRedirect({ info }: { info: { instanceId: string; path: string } }) {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<'checking' | 'failed'>('checking');
-  // Specific reason when the server reported one via `?login_error=`
-  // (e.g. an allowlist denial); null keeps the generic retry copy.
+  // Specific reason when the server reported one via `?login_error=`;
+  // null keeps the generic retry copy.
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -152,7 +152,7 @@ function PostLoginRedirect({ info }: { info: { instanceId: string; path: string 
     return (
       <MessagePage
         title="登录失败"
-        message={failedMessage ?? 'GitHub 授权未成功，请重试。'}
+        message={failedMessage ?? 'SSO 登录未成功，请重试。'}
         action={
           <button
             type="button"

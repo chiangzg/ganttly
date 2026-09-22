@@ -24,7 +24,7 @@ function descriptor(overrides: Record<string, unknown> = {}): Record<string, unk
     apiBaseUrl: 'http://localhost:9617/api/v1',
     webAppUrl: 'http://localhost:9617',
     mcp: { url: 'http://localhost:9617/mcp', transport: 'streamable-http', authMethods: ['pat'] },
-    auth: { browserModes: ['session'], providers: ['github'] },
+    auth: { browserModes: ['session'], providers: ['oidc'] },
     events: { transport: 'sse', url: 'http://localhost:9617/api/v1/events' },
     apiVersions: ['v1'],
     minClientVersion: '0.6.0',

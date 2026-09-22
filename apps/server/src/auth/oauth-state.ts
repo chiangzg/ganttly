@@ -1,12 +1,13 @@
 /**
  * OAuth `state` CSRF protection (spec §13).
  *
- * A high-entropy random `state` is sent to GitHub *and* stored in a short-lived
- * HttpOnly, SameSite=Lax cookie. On callback we compare the query `state` to
- * the cookie value. The state itself is 128 bits of randomness, so it cannot be
- * predicted; SameSite=Lax prevents a cross-origin attacker from setting a
- * cookie on our domain, so they cannot forge a matching (cookie, code) pair for
- * a victim. The cookie therefore does not need to be signed.
+ * A high-entropy random `state` is sent to the identity provider *and* stored
+ * in a short-lived HttpOnly, SameSite=Lax cookie. On callback we compare the
+ * query `state` to the cookie value. The state itself is 128 bits of
+ * randomness, so it cannot be predicted; SameSite=Lax prevents a cross-origin
+ * attacker from setting a cookie on our domain, so they cannot forge a
+ * matching (cookie, code) pair for a victim. The cookie therefore does not
+ * need to be signed.
  *
  * Cookie helpers read/write via the `@fastify/cookie` decorators that
  * `@fastify/secure-session` registers transitively.
@@ -26,7 +27,7 @@ export interface StateCookieOptions {
   secure: boolean;
 }
 
-/** Set the state cookie alongside the redirect to GitHub. */
+/** Set the state cookie alongside the redirect to the identity provider. */
 export function setStateCookie(
   reply: FastifyReply,
   state: string,

@@ -2,10 +2,10 @@
  * Inline login prompt shown when the active scope is a remote instance that
  * the user has not yet authenticated with (spec §12.3).
  *
- * Replaces the project grid with a centered card offering the GitHub OAuth
+ * Replaces the project grid with a centered card offering the OIDC (SSO)
  * entry point. The actual redirect happens in `authStore.login`. Instances
  * that advertise `auth.devLogin` (AUTH_MODE=dev, local testing) instead get
- * a one-click dev-session button — the GitHub flow always fails there.
+ * a one-click dev-session button — the OIDC flow always fails there.
  */
 import { Cloud, LogIn } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -123,7 +123,7 @@ export function LoginGate({
         <p className="mt-2 text-sm leading-6 text-fg-muted">
           {devCapable
             ? '该实例运行在开发模式，可直接建立测试会话。'
-            : '使用 GitHub 登录以访问该工作区的项目。你的凭证仅在此实例上验证，不经过 ganttly 本地。'}
+            : '使用统一身份（SSO）登录以访问该工作区的项目。你的凭证仅在该实例上验证，不经过 ganttly 本地。'}
         </p>
         {devCapable ? (
           <button
@@ -140,7 +140,7 @@ export function LoginGate({
             onClick={() => void handleLogin()}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90"
           >
-            <LogIn size={16} /> 连接 GitHub
+            <LogIn size={16} /> SSO 登录
           </button>
         )}
         {loginError ? <p className="mt-3 text-xs text-danger">{loginError}</p> : null}

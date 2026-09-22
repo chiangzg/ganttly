@@ -2,8 +2,9 @@
  * Health probes (spec §14.2).
  *
  * - `GET /health/live` — liveness; never touches external dependencies. A 200
- *   here means the process is running and serving. It MUST NOT depend on GitHub
- *   or the database, so a transient DB outage does not get the pod killed.
+ *   here means the process is running and serving. It MUST NOT depend on the
+ *   identity provider or the database, so a transient DB outage does not get
+ *   the pod killed.
  * - `GET /health/ready` — readiness; verifies the database connection with a
  *   trivial round-trip AND that the applied Drizzle migration count matches the
  *   migrations shipped with the image. Returns 503 when the database is

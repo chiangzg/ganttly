@@ -22,7 +22,7 @@ export type McpAuthMethod = z.infer<typeof mcpAuthMethodSchema>;
 export const browserModeSchema = z.enum(['session']);
 export type BrowserMode = z.infer<typeof browserModeSchema>;
 
-export const authProviderSchema = z.enum(['github']);
+export const authProviderSchema = z.enum(['oidc']);
 export type AuthProvider = z.infer<typeof authProviderSchema>;
 
 export const instanceDiscoverySchema = z.object({
@@ -45,7 +45,7 @@ export const instanceDiscoverySchema = z.object({
     /**
      * True when the instance offers `POST /auth/dev-session` (AUTH_MODE=dev).
      * Lets local-development clients show a dev login affordance instead of
-     * the GitHub flow, which dev instances always reject. Defaults to false
+     * the OIDC flow, which dev instances always reject. Defaults to false
      * so descriptors from older servers keep parsing.
      */
     devLogin: z.boolean().default(false),

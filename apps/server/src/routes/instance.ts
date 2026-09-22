@@ -91,7 +91,7 @@ export function buildDiscovery(config: AppConfig): InstanceDiscovery {
     },
     auth: {
       browserModes: ['session'],
-      providers: ['github'],
+      providers: ['oidc'],
       devLogin: config.authMode === 'dev',
     },
     events: {
