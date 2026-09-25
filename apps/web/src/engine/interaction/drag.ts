@@ -18,7 +18,9 @@ import {
   pixelsPerDay,
   dayDiff,
 } from '../layout';
-import { addCalendarDays } from '@/lib/calendar';
+import { addCalendarDays, durationBetween, type ResolvedCalendar } from '@/lib/calendar';
+import { computeCascadeRollup } from '@/lib/summary';
+import type { Task } from '@ganttly/schema';
 
 export type HitZone =
   | { kind: 'body'; taskId: string }
@@ -137,4 +139,48 @@ export function applyDrag(
     return { start: row.start, end: newEndISO };
   }
   return null;
+}
+
+/**
+ * Apply a drag move to `draggedId` and cascade rollup to its ancestor summary
+ * tasks. Returns a new tasks array; does not mutate the input. Used for the
+ * live (non-undoable) cursor-following update during pointer-move; the final
+ * commit happens on pointer-up via a Command.
+ *
+ * Duration is derived in WORKING days from the new span (schema: "Duration in
+ * WORKING days"), matching the drawer's end-date edit — a drag that crosses
+ * holidays must not inflate 工期 with non-working days. Milestones keep their
+ * stored duration; the floor of 1 keeps a task dropped entirely inside a
+ * holiday block from collapsing to 0 working days.
+ */
+export function applyDragWithRollup(
+  tasks: Task[],
+  draggedId: string,
+  next: { start: string; end: string },
+  cal: ResolvedCalendar,
+): Task[] {
+  // 1. Apply the drag to the target task.
+  let result = tasks.map((t) =>
+    t.id === draggedId
+      ? {
+          ...t,
+          start: next.start,
+          end: next.end,
+          duration: t.isMilestone
+            ? t.duration
+            : Math.max(1, durationBetween(next.start, next.end, cal)),
+        }
+      : t,
+  );
+  // 2. Cascade rollup to all ancestor summaries. Merge all patches in a single
+  //    pass (O(n)) rather than one map per patch.
+  const patches = computeCascadeRollup(result, draggedId);
+  if (patches.length > 0) {
+    const patchMap = new Map(patches.map((p) => [p.id, p.patch]));
+    result = result.map((t) => {
+      const p = patchMap.get(t.id);
+      return p ? { ...t, ...p } : t;
+    });
+  }
+  return result;
 }

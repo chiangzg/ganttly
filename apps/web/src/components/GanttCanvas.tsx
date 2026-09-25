@@ -32,7 +32,6 @@ import {
   dateRangeWidth,
   dateToPixel,
   pixelsPerDay,
-  dayDiff,
   clamp,
   ROW_HEIGHT,
   HEADER_HEIGHT,
@@ -40,6 +39,7 @@ import {
 import {
   hitTest,
   applyDrag,
+  applyDragWithRollup,
   cursorForHit,
   type DragState,
   PAN_THRESHOLD,
@@ -47,7 +47,7 @@ import {
 import type { Scene } from '@/engine/render/types';
 import { useViewStore } from '@/store/useViewStore';
 import { wouldCreateCycle } from '@/lib/schedule';
-import { computeCascadeRollup } from '@/lib/summary';
+import { resolveCalendar, durationBetween } from '@/lib/calendar';
 import { findActiveBaseline } from '@/lib/baseline';
 import { computeZoomAround, nextZoomLevel } from '@/lib/zoomAround';
 import { computeSelectionOnPointerDown } from '@/lib/selection';
@@ -68,6 +68,9 @@ export function GanttCanvas() {
   const [size, setSize] = useState({ width: 800, height: 600 });
 
   const file = useProjectStore((s) => s.file);
+  // Calendar for working-day duration math on drag commits. The calendar never
+  // changes mid-drag, so the memoised value stays valid through pointer events.
+  const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
   const dispatch = useProjectStore((s) => s.dispatch);
   const openDrawer = useViewStore((s) => s.openDrawer);
   // Active baseline is ephemeral UI state (spec §6.1) — read from viewStore,
@@ -500,7 +503,7 @@ export function GanttCanvas() {
       useProjectStore.setState({
         file: {
           ...file,
-          tasks: applyDragWithRollup(file.tasks, row.id, next),
+          tasks: applyDragWithRollup(file.tasks, row.id, next, cal),
         },
       });
     }
@@ -561,7 +564,13 @@ export function GanttCanvas() {
       }
 
       const currentFile = useProjectStore.getState().file;
-      const finalDuration = dayDiff(final.start, final.end) + 1;
+      // Duration is derived in WORKING days from the final span (schema §Task:
+      // "Duration in WORKING days") — same rule as the drawer's end-date edit,
+      // so a drag crossing holidays doesn't inflate 工期. Milestones keep their
+      // stored duration; the floor of 1 guards a drop fully inside a holiday.
+      const finalDuration = preTask.isMilestone
+        ? preTask.duration
+        : Math.max(1, durationBetween(final.start, final.end, cal));
       useProjectStore.setState({
         file: { ...currentFile, tasks: preDragTasks },
       });
@@ -836,39 +845,4 @@ function VerticalScrollShim({
       <div style={{ width: 1, height: contentHeight }} />
     </div>
   );
-}
-
-/**
- * Apply a drag move to `draggedId` and cascade rollup to its ancestor summary
- * tasks. Returns a new tasks array; does not mutate the input. Used for the
- * live (non-undoable) cursor-following update during pointer-move; the final
- * commit happens on pointer-up via a Command.
- */
-function applyDragWithRollup(
-  tasks: Task[],
-  draggedId: string,
-  next: { start: string; end: string },
-): Task[] {
-  // 1. Apply the drag to the target task.
-  let result = tasks.map((t) =>
-    t.id === draggedId
-      ? {
-          ...t,
-          start: next.start,
-          end: next.end,
-          duration: dayDiff(next.start, next.end) + 1,
-        }
-      : t,
-  );
-  // 2. Cascade rollup to all ancestor summaries. Merge all patches in a single
-  //    pass (O(n)) rather than one map per patch.
-  const patches = computeCascadeRollup(result, draggedId);
-  if (patches.length > 0) {
-    const patchMap = new Map(patches.map((p) => [p.id, p.patch]));
-    result = result.map((t) => {
-      const p = patchMap.get(t.id);
-      return p ? { ...t, ...p } : t;
-    });
-  }
-  return result;
 }
