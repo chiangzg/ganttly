@@ -219,7 +219,13 @@ export class ProjectApplicationService {
       const newRevision = row.revision + 1;
       await tx
         .update(projects)
-        .set({ fileJsonb: canonical, summaryJsonb: stats, revision: newRevision, updatedAt: now })
+        .set({
+          name: canonical.project.name,
+          fileJsonb: canonical,
+          summaryJsonb: stats,
+          revision: newRevision,
+          updatedAt: now,
+        })
         .where(eq(projects.id, params.projectId));
 
       const snapshot = await this.snapshotAndRecord(tx, {
@@ -302,6 +308,7 @@ export class ProjectApplicationService {
         await tx
           .update(projects)
           .set({
+            name: canonical.project.name,
             fileJsonb: canonical,
             summaryJsonb: computeProjectStats(canonical),
             revision: newRevision,
@@ -428,6 +435,7 @@ export class ProjectApplicationService {
       await tx
         .update(projects)
         .set({
+          name: canonical.project.name,
           fileJsonb: canonical,
           summaryJsonb: computeProjectStats(canonical),
           revision: newRevision,
@@ -708,6 +716,7 @@ export class ProjectApplicationService {
       await tx
         .update(projects)
         .set({
+          name: canonical.project.name,
           fileJsonb: canonical,
           summaryJsonb: computeProjectStats(canonical),
           revision: newRevision,

@@ -70,8 +70,15 @@ export function useRemoteEvents(): void {
       if (isCurrent) {
         // Revision-aware: the store ignores the echo of this client's own save
         // (and any event the local copy already covers) instead of mistaking it
-        // for a foreign change.
-        void ps.handleRemoteChange(current, event.revision);
+        // for a foreign change. A genuinely foreign change (reloaded/flagged)
+        // may also carry renamed project metadata, so refresh the catalog to
+        // keep tabs and the switcher in sync with the new summary.
+        void ps
+          .handleRemoteChange(current, event.revision)
+          .then((outcome) => {
+            if (outcome === 'reloaded' || outcome === 'flagged') scheduleRefresh();
+          })
+          .catch(() => undefined);
       } else {
         scheduleRefresh();
       }

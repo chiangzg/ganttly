@@ -105,6 +105,50 @@ describe.skipIf(!dbUrl)('project API integration', () => {
     expect(conflict.json().error.details.actualRevision).toBe('2');
   });
 
+  it('propagates a document rename into the projects.name column', async () => {
+    // Rename via PUT (what the web "重命名" flow does: edit file.project.name,
+    // save the whole document). The `name` column is a projection of the
+    // document and must never fall behind — the project center list, search,
+    // and the editor tabs all read it.
+    const file = createEmptyFile({ name: 'Rename Sync' });
+    const created = await authed({
+      method: 'POST',
+      url: projectsUrl(),
+      headers: { 'idempotency-key': 'k-rename-sync-create' },
+      payload: { file },
+    });
+    expect(created.statusCode).toBe(201);
+    const projectId = created.json().summary.id;
+
+    file.project.name = 'Rename Sync v2';
+    const saved = await authed({
+      method: 'PUT',
+      url: projectsUrl(`/${projectId}`),
+      headers: { 'if-match': '"1"' },
+      payload: { file },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().summary.name).toBe('Rename Sync v2');
+
+    // List (project center) reflects the new name…
+    const list = await authed({ method: 'GET', url: projectsUrl() });
+    const summary = (list.json().projects as Array<{ id: string; name: string }>).find(
+      (p) => p.id === projectId,
+    );
+    expect(summary?.name).toBe('Rename Sync v2');
+
+    // …so does workspace search (lower(name) index)…
+    const search = await authed({ method: 'GET', url: projectsUrl('?query=rename%20sync%20v2') });
+    expect(
+      (search.json().projects as Array<{ id: string }>).find((p) => p.id === projectId),
+    ).toBeDefined();
+
+    // …and the snapshot keeps both name sources consistent.
+    const got = await authed({ method: 'GET', url: projectsUrl(`/${projectId}`) });
+    expect(got.json().summary.name).toBe(got.json().file.project.name);
+    expect(got.json().summary.name).toBe('Rename Sync v2');
+  });
+
   it('replays an identical idempotent request and conflicts on a changed body', async () => {
     const file = createEmptyFile({ name: 'Idem' });
     const first = await authed({
@@ -271,5 +315,15 @@ describe.skipIf(!dbUrl)('project API integration', () => {
     const body = res.json();
     expect(body.affectedTaskIds).toContain('t1');
     expect(body.revision).toBe('2');
+
+    // The command path also maintains the name projection: column stays in
+    // sync with the document even though the command didn't touch it.
+    const afterCmd = await authed({ method: 'GET', url: projectsUrl(`/${projectId}`) });
+    expect(afterCmd.json().summary.name).toBe(afterCmd.json().file.project.name);
+    const list = await authed({ method: 'GET', url: projectsUrl() });
+    expect(
+      (list.json().projects as Array<{ id: string; name: string }>).find((p) => p.id === projectId)
+        ?.name,
+    ).toBe('Cmd');
   });
 });

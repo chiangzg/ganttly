@@ -17,6 +17,7 @@ import { createEmptyFile } from '@ganttly/schema';
 import { useRemoteEvents } from '@/hooks/useRemoteEvents';
 import { createEventStream, type RemoteEventStreamOptions } from '@/data/sseClient';
 import { useProjectStore } from '@/store/useProjectStore';
+import { useProjectCatalogStore } from '@/store/useProjectCatalogStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useInstanceStore, type InstanceConfig } from '@/store/useInstanceStore';
 import { useScopeStore } from '@/store/useScopeStore';
@@ -70,6 +71,7 @@ function mountRemote(revision: string) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   stream = null;
   createEventStreamMock.mockReset();
   createEventStreamMock.mockImplementation((options: RemoteEventStreamOptions) => {
@@ -79,6 +81,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   useProjectStore.getState().unloadProject();
   useScopeStore.setState({ activeScope: localScope() });
   useAuthStore.setState({ authByInstance: {} });
@@ -95,23 +98,58 @@ describe('useRemoteEvents', () => {
     unmount();
   });
 
-  it('does not raise the banner for the echo of our own save', () => {
+  it('does not raise the banner for the echo of our own save', async () => {
+    const refreshSpy = vi
+      .spyOn(useProjectCatalogStore.getState(), 'refresh')
+      .mockResolvedValue(undefined);
     const { unmount } = mountRemote('2');
     expect(stream).not.toBeNull();
 
     stream!.onEvent(projectEvent('prj_1', '2'));
 
+    // The echo is 'ignored' — no banner and no catalog refresh (debounce timer
+    // included), so an ordinary edit never churns the project list.
+    await vi.advanceTimersByTimeAsync(1000);
     expect(useProjectStore.getState().remoteUpdateAvailable).toBe(false);
+    expect(refreshSpy).not.toHaveBeenCalled();
+    refreshSpy.mockRestore();
     unmount();
   });
 
-  it('still raises the banner for a newer revision while dirty', () => {
+  it('still raises the banner for a newer revision while dirty', async () => {
+    const refreshSpy = vi
+      .spyOn(useProjectCatalogStore.getState(), 'refresh')
+      .mockResolvedValue(undefined);
     const { unmount } = mountRemote('2');
     useProjectStore.setState({ dirty: true });
 
     stream!.onEvent(projectEvent('prj_1', '3'));
 
     expect(useProjectStore.getState().remoteUpdateAvailable).toBe(true);
+    // A foreign change ('flagged') refreshes the catalog after the debounce so
+    // tab labels pick up e.g. a rename made from another client.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    refreshSpy.mockRestore();
+    unmount();
+  });
+
+  it('refreshes the catalog when a foreign change reloads the current project', async () => {
+    const refreshSpy = vi
+      .spyOn(useProjectCatalogStore.getState(), 'refresh')
+      .mockResolvedValue(undefined);
+    const original = useProjectStore.getState().handleRemoteChange;
+    // Stub the outcome to 'reloaded' — the clean-state branch would otherwise
+    // hit the network through the remote repository.
+    useProjectStore.setState({ handleRemoteChange: vi.fn().mockResolvedValue('reloaded') });
+    const { unmount } = mountRemote('2');
+
+    stream!.onEvent(projectEvent('prj_1', '3'));
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    useProjectStore.setState({ handleRemoteChange: original });
+    refreshSpy.mockRestore();
     unmount();
   });
 });
