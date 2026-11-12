@@ -131,6 +131,10 @@ export async function buildServer(
     // configured; the web app's origin must be whitelisted explicitly.
     origin: config.allowedWebOrigins.length ? config.allowedWebOrigins : false,
     credentials: true,
+    // The plugin's default only allows GET/HEAD/POST, which would make every
+    // cross-origin PUT (document save / rename) and DELETE fail right after a
+    // valid preflight — mirror the full REST surface here.
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   });
 
   // Prometheus metrics (spec §15). Decorated so routes (SSE/MCP) can record
