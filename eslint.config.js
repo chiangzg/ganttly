@@ -17,6 +17,8 @@ export default tseslint.config(
       '**/test-results/**',
       '**/.husky/**',
       '**/*.cjs',
+      // Review-only interactive mockups (plain browser JS, no build step).
+      'docs/mockups/**',
       'eslint.config.js',
       'commitlint.config.js',
     ],

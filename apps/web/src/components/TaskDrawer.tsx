@@ -44,6 +44,7 @@ import type {
   TaskAssignment,
   TaskConstraints,
   BaselineTask,
+  TaskPriority,
 } from '@ganttly/schema';
 import {
   resolveCalendar,
@@ -51,6 +52,7 @@ import {
   durationBetween,
   isNonWorkingDay,
 } from '@/lib/calendar';
+import { PRIORITY_TAG } from '@/lib/priority';
 import { wouldCreateCycle } from '@/lib/schedule';
 import { computeTaskPersonDays } from '@/lib/cost';
 import { computeAllRollups } from '@/lib/summary';
@@ -66,6 +68,7 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
 import { Combobox, type ComboboxItem } from './ui/Combobox';
 import { ColorSwatchPicker } from './ui/ColorSwatchPicker';
+import { PrioritySegmented } from './PrioritySegmented';
 
 export function TaskDrawer() {
   const { t } = useTranslation();
@@ -76,6 +79,7 @@ export function TaskDrawer() {
   const file = useProjectStore((s) => s.file);
   const dispatch = useProjectStore((s) => s.dispatch);
   const activeBaselineId = useViewStore((s) => s.activeBaselineId);
+  const prioritySyncRequest = useViewStore((s) => s.prioritySyncRequest);
   const selectedId = file.viewState.selectedTaskId;
   const selectedTask = file.tasks.find((x) => x.id === selectedId) ?? null;
   const cal = useMemo(() => resolveCalendar(file.calendar), [file.calendar]);
@@ -149,6 +153,32 @@ export function TaskDrawer() {
     // Depend on task id rather than object identity: same-task store updates
     // must not overwrite an in-progress draft.
   }, [drawer, resetDraft, selectedId]);
+
+  // priority-matrix spec §4.8: the open task's priority changed OUTSIDE the
+  // drawer (matrix drag / context menu). Re-base `before` and carry the new
+  // value into the draft — otherwise the control shows a stale value, or a
+  // later Save writes the old one back over the drag. The latest action wins,
+  // so an unsaved priority pick sitting in the draft is replaced as well.
+  useEffect(() => {
+    const request = prioritySyncRequest;
+    if (!request) return;
+    // Always consume, even when this drawer is not the one concerned.
+    useViewStore.getState().clearPrioritySyncRequest();
+    if (drawer === 'closed') return;
+    const currentBefore = beforeRef.current;
+    const currentDraft = draftRef.current;
+    if (!currentBefore || !currentDraft || currentBefore.id !== request.taskId) return;
+    const live = useProjectStore
+      .getState()
+      .file.tasks.find((candidate) => candidate.id === request.taskId);
+    if (!live) return;
+    const nextBefore = withPriority(currentBefore, live.priority);
+    const nextDraft = withPriority(currentDraft, live.priority);
+    beforeRef.current = nextBefore;
+    draftRef.current = nextDraft;
+    setBefore(nextBefore);
+    setDraft(nextDraft);
+  }, [prioritySyncRequest, drawer]);
 
   // Keep rendering calculations bound to the task whose draft is open while a
   // different selection is waiting for discard confirmation.
@@ -243,6 +273,11 @@ export function TaskDrawer() {
     if (drawer !== 'edit') return;
     const id = selectedId;
     if (!id) return;
+    // priority-matrix spec §4.8: there is no chart in the priority view. A
+    // reveal there would rewrite the task view's horizontal scroll against an
+    // assumed viewport. The matrix already lined the tree up when the card was
+    // picked, so skip it and leave the task view where the user left it.
+    if (useViewStore.getState().viewMode === 'priority') return;
     const raf = requestAnimationFrame(() => revealTask(id, { skipIfVisible: true }));
     return () => cancelAnimationFrame(raf);
   }, [drawer, selectedId]);
@@ -283,6 +318,16 @@ export function TaskDrawer() {
   // lib also short-circuits, so this is defense-in-depth).
   const hasChildren = file.tasks.some((x) => x.parentId === task.id);
 
+  // One-line meaning of the currently chosen priority (priority-matrix spec §3.1).
+  const priorityHint =
+    draft.priority === undefined
+      ? t('priority.drawerHintNone')
+      : t('priority.drawerHint', {
+          tag: PRIORITY_TAG[draft.priority],
+          title: t(`priority.title${draft.priority}`),
+          hint: t(`priority.hint${draft.priority}`),
+        });
+
   // Person-days for this task: summary → rolled-up children sum; leaf → own.
   // Computed from the DRAFT so the user sees the effect of assignment /
   // overtime / date edits immediately, without committing (plan §2.2: the
@@ -295,6 +340,10 @@ export function TaskDrawer() {
 
   // ---- Draft-aware field handlers ----
   const onNameChange = (v: string) => patchDraft({ name: v });
+
+  // priority-matrix spec §3.1: draft-only, like every other field here — the
+  // store hears about it once, on Save. `undefined` means "not triaged".
+  const onPriorityChange = (next: TaskPriority | undefined) => patchDraft({ priority: next });
 
   const onStartChange = (start: string) => {
     const end = endDateFromDuration(start, draft.duration || 1, cal);
@@ -489,6 +538,23 @@ export function TaskDrawer() {
                 onChange={(e) => onNameChange(e.target.value)}
               />
             </Field>
+            {/* priority-matrix spec §3.1. Deliberately NOT a `Field`: that wraps
+             * its children in a <label>, and a click on the label text would then
+             * activate the first segment ("未分级") and silently clear the
+             * priority. Same visual treatment, plain container instead. */}
+            <div>
+              <span className="mb-1 block text-xs font-medium text-fg-muted">
+                {t('priority.label')}
+              </span>
+              {hasChildren ? (
+                <p className="text-xs text-fg-muted">{t('priority.drawerSummaryHint')}</p>
+              ) : (
+                <>
+                  <PrioritySegmented value={draft.priority} onChange={onPriorityChange} />
+                  <p className="mt-1.5 text-xs text-fg-muted">{priorityHint}</p>
+                </>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <Field label={t('drawer.start')} error={errors.start}>
                 <input
@@ -908,6 +974,14 @@ function normalizeDraftTask(task: Task | null): Task | null {
   };
 }
 
+/** Copy of `task` carrying `priority` — with the key removed when it is undefined. */
+function withPriority(task: Task, priority: TaskPriority | undefined): Task {
+  const next: Task = { ...task };
+  if (priority === undefined) delete next.priority;
+  else next.priority = priority;
+  return next;
+}
+
 /**
  * Validate the draft against the project. Returns a map of field → error
  * i18n key (empty when valid). The Save button is disabled while any entry
@@ -978,6 +1052,7 @@ function tasksEqual(a: Task, b: Task): boolean {
     'progress',
     'isMilestone',
     'color',
+    'priority',
     'note',
     'overtimeDates',
     'dependencies',

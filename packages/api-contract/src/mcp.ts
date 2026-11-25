@@ -49,6 +49,16 @@ export const assignmentInputSchema = z.object({
 /** ISO date `YYYY-MM-DD`. */
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected a YYYY-MM-DD date');
 
+/**
+ * Eisenhower quadrant priority (priority-matrix spec §2.4). The `.describe()`
+ * text is what MCP clients see in the tool's JSON Schema, so it carries the
+ * quadrant legend instead of a bare "1-4".
+ */
+const PRIORITY_LEGEND =
+  'Eisenhower quadrant: 1 = urgent + important (do first), 2 = important + not urgent (schedule), ' +
+  '3 = urgent + not important (delegate), 4 = neither (do least).';
+const priorityNumber = z.number().int().min(1).max(4);
+
 // ---------------------------------------------------------------------------
 // Read tool inputs
 // ---------------------------------------------------------------------------
@@ -79,6 +89,11 @@ export const searchTasksInput = z.object({
   startFrom: dateString.optional(),
   startTo: dateString.optional(),
   assigneeResourceId: z.string().optional(),
+  /** `null` selects the tasks that have not been triaged yet. */
+  priority: priorityNumber
+    .nullable()
+    .describe(`${PRIORITY_LEGEND} null matches tasks that are not triaged yet.`)
+    .optional(),
   limit: z.number().int().min(1).max(200).default(50),
   cursor: z.string().optional(),
 });
@@ -123,6 +138,7 @@ export const createTaskItemSchema = z.object({
   duration: z.number().int().min(1).optional(),
   isMilestone: z.boolean().optional(),
   progress: z.number().min(0).max(100).optional(),
+  priority: priorityNumber.describe(PRIORITY_LEGEND).optional(),
   note: z.string().optional(),
   color: z.string().optional(),
   assignments: z.array(assignmentInputSchema).optional(),
@@ -164,6 +180,10 @@ export const updateTaskInput = z
     isMilestone: z.boolean().optional(),
     note: z.string().optional(),
     color: z.string().optional(),
+    priority: priorityNumber
+      .nullable()
+      .describe(`${PRIORITY_LEGEND} null clears the priority.`)
+      .optional(),
     overtimeDates: z.array(dateString).optional(),
     constraints: z.custom<TaskConstraints>().optional(),
     assignments: z.array(assignmentInputSchema).optional(),

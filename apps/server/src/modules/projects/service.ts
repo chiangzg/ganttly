@@ -31,6 +31,7 @@ import {
   type Task,
   createDefaultTask,
   formatAjvErrors,
+  isTaskPriority,
   normalizeFile,
   validateGanttlyFile,
 } from '@ganttly/schema';
@@ -504,6 +505,11 @@ export class ProjectApplicationService {
         if (input.overtimeDates !== undefined) patch.overtimeDates = input.overtimeDates;
         if (input.constraints !== undefined) patch.constraints = input.constraints;
         if (input.assignments !== undefined) patch.assignments = input.assignments;
+        // priority-matrix spec §2.4: `null` clears the marker. zod infers a bare
+        // `number`, so narrow through the guard before it reaches `Task`.
+        if (input.priority !== undefined) {
+          patch.priority = isTaskPriority(input.priority) ? input.priority : undefined;
+        }
         // §4.2: keep start/duration/end consistent with the project calendar,
         // mirroring the TaskDrawer semantics (milestone → duration 0 and
         // start===end; otherwise end derives from start+duration).
@@ -1241,6 +1247,7 @@ async function applyCreateToFileSync(
   };
   if (item.note !== undefined) newTask.note = item.note;
   if (item.color !== undefined) newTask.color = item.color;
+  if (isTaskPriority(item.priority)) newTask.priority = item.priority;
   if (item.assignments !== undefined) newTask.assignments = [...item.assignments];
 
   const affected = new Set<string>([taskId]);

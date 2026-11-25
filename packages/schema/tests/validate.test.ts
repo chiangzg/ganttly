@@ -123,6 +123,16 @@ describe('validateTask', () => {
   it('rejects malformed date', () => {
     expect(validateTask({ ...baseTask, start: '2026/01/05' }).ok).toBe(false);
   });
+
+  it('accepts priority 1-4 and rejects anything outside the quadrant range', () => {
+    // priority-matrix spec §2.1
+    for (const priority of [1, 2, 3, 4]) {
+      expect(validateTask({ ...baseTask, priority }).ok).toBe(true);
+    }
+    for (const priority of [0, 5, -1, 2.5, '2', null]) {
+      expect(validateTask({ ...baseTask, priority }).ok).toBe(false);
+    }
+  });
 });
 
 describe('formatAjvErrors', () => {

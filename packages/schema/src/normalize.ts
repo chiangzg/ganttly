@@ -22,6 +22,7 @@
  * SAME change set, so old files load cleanly.
  */
 import { stripUnknownFields } from './stripUnknown.js';
+import { isTaskPriority } from './priority.js';
 import type { GanttlyFile, Holiday } from './types.js';
 
 export interface NormalizeFileOptions {
@@ -120,6 +121,16 @@ export function normalizeFile(file: GanttlyFile, options: NormalizeFileOptions =
           mutated = true;
           normalized = { ...normalized, overtimeDates };
         }
+      }
+
+      // Task.priority must be 1..4 (priority-matrix spec §2.1). A hand-edited
+      // or malformed value would fail validation for the WHOLE file, so drop it
+      // and let the task read as "not triaged". There is deliberately no
+      // default-fill here: absent IS the untriaged state.
+      if (normalized.priority !== undefined && !isTaskPriority(normalized.priority)) {
+        mutated = true;
+        normalized = { ...normalized };
+        delete normalized.priority;
       }
 
       return normalized;

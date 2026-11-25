@@ -10,7 +10,7 @@
  * works automatically. The host component resolves them to RGB strings
  * before passing to the renderer (Canvas cannot read CSS vars directly).
  */
-import type { ZoomLevel, Holiday, BaselineTask } from '@ganttly/schema';
+import type { ZoomLevel, Holiday, BaselineTask, TaskPriority } from '@ganttly/schema';
 import type { TaskBaselineVariance } from '@/lib/baseline';
 
 /** Resolved theme colors — CSS-variable values converted to rgb() strings. */
@@ -34,6 +34,11 @@ export interface ThemeColors {
   depUpstream: string;
   /** Dependency-chain downstream (successor / future) highlight (chain spec §3.2). */
   depDownstream: string;
+  /** Quadrant colours P1 → P4 for the priority stripe (priority-matrix spec §3.4). */
+  priority1: string;
+  priority2: string;
+  priority3: string;
+  priority4: string;
   todayLine: string;
 }
 
@@ -48,6 +53,8 @@ export interface TaskRow {
   progress: number; // 0-100
   isMilestone: boolean;
   color?: string;
+  /** Eisenhower quadrant 1-4 when the task is triaged (priority-matrix spec §3.4). */
+  priority?: TaskPriority;
   depth: number;
   wbsNumber: string;
   isCritical?: boolean;

@@ -104,6 +104,14 @@ export interface WorkingHours {
 // Task (flat — PRD §4.2.1)
 // ---------------------------------------------------------------------------
 
+/**
+ * Four-level Eisenhower quadrant priority:
+ *   1 = urgent + important, 2 = important + not urgent,
+ *   3 = urgent + not important, 4 = neither.
+ * `Task.priority` is optional; when absent the task is "not triaged yet".
+ */
+export type TaskPriority = 1 | 2 | 3 | 4;
+
 export interface Task {
   /** UUID v4 or nanoid. Primary key. */
   id: string;
@@ -125,6 +133,11 @@ export interface Task {
   overtimeDates?: string[];
   /** 0-100 inclusive. */
   progress: number;
+  /**
+   * Eisenhower quadrant priority (priority-matrix spec §2.1). Optional —
+   * absent means "not triaged yet". Never materialise a default for it.
+   */
+  priority?: TaskPriority;
   isMilestone: boolean;
   /** CSS color. Optional — engine provides a default. */
   color?: string;

@@ -259,6 +259,8 @@ function toTaskRow(
     progress: isSummary && rollup ? rollup.progress : task.progress,
     isMilestone: task.isMilestone,
     color: task.color,
+    // Leaf-level marker; summaries are never triaged, so it is simply not drawn.
+    priority: task.priority,
     depth,
     wbsNumber: wbs,
     isCritical: criticalIds.has(task.id),

@@ -24,6 +24,10 @@ const COLOR_VARS: Array<{ key: keyof ThemeColors; varName: string }> = [
   { key: 'baseline', varName: '--color-baseline' },
   { key: 'depUpstream', varName: '--color-dep-upstream' },
   { key: 'depDownstream', varName: '--color-dep-downstream' },
+  { key: 'priority1', varName: '--color-priority-1' },
+  { key: 'priority2', varName: '--color-priority-2' },
+  { key: 'priority3', varName: '--color-priority-3' },
+  { key: 'priority4', varName: '--color-priority-4' },
 ];
 
 export function resolveThemeColors(doc: Document = document): ThemeColors {
@@ -47,6 +51,10 @@ export function resolveThemeColors(doc: Document = document): ThemeColors {
     baseline: 'rgb(100, 116, 139)',
     depUpstream: 'rgb(16, 185, 129)',
     depDownstream: 'rgb(6, 182, 212)',
+    priority1: 'rgb(220, 38, 38)',
+    priority2: 'rgb(22, 163, 74)',
+    priority3: 'rgb(217, 119, 6)',
+    priority4: 'rgb(100, 116, 139)',
     todayLine: 'rgb(220, 38, 38)',
   };
 

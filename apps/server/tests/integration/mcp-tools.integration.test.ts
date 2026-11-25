@@ -11,6 +11,7 @@ import { createEmptyFile } from '@ganttly/schema';
 import type { AuthPrincipal } from '../../src/auth/principal';
 import type { ProjectLimits } from '../../src/modules/projects/service';
 import { ProjectApplicationService } from '../../src/modules/projects/service';
+import { searchTasksInFile } from '../../src/modules/projects/read';
 import {
   outboxEvents,
   projectOperations,
@@ -173,6 +174,49 @@ describe.skipIf(!dbUrl)('MCP task tools integration', () => {
     });
     const updated = outcome.file.tasks.find((t) => t.id === created.task.id)!;
     expect(updated.progress).toBe(75);
+  });
+
+  it('createTask stores priority; updateTask changes and clears it (priority-matrix spec §2.4)', async () => {
+    const created = await service.createTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        name: 'Prioritized',
+        priority: 1,
+        idempotencyKey: 'ct-prio',
+      },
+    });
+    expect(created.task.priority).toBe(1);
+
+    const changed = await service.updateTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        taskId: created.task.id,
+        priority: 3,
+        idempotencyKey: 'ut-prio-set',
+      },
+    });
+    expect(changed.file.tasks.find((t) => t.id === created.task.id)!.priority).toBe(3);
+
+    const cleared = await service.updateTask({
+      ...base(),
+      input: {
+        workspaceId: session.workspaceId,
+        projectId,
+        taskId: created.task.id,
+        priority: null,
+        idempotencyKey: 'ut-prio-clear',
+      },
+    });
+    // "Cleared" means the key is gone from the stored document — not an
+    // explicit null, which the strict schema would reject on the next load.
+    const stored = JSON.stringify(cleared.file.tasks.find((t) => t.id === created.task.id));
+    expect(stored).not.toContain('"priority"');
+    const untriaged = searchTasksInFile(cleared.file, { priority: null, limit: 200 });
+    expect(untriaged.tasks.some((t) => t.id === created.task.id)).toBe(true);
   });
 
   it('moveTask repositions under a new parent', async () => {

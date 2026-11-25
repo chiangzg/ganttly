@@ -5,7 +5,7 @@
  * spec notes first-version MCP search is per-project O(n) over the task list,
  * which keeps the query surface simple and dependency-free.
  */
-import type { GanttlyFile, Resource, Task } from '@ganttly/schema';
+import type { GanttlyFile, Resource, Task, TaskPriority } from '@ganttly/schema';
 import type { SearchResourcesInput, SearchTasksInput } from '@ganttly/api-contract';
 
 export interface TaskSummary {
@@ -18,6 +18,8 @@ export interface TaskSummary {
   duration: number;
   progress: number;
   isMilestone: boolean;
+  /** Eisenhower quadrant 1-4; `null` when the task is not triaged (spec §2.4). */
+  priority: TaskPriority | null;
 }
 
 export interface TaskDetail {
@@ -40,6 +42,7 @@ function toSummary(task: Task): TaskSummary {
     duration: task.duration,
     progress: task.progress,
     isMilestone: task.isMilestone,
+    priority: task.priority ?? null,
   };
 }
 
@@ -66,6 +69,7 @@ export function searchTasksInFile(
     | 'startFrom'
     | 'startTo'
     | 'assigneeResourceId'
+    | 'priority'
     | 'limit'
     | 'cursor'
   >,
@@ -90,6 +94,8 @@ export function searchTasksInFile(
     ) {
       continue;
     }
+    // priority: null selects the tasks that are not triaged yet (priority-matrix spec §2.4).
+    if (input.priority !== undefined && (task.priority ?? null) !== input.priority) continue;
     filtered.push(toSummary(task));
   }
 

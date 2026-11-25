@@ -241,6 +241,9 @@ const TASK_DRAFT_FIELDS: Array<keyof Task> = [
   'progress',
   'isMilestone',
   'color',
+  // priority-matrix spec §3.1: the drawer's priority control saves through the
+  // draft merge — leave this out and a priority-only edit is silently dropped.
+  'priority',
   'note',
   'overtimeDates',
   'dependencies',

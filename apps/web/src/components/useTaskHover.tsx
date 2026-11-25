@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next';
 import type { Scene, TaskRow } from '@/engine/render/types';
 import { hitTaskBar } from '@/lib/taskHoverHit';
+import { PRIORITY_TAG } from '@/lib/priority';
 
 const MINUS = '\u2212';
 /** Hover delay before the tooltip appears (plan §3.2 ≈ 300ms). */
@@ -200,6 +201,20 @@ function TaskTooltip({
       </div>
       <table className="mt-1 w-full border-collapse">
         <tbody>
+          {/* priority-matrix spec §3.5: only shown once the task is triaged. */}
+          {row.priority && (
+            <tr>
+              <td className="pr-3 whitespace-nowrap text-fg-muted">
+                {t('canvas.tooltipPriority')}
+              </td>
+              <td>
+                {t(`priority.tagLabel`, {
+                  tag: PRIORITY_TAG[row.priority],
+                  title: t(`priority.title${row.priority}`),
+                })}
+              </td>
+            </tr>
+          )}
           <tr>
             <td className="pr-3 align-top whitespace-nowrap text-fg-muted">
               {t('canvas.tooltipAssignees')}

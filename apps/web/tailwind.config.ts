@@ -22,6 +22,11 @@ export default {
         'task-bar': 'rgb(var(--color-task-bar) / <alpha-value>)',
         'task-progress': 'rgb(var(--color-task-progress) / <alpha-value>)',
         critical: 'rgb(var(--color-critical) / <alpha-value>)',
+        // Priority quadrants (priority-matrix spec §5.1).
+        'priority-1': 'rgb(var(--color-priority-1) / <alpha-value>)',
+        'priority-2': 'rgb(var(--color-priority-2) / <alpha-value>)',
+        'priority-3': 'rgb(var(--color-priority-3) / <alpha-value>)',
+        'priority-4': 'rgb(var(--color-priority-4) / <alpha-value>)',
       },
       fontFamily: {
         sans: [
