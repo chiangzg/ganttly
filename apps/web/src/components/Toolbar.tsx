@@ -30,6 +30,7 @@ import {
   CircleAlert,
   Expand,
   GitBranch,
+  LayoutGrid,
   ListTree,
   LoaderCircle,
   Minus,
@@ -130,72 +131,80 @@ export function Toolbar() {
       data-editor-toolbar
       className="flex h-11 shrink-0 items-center gap-1 overflow-hidden border-b border-border/80 bg-bg-elevated px-2.5"
     >
-      <ToolbarGroup aria-label="日期导航">
-        <ToolbarButton onClick={jumpToToday} title={t('toolbar.today')}>
-          <CalendarDays size={15} />
-          <span>{t('toolbar.today')}</span>
-        </ToolbarButton>
-        <ToolbarButton
-          onClick={fitProjectRange}
-          title={t('toolbar.fitProjectRangeHint')}
-          aria-label={t('toolbar.fitProjectRange')}
-        >
-          <Expand size={15} />
-          <span className="hidden xl:inline">{t('toolbar.fitProjectRange')}</span>
-        </ToolbarButton>
-        <div
-          className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex"
-          aria-label={t('toolbar.groupZoom')}
-        >
-          <ToolbarButton
-            size="icon"
-            onClick={zoomOut}
-            title={t('toolbar.zoomOut')}
-            aria-label={t('toolbar.zoomOut')}
-            className="h-7 w-7"
-          >
-            <Minus size={14} />
-          </ToolbarButton>
-          <span className="min-w-[52px] px-1 text-center text-xs font-medium text-fg">
-            {t(`toolbar.zoom${cap(file.viewState.zoom)}`)}
-          </span>
-          <ToolbarButton
-            size="icon"
-            onClick={zoomIn}
-            title={t('toolbar.zoomIn')}
-            aria-label={t('toolbar.zoomIn')}
-            className="h-7 w-7"
-          >
-            <Plus size={14} />
-          </ToolbarButton>
-        </div>
-      </ToolbarGroup>
+      {/* priority-matrix spec §4.1: date navigation and the plan toggles only
+       * drive the Gantt chart. The priority view has no chart, so they are
+       * hidden rather than shown disabled — clicking them would rewrite the
+       * task view's scroll against an assumed 800×600 viewport. */}
+      {viewMode !== 'priority' && (
+        <>
+          <ToolbarGroup aria-label="日期导航">
+            <ToolbarButton onClick={jumpToToday} title={t('toolbar.today')}>
+              <CalendarDays size={15} />
+              <span>{t('toolbar.today')}</span>
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={fitProjectRange}
+              title={t('toolbar.fitProjectRangeHint')}
+              aria-label={t('toolbar.fitProjectRange')}
+            >
+              <Expand size={15} />
+              <span className="hidden xl:inline">{t('toolbar.fitProjectRange')}</span>
+            </ToolbarButton>
+            <div
+              className="hidden items-center rounded-lg bg-bg p-0.5 lg:flex"
+              aria-label={t('toolbar.groupZoom')}
+            >
+              <ToolbarButton
+                size="icon"
+                onClick={zoomOut}
+                title={t('toolbar.zoomOut')}
+                aria-label={t('toolbar.zoomOut')}
+                className="h-7 w-7"
+              >
+                <Minus size={14} />
+              </ToolbarButton>
+              <span className="min-w-[52px] px-1 text-center text-xs font-medium text-fg">
+                {t(`toolbar.zoom${cap(file.viewState.zoom)}`)}
+              </span>
+              <ToolbarButton
+                size="icon"
+                onClick={zoomIn}
+                title={t('toolbar.zoomIn')}
+                aria-label={t('toolbar.zoomIn')}
+                className="h-7 w-7"
+              >
+                <Plus size={14} />
+              </ToolbarButton>
+            </div>
+          </ToolbarGroup>
 
-      <ToolbarDivider className="hidden lg:block" />
-      <ToolbarGroup className="hidden lg:flex" aria-label="计划显示">
-        <div
-          className="hidden xl:block"
-          title={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
-        >
-          <ToolbarButton
-            onClick={toggleCriticalPath}
-            title={taskViewControlsDisabled ? taskViewOnlyTitle : t('toolbar.criticalPath')}
-            aria-label={t('toolbar.criticalPath')}
-            pressed={file.viewState.showCriticalPath}
-            disabled={taskViewControlsDisabled}
-          >
-            <GitBranch size={15} />
-            {file.viewState.showCriticalPath
-              ? t('toolbar.hideCriticalPath')
-              : t('toolbar.showCriticalPath')}
-          </ToolbarButton>
-        </div>
-        <BaselineControl
-          disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
-        />
-      </ToolbarGroup>
+          <ToolbarDivider className="hidden lg:block" />
+          <ToolbarGroup className="hidden lg:flex" aria-label="计划显示">
+            <div
+              className="hidden xl:block"
+              title={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+            >
+              <ToolbarButton
+                onClick={toggleCriticalPath}
+                title={taskViewControlsDisabled ? taskViewOnlyTitle : t('toolbar.criticalPath')}
+                aria-label={t('toolbar.criticalPath')}
+                pressed={file.viewState.showCriticalPath}
+                disabled={taskViewControlsDisabled}
+              >
+                <GitBranch size={15} />
+                {file.viewState.showCriticalPath
+                  ? t('toolbar.hideCriticalPath')
+                  : t('toolbar.showCriticalPath')}
+              </ToolbarButton>
+            </div>
+            <BaselineControl
+              disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+            />
+          </ToolbarGroup>
 
-      <ToolbarDivider className="hidden lg:block" />
+          <ToolbarDivider className="hidden lg:block" />
+        </>
+      )}
       <ToolbarGroup aria-label="视图">
         <div
           className="flex items-center rounded-lg bg-bg p-0.5"
@@ -221,6 +230,20 @@ export function Toolbar() {
           >
             <Users size={14} />
             {t('toolbar.resourceView')}
+          </ToolbarButton>
+          {/* priority-matrix spec §4.1. Below `lg` the label is dropped so the
+           * 768px toolbar keeps its no-horizontal-overflow guarantee; the
+           * aria-label keeps the accessible name. */}
+          <ToolbarButton
+            size="compact"
+            onClick={() => setViewMode('priority')}
+            title={t('toolbar.priorityView')}
+            aria-label={t('toolbar.priorityView')}
+            pressed={viewMode === 'priority'}
+            className="h-7"
+          >
+            <LayoutGrid size={14} />
+            <span className="hidden lg:inline">{t('toolbar.priorityView')}</span>
           </ToolbarButton>
         </div>
       </ToolbarGroup>
@@ -278,27 +301,29 @@ export function Toolbar() {
               sideOffset={6}
               className="z-40 min-w-64 rounded-xl border border-border bg-bg-elevated p-2 shadow-xl data-[state=closed]:hidden"
             >
-              <div className="lg:hidden">
-                <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
-                  {t('toolbar.groupZoom')}
+              {viewMode !== 'priority' && (
+                <div className="lg:hidden">
+                  <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+                    {t('toolbar.groupZoom')}
+                  </div>
+                  <DropdownMenu.Item onSelect={zoomIn} className={menuItemClass}>
+                    <ZoomIn size={15} className="text-fg-muted" />
+                    {t('toolbar.zoomIn')}
+                    <span className="ml-auto text-xs text-fg-muted">
+                      {t(`toolbar.zoom${cap(file.viewState.zoom)}`)}
+                    </span>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={zoomOut} className={menuItemClass}>
+                    <Minus size={15} className="text-fg-muted" />
+                    {t('toolbar.zoomOut')}
+                  </DropdownMenu.Item>
+                  <BaselineControl
+                    presentation="menu"
+                    disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
+                  />
+                  <DropdownMenu.Separator className="my-1 h-px bg-border" />
                 </div>
-                <DropdownMenu.Item onSelect={zoomIn} className={menuItemClass}>
-                  <ZoomIn size={15} className="text-fg-muted" />
-                  {t('toolbar.zoomIn')}
-                  <span className="ml-auto text-xs text-fg-muted">
-                    {t(`toolbar.zoom${cap(file.viewState.zoom)}`)}
-                  </span>
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={zoomOut} className={menuItemClass}>
-                  <Minus size={15} className="text-fg-muted" />
-                  {t('toolbar.zoomOut')}
-                </DropdownMenu.Item>
-                <BaselineControl
-                  presentation="menu"
-                  disabledReason={taskViewControlsDisabled ? taskViewOnlyTitle : undefined}
-                />
-                <DropdownMenu.Separator className="my-1 h-px bg-border" />
-              </div>
+              )}
               <div className="xl:hidden">
                 <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
                   {t('toolbar.groupDisplay')}

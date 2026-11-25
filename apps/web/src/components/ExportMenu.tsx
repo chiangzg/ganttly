@@ -24,7 +24,9 @@ export function ExportMenu() {
   const exportCsv = () => {
     const tree = buildTree(file.tasks);
     const flat = flattenVisible(tree, new Set(file.viewState.collapsedTaskIds));
-    const rows: string[] = ['WBS,Name,Start,End,Duration,Progress,Milestone,Color,OvertimeDates'];
+    const rows: string[] = [
+      'WBS,Name,Start,End,Duration,Progress,Milestone,Color,OvertimeDates,Priority',
+    ];
     for (const node of flat) {
       const t = node.task;
       rows.push(
@@ -38,6 +40,8 @@ export function ExportMenu() {
           t.isMilestone ? '1' : '0',
           t.color ?? '',
           csv([...(t.overtimeDates ?? [])].sort().join(';')),
+          // priority-matrix spec §3.6: P1-P4, blank when the task is not triaged.
+          t.priority ? `P${t.priority}` : '',
         ].join(','),
       );
     }

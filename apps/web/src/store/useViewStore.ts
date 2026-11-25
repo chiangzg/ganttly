@@ -4,8 +4,10 @@
  * Stores state that does NOT go into the project file or the undo stack:
  * - Whether the edit drawer is open
  * - Whether a context menu is open and where
- * - The active view mode (task ↔ resource) — G11: ephemeral, not persisted,
- *   consistent with how scroll/zoom navigation bypasses the undo stack.
+ * - The active view mode (task ↔ resource ↔ priority) — G11: ephemeral, not
+ *   persisted, consistent with how scroll/zoom navigation bypasses the undo
+ *   stack. `priority` keeps the task tree and swaps only the right-hand pane;
+ *   its filters live here too (priority-matrix spec §4.7).
  * - Resource-view scroll position — G19: separate from `file.viewState.scrollTop`
  *   because task rows (N) and resource rows (M) differ in count; sharing one
  *   scrollTop would land the wrong row on view switch.
@@ -22,6 +24,9 @@ import { create } from 'zustand';
 import { clampDrawerWidth, loadDrawerWidth, saveDrawerWidth } from '@/lib/drawerWidthPrefs';
 import type { TaskFilter } from '@/lib/taskFilter';
 import type { SelectionState } from '@/lib/selection';
+import { DEFAULT_MATRIX_SORT } from '@/lib/priorityMatrix';
+import type { MatrixSortMode } from '@/lib/priorityMatrix';
+import type { TaskPriority } from '@ganttly/schema';
 import { useProjectStore } from '@/store/useProjectStore';
 
 // Re-export the width bounds so callers can import them from the store path
@@ -29,7 +34,11 @@ import { useProjectStore } from '@/store/useProjectStore';
 export { DEFAULT_DRAWER_WIDTH, MIN_DRAWER_WIDTH, MAX_DRAWER_WIDTH } from '@/lib/drawerWidthPrefs';
 
 export type DrawerMode = 'closed' | 'edit';
-export type ViewMode = 'task' | 'resource';
+/**
+ * `priority` is the Eisenhower matrix (priority-matrix spec §4.1). It keeps the
+ * left task tree and swaps only the right-hand pane, exactly like `resource`.
+ */
+export type ViewMode = 'task' | 'resource' | 'priority';
 
 interface ViewStoreState {
   drawer: DrawerMode;
@@ -77,9 +86,35 @@ interface ViewStoreState {
   requestResourceRename(resourceId: string): void;
   clearResourceRenameRequest(): void;
 
-  /** Active view: task (Gantt) ↔ resource (load chart). G11: ephemeral. */
+  /** Active view: task (Gantt) ↔ resource (load chart) ↔ priority (matrix). G11: ephemeral. */
   viewMode: ViewMode;
   setViewMode(mode: ViewMode): void;
+
+  /**
+   * Priority-matrix filters (priority-matrix spec §4.7). Ephemeral like the
+   * task-tree search: never persisted, never in the undo stack, reset on
+   * project switch. The matrix shares `searchQuery` with the task tree.
+   */
+  /** `'all'` | `'none'` (unassigned) | a resource id. */
+  matrixAssignee: string;
+  setMatrixAssignee(value: string): void;
+  matrixShowDone: boolean;
+  toggleMatrixShowDone(): void;
+  /** Each quadrant remembers its own sort order. */
+  matrixSort: Readonly<Record<TaskPriority, MatrixSortMode>>;
+  setMatrixSort(priority: TaskPriority, mode: MatrixSortMode): void;
+  matrixTrayCollapsed: boolean;
+  toggleMatrixTrayCollapsed(): void;
+
+  /**
+   * One-shot signal (priority-matrix spec §4.8): `taskId`'s priority changed
+   * outside the drawer (matrix drag / context menu) while a draft on it may be
+   * open. The drawer re-bases its draft and clears the request, same nonce
+   * pattern as `renameRequest`.
+   */
+  prioritySyncRequest: { taskId: string; nonce: number } | null;
+  requestPrioritySync(taskId: string): void;
+  clearPrioritySyncRequest(): void;
 
   /** Resource-view vertical scroll (G19: independent of task-view scrollTop). */
   resourceScrollTop: number;
@@ -206,6 +241,23 @@ export const useViewStore = create<ViewStoreState>((set) => ({
   viewMode: 'task',
   setViewMode: (mode) => set({ viewMode: mode }),
 
+  matrixAssignee: 'all',
+  setMatrixAssignee: (value) => set({ matrixAssignee: value }),
+  matrixShowDone: false,
+  toggleMatrixShowDone: () => set((s) => ({ matrixShowDone: !s.matrixShowDone })),
+  matrixSort: DEFAULT_MATRIX_SORT,
+  setMatrixSort: (priority, mode) =>
+    set((s) => ({ matrixSort: { ...s.matrixSort, [priority]: mode } })),
+  matrixTrayCollapsed: false,
+  toggleMatrixTrayCollapsed: () => set((s) => ({ matrixTrayCollapsed: !s.matrixTrayCollapsed })),
+
+  prioritySyncRequest: null,
+  requestPrioritySync: (taskId) =>
+    set((s) => ({
+      prioritySyncRequest: { taskId, nonce: (s.prioritySyncRequest?.nonce ?? 0) + 1 },
+    })),
+  clearPrioritySyncRequest: () => set({ prioritySyncRequest: null }),
+
   resourceScrollTop: 0,
   setResourceScrollTop: (top) => set({ resourceScrollTop: top }),
 
@@ -296,6 +348,13 @@ export const useViewStore = create<ViewStoreState>((set) => ({
       // §4.4: clear search/filter so a switched-to project starts unfiltered.
       searchQuery: '',
       taskFilter: 'none',
+      // priority-matrix spec §4.7: the matrix's own filters restart per project
+      // (sort preferences included — they describe this project's quadrants).
+      matrixAssignee: 'all',
+      matrixShowDone: false,
+      matrixSort: DEFAULT_MATRIX_SORT,
+      matrixTrayCollapsed: false,
+      prioritySyncRequest: null,
       // §4.6: clear multi-select on project switch.
       selectedTaskIds: new Set<string>(),
       anchorTaskId: null,

@@ -79,6 +79,17 @@ describe('searchTasksInput', () => {
       searchTasksInput.parse({ workspaceId: 'ws', projectId: 'prj', startFrom: '2026/01/01' }),
     ).toThrow();
   });
+
+  it('accepts a priority filter of 1-4 or null (untriaged) and rejects the rest', () => {
+    // priority-matrix spec §2.4
+    const base = { workspaceId: 'ws', projectId: 'prj' };
+    expect(searchTasksInput.parse({ ...base, priority: 3 }).priority).toBe(3);
+    expect(searchTasksInput.parse({ ...base, priority: null }).priority).toBeNull();
+    expect(searchTasksInput.parse(base).priority).toBeUndefined();
+    for (const priority of [0, 5, 2.5, '2']) {
+      expect(() => searchTasksInput.parse({ ...base, priority })).toThrow();
+    }
+  });
 });
 
 describe('searchResourcesInput', () => {
@@ -136,6 +147,15 @@ describe('createTaskInput', () => {
       createTaskInput.parse({ workspaceId: 'ws', projectId: 'prj', name: 'x' }),
     ).toThrow();
   });
+
+  it('accepts a priority of 1-4 and rejects other values (priority-matrix spec §2.4)', () => {
+    expect(createTaskInput.parse({ ...base, name: 'x', priority: 4 }).priority).toBe(4);
+    expect(createTaskInput.parse({ ...base, name: 'x' }).priority).toBeUndefined();
+    // Creating never needs "clear" — a task starts out untriaged.
+    for (const priority of [0, 5, 2.5, '2', null]) {
+      expect(() => createTaskInput.parse({ ...base, name: 'x', priority })).toThrow();
+    }
+  });
 });
 
 describe('createTasksInput', () => {
@@ -171,6 +191,15 @@ describe('updateTaskInput', () => {
 
   it('rejects an empty patch (no field to change)', () => {
     expect(() => updateTaskInput.parse(base)).toThrow();
+  });
+
+  it('accepts a priority change, with null meaning "clear" (priority-matrix spec §2.4)', () => {
+    expect(updateTaskInput.parse({ ...base, priority: 2 }).priority).toBe(2);
+    // `priority: null` alone is a valid patch — clearing IS a change.
+    expect(updateTaskInput.parse({ ...base, priority: null }).priority).toBeNull();
+    for (const priority of [0, 5, 2.5, '2']) {
+      expect(() => updateTaskInput.parse({ ...base, priority })).toThrow();
+    }
   });
 });
 

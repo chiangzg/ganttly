@@ -30,6 +30,10 @@ const THEME: ThemeColors = {
   baseline: '#64748b',
   depUpstream: '#10b981',
   depDownstream: '#06b6d4',
+  priority1: '#ef4444',
+  priority2: '#22c55e',
+  priority3: '#f59e0b',
+  priority4: '#94a3b8',
   todayLine: '#ef4444',
 };
 

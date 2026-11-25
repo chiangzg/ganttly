@@ -12,6 +12,9 @@
  *   after a menu-driven move (plan §5.4; the old path used the non-rollup
  *   command and left parent progress/dates stale).
  * - Delete (cascade)
+ * - Priority (priority-matrix spec §3.2): a second page shown in place of the
+ *   main list — ← returns, the current quadrant is check-marked. Applying the
+ *   current value again is a no-op (no command, no undo record).
  *
  * Resource actions: Rename (F2, one-shot request to ResourceList) /
  * Expand-Collapse drill-down / Add resource / Delete (confirm dialog).
@@ -25,6 +28,7 @@
  *   the canvas are focusable, and right-click focuses them before opening).
  */
 import { useTranslation } from 'react-i18next';
+import { ArrowLeft, Check } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useViewStore } from '@/store/useViewStore';
 import {
@@ -42,6 +46,10 @@ import { computeTaskPosition } from '@/lib/taskPosition';
 import { nanoid } from 'nanoid';
 import { DeleteTaskConfirm } from './DeleteTaskConfirm';
 import { DeleteResourceConfirm } from './DeleteResourceConfirm';
+import { PriorityTag } from './PriorityTag';
+import { PRIORITY_TAG, TASK_PRIORITIES } from '@/lib/priority';
+import { setTaskPriority } from '@/lib/setTaskPriority';
+import type { TaskPriority } from '@ganttly/schema';
 
 export function ContextMenu() {
   const { t } = useTranslation();
@@ -52,6 +60,25 @@ export function ContextMenu() {
   const dispatch = useProjectStore((s) => s.dispatch);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
   const [confirmDeleteResourceId, setConfirmDeleteResourceId] = useState<string | null>(null);
+  // priority-matrix spec §3.2: the task menu swaps to a second page for picking
+  // a priority — same shell, same roving-focus keyboard model. The page belongs
+  // to ONE menu instance: comparing the stored menu with the current one resets
+  // to the main page during the first render of a fresh menu. (Resetting in an
+  // effect instead flashes the previous menu's page for a frame, and a click
+  // landing in that frame hits the wrong item.)
+  const [pageState, setPageState] = useState<{
+    menu: NonNullable<typeof menu>;
+    page: 'main' | 'priority';
+  } | null>(null);
+  const page: 'main' | 'priority' = menu && pageState?.menu === menu ? pageState.page : 'main';
+  const setPage = useCallback(
+    (next: 'main' | 'priority') => {
+      if (menu) setPageState({ menu, page: next });
+    },
+    [menu],
+  );
+  // The "优先级" entry on the main page, refocused when the user comes back.
+  const priorityEntryRef = useRef<HTMLButtonElement | null>(null);
 
   // §5.4 focus restore: right-click focuses the (focusable) row/canvas before
   // the menu opens, so capture it whenever the menu opens and restore it on
@@ -67,6 +94,14 @@ export function ContextMenu() {
   // document.activeElement (no stale-closure risk in the window key listener).
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
+  // `find` / `filter` DO visit holes (an index no rendered item ever claimed)
+  // with `undefined`, so test for both empties — never just `=== null`. A hole
+  // is one missed renumber away whenever an item is inserted.
+  const enabledItems = (): HTMLButtonElement[] =>
+    itemRefs.current.filter(
+      (el): el is HTMLButtonElement => el !== null && el !== undefined && !el.disabled,
+    );
+  const firstEnabledItem = (): HTMLButtonElement | undefined => enabledItems()[0];
 
   // §5.4 viewport clamping: measure the rendered menu and pull it back inside
   // the window (auto-flip near the right/bottom edge, 8px breathing room).
@@ -78,14 +113,15 @@ export function ContextMenu() {
     const x = Math.min(menu.x, window.innerWidth - rect.width - margin);
     const y = Math.min(menu.y, window.innerHeight - rect.height - margin);
     setClampedPos({ x: Math.max(margin, x), y: Math.max(margin, y) });
-  }, [menu]);
+  }, [menu, page]);
 
   const moveFocus = useCallback((dir: 1 | -1) => {
-    const items = itemRefs.current.filter(
-      (el): el is HTMLButtonElement => el !== null && !el.disabled,
-    );
+    const items = enabledItems();
     if (items.length === 0) return;
-    const activeIndex = itemRefs.current.indexOf(document.activeElement as HTMLButtonElement);
+    // Index WITHIN the enabled list: the roving set skips disabled items, so an
+    // index taken from the full ref array would overshoot past every disabled
+    // entry above the focused one.
+    const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
     const cur = activeIndex >= 0 ? activeIndex : 0;
     const next = (cur + dir + items.length) % items.length;
     items[next]!.focus();
@@ -116,6 +152,17 @@ export function ContextMenu() {
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         moveFocus(e.key === 'ArrowDown' ? 1 : -1);
+      } else if (
+        e.key === 'ArrowRight' &&
+        page === 'main' &&
+        document.activeElement === priorityEntryRef.current
+      ) {
+        // → on the "优先级" entry opens its page, like a native submenu.
+        e.preventDefault();
+        setPage('priority');
+      } else if (e.key === 'ArrowLeft' && page === 'priority') {
+        e.preventDefault();
+        setPage('main');
       } else if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         activateFocused();
@@ -123,15 +170,14 @@ export function ContextMenu() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menu, moveFocus, activateFocused, handleClose]);
+  }, [menu, page, moveFocus, activateFocused, handleClose, setPage]);
 
-  // Focus the first enabled item when the menu opens.
+  // Focus the first enabled item when the menu opens (or when it changes page —
+  // the page swap re-renders the whole list, so focus would otherwise be lost).
   useEffect(() => {
-    const first = itemRefs.current.find((el) => el !== null && !el.disabled);
-    if (first) {
-      first.focus();
-    }
-  }, [menu]);
+    if (!menu) return;
+    firstEnabledItem()?.focus();
+  }, [menu, page]);
 
   if (!menu) return null;
 
@@ -350,57 +396,133 @@ export function ContextMenu() {
   // Shortcut hints use the platform modifier (⌘ on macOS, Ctrl elsewhere).
   const mod = modKeyLabel();
 
+  // priority-matrix spec §3.2: summaries are never triaged — the entry stays
+  // visible but disabled rather than silently doing nothing.
+  const isSummary = file.tasks.some((x) => x.parentId === task.id);
+  const onPickPriority = (next: TaskPriority | undefined) => {
+    handleClose();
+    // One shared entry point with the matrix drag: it skips the no-op (re-picking
+    // the current value is not a change, so no command, no undo record) and
+    // tells an open drawer to re-base its draft.
+    setTaskPriority(task.id, next);
+  };
+  const backToMain = () => {
+    setPage('main');
+    // The page swap re-renders the list; land focus back on the entry.
+    requestAnimationFrame(() => priorityEntryRef.current?.focus());
+  };
+
+  const items =
+    page === 'priority' ? (
+      <>
+        <MenuItem ref={setItemRef(0)} onClick={backToMain}>
+          <span className="flex items-center gap-2">
+            <ArrowLeft size={14} aria-hidden />
+            {t('contextMenu.priority')}
+          </span>
+        </MenuItem>
+        {/* MenuItem wraps all children in one block, so the check mark must live
+         * INSIDE the row's flex line (ml-auto) — as a sibling it wraps to a new
+         * line under the label. */}
+        <MenuItem ref={setItemRef(1)} onClick={() => onPickPriority(undefined)}>
+          <span className="flex w-full items-center gap-2">
+            <span aria-hidden className="w-4 text-center text-xs text-fg-muted">
+              —
+            </span>
+            {t('priority.none')}
+            {task.priority === undefined && (
+              <Check size={14} className="ml-auto shrink-0 text-primary" aria-hidden />
+            )}
+          </span>
+        </MenuItem>
+        {TASK_PRIORITIES.map((priority, index) => (
+          <MenuItem
+            key={priority}
+            ref={setItemRef(index + 2)}
+            onClick={() => onPickPriority(priority)}
+          >
+            <span className="flex w-full items-center gap-2">
+              <PriorityTag priority={priority} />
+              {t(`priority.title${priority}`)}
+              <span className="text-xs text-fg-muted">{t(`priority.hint${priority}`)}</span>
+              {task.priority === priority && (
+                <Check size={14} className="ml-auto shrink-0 text-primary" aria-hidden />
+              )}
+            </span>
+          </MenuItem>
+        ))}
+      </>
+    ) : (
+      <>
+        <MenuItem ref={setItemRef(0)} onClick={onEdit}>
+          {t('contextMenu.edit')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(1)} onClick={onRename} shortcut="F2">
+          {t('contextMenu.rename')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(2)} onClick={onCopy} shortcut={`${mod}+C`}>
+          {t('contextMenu.copy')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(3)} onClick={onCut} shortcut={`${mod}+X`}>
+          {t('contextMenu.cut')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(4)} onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
+          {t('contextMenu.paste')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(5)} onClick={onToggleMilestone}>
+          {task.isMilestone ? t('contextMenu.toTask') : t('contextMenu.toMilestone')}
+        </MenuItem>
+        <MenuItem
+          ref={(el) => {
+            priorityEntryRef.current = el;
+            setItemRef(6)(el);
+          }}
+          onClick={() => setPage('priority')}
+          disabled={isSummary}
+          title={isSummary ? t('priority.drawerSummaryHint') : undefined}
+          shortcut={
+            isSummary
+              ? undefined
+              : `${task.priority ? PRIORITY_TAG[task.priority] : t('priority.none')} ›`
+          }
+        >
+          {t('contextMenu.priority')}
+        </MenuItem>
+        <MenuItem
+          ref={setItemRef(7)}
+          onClick={() => onMoveSibling(-1)}
+          disabled={!pos.canMoveUp}
+          shortcut="Alt+↑"
+        >
+          {t('contextMenu.moveUp')}
+        </MenuItem>
+        <MenuItem
+          ref={setItemRef(8)}
+          onClick={() => onMoveSibling(1)}
+          disabled={!pos.canMoveDown}
+          shortcut="Alt+↓"
+        >
+          {t('contextMenu.moveDown')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(9)} onClick={onIndent} disabled={!pos.canIndent} shortcut="Tab">
+          {t('contextMenu.indent')}
+        </MenuItem>
+        <MenuItem
+          ref={setItemRef(10)}
+          onClick={onOutdent}
+          disabled={!pos.canOutdent}
+          shortcut="Shift+Tab"
+        >
+          {t('contextMenu.outdent')}
+        </MenuItem>
+        <MenuItem ref={setItemRef(11)} onClick={onDelete} danger shortcut="Delete">
+          {t('contextMenu.delete')}
+        </MenuItem>
+      </>
+    );
+
   return renderMenu(
-    <>
-      <MenuItem ref={setItemRef(0)} onClick={onEdit}>
-        {t('contextMenu.edit')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(1)} onClick={onRename} shortcut="F2">
-        {t('contextMenu.rename')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(2)} onClick={onCopy} shortcut={`${mod}+C`}>
-        {t('contextMenu.copy')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(3)} onClick={onCut} shortcut={`${mod}+X`}>
-        {t('contextMenu.cut')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(4)} onClick={onPaste} disabled={!canPaste} shortcut={`${mod}+V`}>
-        {t('contextMenu.paste')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(5)} onClick={onToggleMilestone}>
-        {task.isMilestone ? t('contextMenu.toTask') : t('contextMenu.toMilestone')}
-      </MenuItem>
-      <MenuItem
-        ref={setItemRef(6)}
-        onClick={() => onMoveSibling(-1)}
-        disabled={!pos.canMoveUp}
-        shortcut="Alt+↑"
-      >
-        {t('contextMenu.moveUp')}
-      </MenuItem>
-      <MenuItem
-        ref={setItemRef(7)}
-        onClick={() => onMoveSibling(1)}
-        disabled={!pos.canMoveDown}
-        shortcut="Alt+↓"
-      >
-        {t('contextMenu.moveDown')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(8)} onClick={onIndent} disabled={!pos.canIndent} shortcut="Tab">
-        {t('contextMenu.indent')}
-      </MenuItem>
-      <MenuItem
-        ref={setItemRef(9)}
-        onClick={onOutdent}
-        disabled={!pos.canOutdent}
-        shortcut="Shift+Tab"
-      >
-        {t('contextMenu.outdent')}
-      </MenuItem>
-      <MenuItem ref={setItemRef(10)} onClick={onDelete} danger shortcut="Delete">
-        {t('contextMenu.delete')}
-      </MenuItem>
-    </>,
+    items,
     confirmDeleteTaskId && <DeleteTaskConfirm taskId={confirmDeleteTaskId} onClose={handleClose} />,
   );
 }
@@ -412,10 +534,12 @@ interface MenuItemProps {
   disabled?: boolean;
   /** Optional accelerator hint (e.g. "⌘+C", "Delete") shown right-aligned. */
   shortcut?: string;
+  /** Native tooltip — used to say WHY a disabled item is disabled. */
+  title?: string;
 }
 
 const MenuItem = forwardRef<HTMLButtonElement, MenuItemProps>(function MenuItem(
-  { children, onClick, danger, disabled, shortcut },
+  { children, onClick, danger, disabled, shortcut, title },
   ref,
 ) {
   return (
@@ -424,6 +548,7 @@ const MenuItem = forwardRef<HTMLButtonElement, MenuItemProps>(function MenuItem(
       role="menuitem"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`flex w-full items-center px-3 py-1 text-left outline-none focus:bg-bg ${
         disabled
           ? 'cursor-not-allowed text-fg-muted opacity-50 hover:bg-transparent'

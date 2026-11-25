@@ -20,12 +20,20 @@
  * The TaskTable and GanttCanvas share scroll-Y (a row at index N must align
  * on both sides). The Toolbar drives high-level actions; the StatusBar shows
  * save state and undo/redo availability.
+ *
+ * View modes (useViewStore.viewMode) all keep ProjectHeader/Toolbar/StatusBar
+ * and the shared ContextMenu / BatchActionBar / UndoToastStack:
+ *   task      → TaskTable + GanttCanvas
+ *   resource  → ResourceList + ResourceLoadCanvas
+ *   priority  → TaskTable + PriorityMatrix (priority-matrix spec §4.1)
+ * TaskDrawer is a docked flex child of whichever branch is active.
  */
 import { Toolbar } from './Toolbar';
 import { TaskTable } from './TaskTable';
 import { GanttCanvas } from './GanttCanvas';
 import { ResourceList } from './ResourceList';
 import { ResourceLoadCanvas } from './ResourceLoadCanvas';
+import { PriorityMatrix } from './PriorityMatrix';
 import { StatusBar } from './StatusBar';
 import { TaskDrawer } from './TaskDrawer';
 import { ContextMenu } from './ContextMenu';
@@ -58,6 +66,15 @@ export function GanttView() {
           <>
             <ResourceList />
             <ResourceLoadCanvas />
+            <TaskDrawer />
+          </>
+        ) : viewMode === 'priority' ? (
+          // priority-matrix spec §4.1: same shape as the task/resource views —
+          // the task tree stays, only the right-hand pane changes. TaskDrawer
+          // must be mounted in every branch or double-click could not open it.
+          <>
+            <TaskTable />
+            <PriorityMatrix />
             <TaskDrawer />
           </>
         ) : (

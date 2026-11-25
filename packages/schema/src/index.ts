@@ -16,3 +16,4 @@ export {
 } from './factory.js';
 export { normalizeFile, type NormalizeFileOptions } from './normalize.js';
 export { stripUnknownFields, type StripResult, type StrippedField } from './stripUnknown.js';
+export { TASK_PRIORITIES, isTaskPriority } from './priority.js';

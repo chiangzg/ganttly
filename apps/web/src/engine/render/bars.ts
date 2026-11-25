@@ -28,6 +28,7 @@ import {
   milestoneCenterX,
 } from '../layout';
 import { BAR_INSET_Y, MILESTONE_HALF } from './geometry';
+import { darken } from './color';
 
 const BAR_RADIUS = 4;
 /** Spotlight opacity for rows outside the active dependency chain (§3.5). */
@@ -199,6 +200,19 @@ function drawRow(ctx: CanvasRenderingContext2D, row: TaskRow, yTop: number, env:
       ctx.fillStyle = progressColor;
       ctx.fill();
     }
+  }
+
+  // Priority stripe (priority-matrix spec §3.4): a 3px band of the quadrant
+  // colour at the bar's left edge — above the fill, under the outline. Clipped
+  // to the bar so it follows the rounded corners.
+  if (row.priority) {
+    ctx.save();
+    drawRoundedRect(ctx, xStart, barY, width, barH, BAR_RADIUS);
+    ctx.clip();
+    ctx.globalAlpha = env.baseAlpha;
+    ctx.fillStyle = env.theme[`priority${row.priority}`];
+    ctx.fillRect(xStart, barY, 3, barH);
+    ctx.restore();
   }
 
   // Bar outline (always visible, sharper when selected). §4.6: every task in
@@ -630,22 +644,4 @@ function ellipsis(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     else hi = mid - 1;
   }
   return lo === 0 ? '…' : text.slice(0, lo) + '…';
-}
-
-/** Darken a color by ~20%. Accepts hex (#RRGGBB) or rgb(). */
-function darken(color: string): string {
-  const m = color.match(/^#([0-9a-f]{6})$/i);
-  if (m) {
-    const n = parseInt(m[1]!, 16);
-    const r = Math.floor(((n >> 16) & 0xff) * 0.8);
-    const g = Math.floor(((n >> 8) & 0xff) * 0.8);
-    const b = Math.floor((n & 0xff) * 0.8);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-  const rgb = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-  if (rgb) {
-    const [r, g, b] = rgb.slice(1).map((v) => Math.floor(Number(v) * 0.8));
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-  return color;
 }

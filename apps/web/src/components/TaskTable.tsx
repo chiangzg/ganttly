@@ -56,6 +56,7 @@ import {
   type EffectiveTaskValue,
 } from '@/lib/baseline';
 import { deviationColumnCell, deviationToneClass } from './BaselineVariance';
+import { PriorityTag } from './PriorityTag';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { computeDropPosition, resolveDropTarget, type TaskDropTarget } from '@/lib/taskDropTarget';
 import { isEditableTarget } from '@/lib/shortcutTarget';
@@ -693,9 +694,14 @@ export function TaskTable() {
   const dragEscapeHandler = useRef<((e: globalThis.KeyboardEvent) => void) | null>(null);
 
   const onDragOver = (e: React.DragEvent<HTMLDivElement>, node: TreeNode) => {
+    // Not our own grip drag (e.g. a priority-matrix card passing over the tree
+    // in the priority view): the row is not a drop target at all, so the cursor
+    // says "no drop" instead of offering a move that would never happen
+    // (priority-matrix spec §4.5).
+    if (!draggedId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = dragCancelled.current ? 'none' : 'move';
-    if (!draggedId || dragCancelled.current) return;
+    if (dragCancelled.current) return;
     const row = e.currentTarget;
     const rect = row.getBoundingClientRect();
     const offset = e.clientY - rect.top;
@@ -1245,6 +1251,12 @@ export function TaskTable() {
                           >
                             {t('table.childCount', { count: node.children.length })}
                           </span>
+                        )}
+                        {/* priority-matrix spec §3.3: the mark sits after the name
+                         * like the child-count chip (shrink-0, no column shift).
+                         * Summaries are never triaged, so parents never show it. */}
+                        {node.task.priority && !isParent && activeField !== 'name' && (
+                          <PriorityTag priority={node.task.priority} className="ml-1.5" />
                         )}
                       </div>
                     </div>

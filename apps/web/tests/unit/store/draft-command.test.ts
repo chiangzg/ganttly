@@ -163,6 +163,25 @@ describe('updateTaskFromDraftCommand', () => {
     expect('color' in restored).toBe(false);
   });
 
+  it('carries a priority-only draft edit, clears when dropped, and undoes in one step (priority-matrix spec §3.1)', () => {
+    const before = makeTask('t1', { name: 'A' });
+    seed([before]);
+
+    useProjectStore
+      .getState()
+      .dispatch(updateTaskFromDraftCommand(before, { ...before, priority: 2 }));
+    const prioritized = fileTasks().find((x) => x.id === 't1')!;
+    expect(prioritized.priority).toBe(2);
+
+    const cleared: Task = { ...prioritized };
+    delete cleared.priority;
+    useProjectStore.getState().dispatch(updateTaskFromDraftCommand(prioritized, cleared));
+    expect(fileTasks().find((x) => x.id === 't1')).not.toHaveProperty('priority');
+
+    useProjectStore.getState().undo();
+    expect(fileTasks().find((x) => x.id === 't1')!.priority).toBe(2);
+  });
+
   it('leaves the file unchanged when the draft equals the before state', () => {
     const before = makeTask('t1', { name: 'A', progress: 10 });
     seed([before]);

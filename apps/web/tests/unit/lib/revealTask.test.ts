@@ -110,6 +110,45 @@ describe('computeRevealTarget — horizontal reveal', () => {
   });
 });
 
+describe('computeRevealTarget — horizontal: false (priority-matrix spec §4.4)', () => {
+  it('never touches scrollLeft, even when the bar is far off-screen', () => {
+    const file = makeFile([makeTask('a', '2026-01-05', { order: 0 })], {
+      project: { name: 't', locale: 'zh-CN', startDate: '2026-01-05' },
+    });
+    file.tasks[0]!.start = '2026-07-31';
+    file.tasks[0]!.end = '2026-07-31';
+    // Sanity: the default WOULD scroll here…
+    expect(computeRevealTarget(file, 'a', VIEWPORT)!.scrollLeft).not.toBeNull();
+    // …the vertical-only variant leaves the task view's horizontal position alone.
+    expect(computeRevealTarget(file, 'a', VIEWPORT, { horizontal: false })!.scrollLeft).toBeNull();
+  });
+
+  it('still expands collapsed ancestors and still scrolls vertically', () => {
+    const tasks: Task[] = [];
+    for (let i = 0; i < 20; i++) tasks.push(makeTask(`t${i}`, '2026-01-05', { order: i }));
+    tasks.push(makeTask('p', '2026-01-05', { order: 20 }));
+    tasks.push(makeTask('c', '2026-01-05', { order: 0, parentId: 'p' }));
+    const file = makeFile(tasks, {
+      viewState: {
+        zoom: 'week',
+        scrollLeft: 1234,
+        scrollTop: 0,
+        selectedTaskId: null,
+        showCriticalPath: false,
+        collapsedTaskIds: ['p'],
+      },
+    });
+
+    const target = computeRevealTarget(file, 'c', VIEWPORT, { horizontal: false })!;
+
+    expect(target.ancestorsToExpand).toEqual(['p']);
+    // Row 21 (after the expansion) is far below a 600px viewport.
+    expect(target.scrollTop).not.toBeNull();
+    expect(target.scrollTop!).toBeGreaterThan(0);
+    expect(target.scrollLeft).toBeNull();
+  });
+});
+
 describe('computeRevealTarget — vertical reveal', () => {
   it('scrolls down to a task many rows below', () => {
     // 100 tasks; task at row 80 is far below a 600px viewport (~17 rows).

@@ -59,6 +59,7 @@ import {
 } from 'lucide-react';
 import { DeleteResourceConfirm } from './DeleteResourceConfirm';
 import { EmptyState } from './ui/EmptyState';
+import { Avatar } from './ui/Avatar';
 import { usePanelWidth, useColumnWidths } from './useLayoutPrefs';
 import { ResizeHandle, ResizableHeaderCell, startPointerResize } from './ui/ResizeHandle';
 import { DEFAULT_PANEL_WIDTHS, DEFAULT_COLUMN_WIDTHS } from '@/lib/layoutPrefs';
@@ -81,36 +82,6 @@ const TASK_GRID_TEMPLATE = '20px 44px minmax(0, 1fr) 52px 52px 44px';
 /** Inline-editable resource fields, in Tab-traversal order. */
 type EditableField = 'name' | 'role' | 'capacity';
 const EDITABLE_FIELDS: readonly EditableField[] = ['name', 'role', 'capacity'];
-
-/**
- * Person avatar palette (the resource view is people-centric — the avatar is
- * the identity marker, like the task tree's chevron + semibold parents).
- * Stable by name hash; soft 15% fills read on both light and dark themes.
- */
-const AVATAR_COLORS = [
-  'bg-blue-500/15 text-blue-700 dark:text-blue-300',
-  'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-  'bg-violet-500/15 text-violet-700 dark:text-violet-300',
-  'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  'bg-rose-500/15 text-rose-700 dark:text-rose-300',
-  'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300',
-  'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300',
-  'bg-teal-500/15 text-teal-700 dark:text-teal-300',
-] as const;
-
-function avatarColorOf(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
-}
-
-/** "孟祥俊" → 孟, "Zhang San" → ZS, "Alice" → A. */
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '?';
-  if (words.length >= 2) return (words[0]![0]! + words[1]![0]!).toUpperCase();
-  return words[0]![0]!.toUpperCase();
-}
 
 export function ResourceList() {
   const { t } = useTranslation();
@@ -769,15 +740,7 @@ export function ResourceList() {
                         {/* Person avatar — the resource view's identity
                          * marker (people-centric counterpart of the task
                          * tree's chevron + semibold parents). */}
-                        <span
-                          aria-hidden
-                          className={cn(
-                            'flex h-6 w-6 shrink-0 select-none items-center justify-center rounded-full text-[10px] font-semibold',
-                            avatarColorOf(r.name),
-                          )}
-                        >
-                          {initialsOf(r.name)}
-                        </span>
+                        <Avatar name={r.name} className="h-6 w-6" />
                         <div className="flex min-w-0 flex-1 items-center pl-1.5 pr-2">
                           {activeField === 'name' ? (
                             <input

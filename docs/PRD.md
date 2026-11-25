@@ -210,23 +210,24 @@ GanttProject 在 UI 多处嵌入了乌克兰国旗元素(2022 年起)。本 PRD 
 
 **功能**:每个任务包含以下字段:
 
-| 字段           | 类型           | 说明                           |
-| -------------- | -------------- | ------------------------------ |
-| `id`           | string         | UUID,主键                      |
-| `name`         | string         | 任务名                         |
-| `parentId`     | string \| null | 父任务 ID,顶层为 null          |
-| `order`        | number         | 同级排序                       |
-| `start`        | ISO date       | 开始日期                       |
-| `end`          | ISO date       | 结束日期                       |
-| `duration`     | number         | 工期(工作日),与 start/end 联动 |
-| `progress`     | 0-100          | 完成百分比                     |
-| `isMilestone`  | boolean        | 里程碑(显示为菱形,工期 0)      |
-| `color`        | string         | 任务条颜色(CSS 颜色值)         |
-| `note`         | string         | 备注(Markdown)                 |
-| `dependencies` | array          | 见 3.3                         |
-| `constraints`  | object         | P1 预留,空对象                 |
-| `assignments`  | array          | P1 预留,空数组                 |
-| `customFields` | object         | P1 预留,空对象                 |
+| 字段           | 类型           | 说明                                                               |
+| -------------- | -------------- | ------------------------------------------------------------------ |
+| `id`           | string         | UUID,主键                                                          |
+| `name`         | string         | 任务名                                                             |
+| `parentId`     | string \| null | 父任务 ID,顶层为 null                                              |
+| `order`        | number         | 同级排序                                                           |
+| `start`        | ISO date       | 开始日期                                                           |
+| `end`          | ISO date       | 结束日期                                                           |
+| `duration`     | number         | 工期(工作日),与 start/end 联动                                     |
+| `progress`     | 0-100          | 完成百分比                                                         |
+| `isMilestone`  | boolean        | 里程碑(显示为菱形,工期 0)                                          |
+| `priority`     | 1-4 \| 缺省    | 四象限优先级 P1–P4,缺省为未分级(见 `priority-matrix-spec.md` §2.1) |
+| `color`        | string         | 任务条颜色(CSS 颜色值)                                             |
+| `note`         | string         | 备注(Markdown)                                                     |
+| `dependencies` | array          | 见 3.3                                                             |
+| `constraints`  | object         | P1 预留,空对象                                                     |
+| `assignments`  | array          | P1 预留,空数组                                                     |
+| `customFields` | object         | P1 预留,空对象                                                     |
 
 **联动逻辑**:
 

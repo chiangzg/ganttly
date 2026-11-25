@@ -162,7 +162,7 @@ function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
     'search_tasks',
     {
       description:
-        'Search tasks within a project by name/note, parent, progress range, dates or assignee. Paginated.',
+        'Search tasks within a project by name/note, parent, progress range, dates, assignee or priority. Paginated.',
       inputSchema: searchTasksInput,
     },
     (args, extra) =>
@@ -214,7 +214,8 @@ function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
   server.registerTool(
     'create_task',
     {
-      description: 'Create a single task. Optional `source` deduplicates across re-submissions.',
+      description:
+        'Create a single task. Optional `source` deduplicates across re-submissions. Optional `priority` is the Eisenhower quadrant (see the field description).',
       inputSchema: createTaskInput,
     },
     (args, extra) =>
@@ -250,7 +251,8 @@ function registerTools(server: McpServer, deps: CreateMcpServerDeps): void {
   server.registerTool(
     'update_task',
     {
-      description: 'Update whitelisted task fields (name/start/duration/progress/etc).',
+      description:
+        'Update whitelisted task fields (name/start/duration/progress/priority/etc). `priority` accepts 1-4, or null to clear it.',
       inputSchema: updateTaskInput,
     },
     (args, extra) =>

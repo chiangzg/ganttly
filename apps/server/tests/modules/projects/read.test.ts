@@ -100,6 +100,37 @@ describe('searchTasksInFile', () => {
   });
 });
 
+describe('searchTasksInFile — priority (priority-matrix spec §2.4)', () => {
+  const base = buildFile();
+  const file: GanttlyFile = {
+    ...base,
+    tasks: base.tasks.map((t) =>
+      t.id === 'design' ? { ...t, priority: 1 } : t.id === 'build' ? { ...t, priority: 3 } : t,
+    ),
+  };
+
+  it('reports priority on every summary, null when the task is not triaged', () => {
+    const { tasks } = searchTasksInFile(file, { limit: 50 });
+    expect(tasks.map((t) => t.priority)).toEqual([null, 1, 3, null]);
+  });
+
+  it('filters by an exact priority', () => {
+    expect(searchTasksInFile(file, { priority: 1, limit: 50 }).tasks.map((t) => t.id)).toEqual([
+      'design',
+    ]);
+    expect(searchTasksInFile(file, { priority: 3, limit: 50 }).tasks.map((t) => t.id)).toEqual([
+      'build',
+    ]);
+  });
+
+  it('filters by null to get the tasks that are not triaged yet', () => {
+    expect(searchTasksInFile(file, { priority: null, limit: 50 }).tasks.map((t) => t.id)).toEqual([
+      'root',
+      'test',
+    ]);
+  });
+});
+
 describe('searchResourcesInFile', () => {
   const file: GanttlyFile = {
     ...buildFile(),

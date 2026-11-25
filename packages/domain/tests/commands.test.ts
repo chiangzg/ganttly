@@ -506,6 +506,65 @@ describe('applyProjectCommand — all 23 kinds covered', () => {
   });
 });
 
+describe('updateTaskFromDraft — priority (priority-matrix spec §3.1)', () => {
+  it('carries a priority-only draft edit onto the live task and nothing else', () => {
+    const before = makeTask({ id: 't1', name: 'A' });
+    const out = applyProjectCommand(
+      makeFile([before]),
+      { kind: 'updateTaskFromDraft', before, after: { ...before, priority: 1 } },
+      CTX,
+    );
+
+    const saved = out.file.tasks[0]!;
+    expect(saved.priority).toBe(1);
+    const rest: Task = { ...saved };
+    delete rest.priority;
+    expect(rest).toEqual(before);
+    expect(out.affectedTaskIds).toContain('t1');
+  });
+
+  it('clears the priority when the draft no longer carries one', () => {
+    const before = makeTask({ id: 't1', name: 'A', priority: 3 });
+    const after: Task = { ...before };
+    delete after.priority;
+
+    const out = applyProjectCommand(
+      makeFile([before]),
+      { kind: 'updateTaskFromDraft', before, after },
+      CTX,
+    );
+
+    expect(out.file.tasks[0]).not.toHaveProperty('priority');
+  });
+
+  it('keeps a live priority the draft never touched', () => {
+    // The user dragged the card (live file got P2) while a draft opened on the
+    // pre-drag state was still being edited elsewhere — the save must not
+    // revert the drag.
+    const before = makeTask({ id: 't1', name: 'A' });
+    const live = makeTask({ id: 't1', name: 'A', priority: 2 });
+
+    const out = applyProjectCommand(
+      makeFile([live]),
+      { kind: 'updateTaskFromDraft', before, after: { ...before, name: 'B' } },
+      CTX,
+    );
+
+    expect(out.file.tasks[0]!.name).toBe('B');
+    expect(out.file.tasks[0]!.priority).toBe(2);
+  });
+
+  it('leaves the task untouched when the draft priority equals the saved one', () => {
+    const before = makeTask({ id: 't1', name: 'A', priority: 4 });
+    const out = applyProjectCommand(
+      makeFile([before]),
+      { kind: 'updateTaskFromDraft', before, after: { ...before } },
+      CTX,
+    );
+    expect(out.file.tasks[0]).toEqual(before);
+  });
+});
+
 describe('resolveProjectCalendar', () => {
   it('uses the file calendar (with its own holidays) when holidays are present', () => {
     const file = makeFile([]);

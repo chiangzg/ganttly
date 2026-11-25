@@ -193,6 +193,62 @@ describe('normalizeFile', () => {
     expect(normalizeFile(out, { getHolidays })).toEqual(out);
   });
 
+  // ----- Task.priority (priority-matrix spec §2.1 / §6) ----------------------
+  const rawTask = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: `T-${id}`,
+    parentId: null,
+    order: 0,
+    start: '2026-01-05',
+    end: '2026-01-09',
+    duration: 5,
+    progress: 0,
+    isMilestone: false,
+    dependencies: [],
+    constraints: { type: 'none' as const },
+    assignments: [],
+    customFields: {},
+    ...extra,
+  });
+
+  it('preserves a valid priority through normalize and never adds a default', () => {
+    // Regression guard for silent stripping: `priority` is a REGISTERED field, so
+    // the unknown-field stripper must let it through on every load path.
+    const file = {
+      ...createEmptyFile(),
+      tasks: [rawTask('t1', { priority: 2 }), rawTask('t2')],
+    };
+    const out = normalizeFile(file, { getHolidays });
+
+    expect(out.tasks[0]!.priority).toBe(2);
+    expect(out.tasks[1]).not.toHaveProperty('priority');
+    // What persistence actually stores (IndexedDB / the server's JSONB column).
+    expect(JSON.parse(JSON.stringify(out)).tasks[0].priority).toBe(2);
+    expect(validateGanttlyFile(out).ok).toBe(true);
+  });
+
+  it('drops an out-of-range priority so the rest of the file still validates', () => {
+    const file = {
+      ...createEmptyFile(),
+      tasks: [
+        rawTask('t1', { priority: 7 }),
+        rawTask('t2', { priority: 'high' }),
+        rawTask('t3', { priority: 0 }),
+        rawTask('t4', { priority: 4 }),
+      ],
+    };
+    expect(validateGanttlyFile(file).ok).toBe(false);
+
+    const out = normalizeFile(file, { getHolidays });
+
+    expect(out.tasks[0]).not.toHaveProperty('priority');
+    expect(out.tasks[1]).not.toHaveProperty('priority');
+    expect(out.tasks[2]).not.toHaveProperty('priority');
+    expect(out.tasks[3]!.priority).toBe(4);
+    expect(validateGanttlyFile(out).ok).toBe(true);
+    expect(normalizeFile(out, { getHolidays })).toEqual(out);
+  });
+
   // ----- forward-compatibility: unknown-field stripping ---------------------
   it('strips unknown task keys and reports them via onStripped', () => {
     const base = createEmptyFile();

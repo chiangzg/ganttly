@@ -54,6 +54,12 @@ export interface RevealOptions {
    * visible — prevents jitter on repeated reveal calls.
    */
   skipIfVisible?: boolean;
+  /**
+   * If false, never change the horizontal scroll (priority-matrix spec §4.4).
+   * Used when no chart is on screen: only the task tree has to follow, and the
+   * task view's horizontal position must survive the detour.
+   */
+  horizontal?: boolean;
 }
 
 export interface RevealTarget {
@@ -81,7 +87,7 @@ export function computeRevealTarget(
     /** Collapsed set AFTER ancestor expansion (computed internally). */
   } = {},
 ): RevealTarget | null {
-  const { expandAncestors = true, skipIfVisible = true } = options;
+  const { expandAncestors = true, skipIfVisible = true, horizontal = true } = options;
 
   const target = file.tasks.find((t) => t.id === taskId);
   if (!target) return null;
@@ -112,36 +118,37 @@ export function computeRevealTarget(
     return { scrollLeft: null, scrollTop: null, ancestorsToExpand };
   }
 
-  const activeBaseline = findActiveBaseline(
-    file.baselines,
-    useViewStore.getState().activeBaselineId,
-  );
-  const origin = originDateFor(file, { activeBaseline });
-  const zoom = file.viewState.zoom;
-
   // 3. Horizontal visibility — bar span in chart-local pixels, mapped to
   //    viewport-local coords by subtracting the current scrollLeft.
-  const barStartPx = dateToPixel(target.start, origin, zoom);
-  const barEndPx = dateToPixel(target.end, origin, zoom) + pixelsPerDay(zoom);
-  const viewLeft = file.viewState.scrollLeft;
-  const barViewStart = barStartPx - viewLeft;
-  const barViewEnd = barEndPx - viewLeft;
+  let scrollLeft: number | null = null;
+  if (horizontal) {
+    const activeBaseline = findActiveBaseline(
+      file.baselines,
+      useViewStore.getState().activeBaselineId,
+    );
+    const origin = originDateFor(file, { activeBaseline });
+    const zoom = file.viewState.zoom;
+    const barStartPx = dateToPixel(target.start, origin, zoom);
+    const barEndPx = dateToPixel(target.end, origin, zoom) + pixelsPerDay(zoom);
+    const viewLeft = file.viewState.scrollLeft;
+    const barViewStart = barStartPx - viewLeft;
+    const barViewEnd = barEndPx - viewLeft;
 
-  let scrollLeft: number | null;
-  if (
-    skipIfVisible &&
-    barViewStart >= -HORIZONTAL_PADDING_PX &&
-    barViewEnd <= viewport.width + HORIZONTAL_PADDING_PX
-  ) {
-    // Bar fully visible (with padding) — don't move.
-    scrollLeft = null;
-  } else if (barViewEnd > viewport.width || barViewStart < 0) {
-    // Bar outside viewport — center it, clamped to >= 0.
-    const barCenter = (barStartPx + barEndPx) / 2;
-    const candidate = Math.floor(barCenter - viewport.width / 2);
-    scrollLeft = Math.max(0, candidate);
-  } else {
-    scrollLeft = null;
+    if (
+      skipIfVisible &&
+      barViewStart >= -HORIZONTAL_PADDING_PX &&
+      barViewEnd <= viewport.width + HORIZONTAL_PADDING_PX
+    ) {
+      // Bar fully visible (with padding) — don't move.
+      scrollLeft = null;
+    } else if (barViewEnd > viewport.width || barViewStart < 0) {
+      // Bar outside viewport — center it, clamped to >= 0.
+      const barCenter = (barStartPx + barEndPx) / 2;
+      const candidate = Math.floor(barCenter - viewport.width / 2);
+      scrollLeft = Math.max(0, candidate);
+    } else {
+      scrollLeft = null;
+    }
   }
 
   // 4. Vertical visibility — row top/bottom in viewport-local coords.
@@ -176,7 +183,12 @@ export function computeRevealTarget(
  */
 export function revealTask(taskId: string, options: RevealOptions = {}): boolean {
   const file = useProjectStore.getState().file;
-  const chartEl = document.querySelector('[data-gantt-chart]') as HTMLElement | null;
+  // The chart is the natural viewport. Without one on screen (priority-matrix
+  // view) fall back to the task table's scroll area, so the VERTICAL reveal is
+  // measured against what the user actually sees there.
+  const chartEl =
+    (document.querySelector('[data-gantt-chart]') as HTMLElement | null) ??
+    (document.querySelector('[data-task-scroll]') as HTMLElement | null);
   const viewport: RevealViewport = {
     width: chartEl ? chartEl.clientWidth : 800,
     height: chartEl ? chartEl.clientHeight : 600,

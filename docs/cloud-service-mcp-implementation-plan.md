@@ -888,6 +888,7 @@ remove_dependency
 
 - 名称和备注的大小写不敏感子串搜索。
 - `parentTaskId`、进度范围、日期范围、负责人筛选。
+- `priority` 筛选：1–4 精确匹配，`null` 表示尚未分级的任务；每条结果带 `priority`（未分级为 `null`）。
 - `limit` 默认 50、最大 200。
 - 游标分页。
 
@@ -906,6 +907,8 @@ interface CreateTaskToolInput {
   duration?: number;
   isMilestone?: boolean;
   progress?: number;
+  /** 四象限优先级 1–4，缺省为未分级（priority-matrix spec §2.4）。 */
+  priority?: number;
   note?: string;
   color?: string;
   assignments?: Array<{ resourceId: string; load: number }>;
@@ -948,6 +951,7 @@ interface CreateTaskToolInput {
 
 - `name`、`start`、`duration`、`progress`、`isMilestone`。
 - `note`、`color`、`overtimeDates`。
+- `priority`（1–4；`null` 表示清除，即回到未分级）。
 - `constraints`、`assignments`。
 
 禁止通过该工具更新：

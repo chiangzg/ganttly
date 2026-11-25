@@ -136,6 +136,12 @@
           "uniqueItems": true
         },
         "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Eisenhower quadrant priority: 1 = urgent + important, 2 = important + not urgent, 3 = urgent + not important, 4 = neither. Absent = not triaged yet."
+        },
         "isMilestone": { "type": "boolean" },
         "color": { "$ref": "#/$defs/cssColor" },
         "note": { "type": "string" },
